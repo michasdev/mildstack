@@ -96,3 +96,47 @@ func TestReadinessEndpointReflectsRuntimeSnapshot(t *testing.T) {
 		t.Fatalf("unexpected not-ready status: got %q want %q", got, want)
 	}
 }
+
+func TestReadinessResponseCopiesSourceSlices(t *testing.T) {
+	t.Helper()
+
+	services := []orchestrator.Metadata{
+		{
+			Name:        "alpha",
+			Description: "first service",
+			Version:     "v1",
+			Tags:        []string{"core"},
+		},
+	}
+	ports := []int{8080}
+
+	response := readinessResponse{
+		Status:   "ready",
+		Services: copyRuntimeServices(services),
+		Ports:    copyRuntimePorts(ports),
+	}
+
+	services[0].Name = "mutated"
+	services[0].Tags[0] = "changed"
+	ports[0] = 9090
+
+	rendered, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("marshal readiness response: %v", err)
+	}
+
+	var copied readinessResponse
+	if err := json.Unmarshal(rendered, &copied); err != nil {
+		t.Fatalf("unmarshal readiness response: %v", err)
+	}
+
+	if got, want := copied.Services[0].Name, "alpha"; got != want {
+		t.Fatalf("unexpected copied service name: got %q want %q", got, want)
+	}
+	if got, want := copied.Services[0].Tags[0], "core"; got != want {
+		t.Fatalf("unexpected copied service tag: got %q want %q", got, want)
+	}
+	if got, want := copied.Ports[0], 8080; got != want {
+		t.Fatalf("unexpected copied port: got %d want %d", got, want)
+	}
+}

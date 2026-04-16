@@ -33,7 +33,7 @@ func (h healthHandler) handleReady(c *gin.Context) {
 	response := readinessResponse{
 		Status:   "not_ready",
 		Services: copyRuntimeServices(snapshot.Services),
-		Ports:    append([]int(nil), snapshot.Ports...),
+		Ports:    copyRuntimePorts(snapshot.Ports),
 	}
 
 	if len(snapshot.Ports) > 0 {

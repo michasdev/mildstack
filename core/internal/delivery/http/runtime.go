@@ -31,7 +31,7 @@ func (h runtimeHandler) handleInfo(c *gin.Context) {
 	snapshot := h.snapshotter.Snapshot(c.Request.Context())
 	c.JSON(http.StatusOK, runtimeResponse{
 		Services: copyRuntimeServices(snapshot.Services),
-		Ports:    append([]int(nil), snapshot.Ports...),
+		Ports:    copyRuntimePorts(snapshot.Ports),
 	})
 }
 
@@ -46,4 +46,8 @@ func copyRuntimeServices(services []orchestrator.Metadata) []runtimeService {
 		}
 	}
 	return copied
+}
+
+func copyRuntimePorts(ports []int) []int {
+	return append([]int(nil), ports...)
 }

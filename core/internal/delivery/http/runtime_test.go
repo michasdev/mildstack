@@ -70,20 +70,30 @@ func TestRuntimeInfoResponseCopiesSourceSlices(t *testing.T) {
 
 	response := runtimeResponse{
 		Services: copyRuntimeServices(snapshot.Services),
-		Ports:    append([]int(nil), snapshot.Ports...),
+		Ports:    copyRuntimePorts(snapshot.Ports),
 	}
 
 	services[0].Name = "mutated"
 	services[0].Tags[0] = "changed"
 	snapshot.Ports[0] = 9090
 
-	if got, want := response.Services[0].Name, "alpha"; got != want {
+	rendered, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("marshal runtime response: %v", err)
+	}
+
+	var copied runtimeResponse
+	if err := json.Unmarshal(rendered, &copied); err != nil {
+		t.Fatalf("unmarshal runtime response: %v", err)
+	}
+
+	if got, want := copied.Services[0].Name, "alpha"; got != want {
 		t.Fatalf("unexpected copied service name: got %q want %q", got, want)
 	}
-	if got, want := response.Services[0].Tags[0], "core"; got != want {
+	if got, want := copied.Services[0].Tags[0], "core"; got != want {
 		t.Fatalf("unexpected copied service tag: got %q want %q", got, want)
 	}
-	if got, want := response.Ports[0], 8080; got != want {
+	if got, want := copied.Ports[0], 8080; got != want {
 		t.Fatalf("unexpected copied port: got %d want %d", got, want)
 	}
 }
