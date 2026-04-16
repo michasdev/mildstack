@@ -1,0 +1,42 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"testing"
+
+	"github.com/spf13/cobra"
+)
+
+func TestNewRootCommandRegistersSubcommandsInFixedOrder(t *testing.T) {
+	t.Helper()
+
+	cmd := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{}, Commands{
+		Serve:  &cobra.Command{Use: "serve"},
+		Status: &cobra.Command{Use: "status"},
+		Ports:  &cobra.Command{Use: "ports"},
+	})
+
+	if got, want := cmd.Use, "mildstack"; got != want {
+		t.Fatalf("unexpected root use: got %q want %q", got, want)
+	}
+
+	subcommands := cmd.Commands()
+	if len(subcommands) != 3 {
+		t.Fatalf("expected 3 subcommands, got %d", len(subcommands))
+	}
+
+	for i, want := range []string{"serve", "status", "ports"} {
+		if got := subcommands[i].Use; got != want {
+			t.Fatalf("unexpected subcommand at %d: got %q want %q", i, got, want)
+		}
+	}
+}
+
+func TestExecuteWiresContextAndRootCommand(t *testing.T) {
+	t.Helper()
+
+	if err := Execute(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, Commands{}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+}
