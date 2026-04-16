@@ -21,9 +21,20 @@ func TestInwardLayersStayFrameworkFree(t *testing.T) {
 
 	mustExist(t, "../domain")
 	mustExist(t, "../application")
+	mustExist(t, "../s3/domain")
+	mustExist(t, "../s3/application")
+	mustExist(t, "../dynamodb/domain")
+	mustExist(t, "../dynamodb/application")
 	mustExist(t, "layout.md")
 
-	scan := []string{"../domain", "../application"}
+	scan := []string{
+		"../domain",
+		"../application",
+		"../s3/domain",
+		"../s3/application",
+		"../dynamodb/domain",
+		"../dynamodb/application",
+	}
 	for _, root := range scan {
 		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {

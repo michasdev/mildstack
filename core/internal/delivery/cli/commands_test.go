@@ -47,22 +47,7 @@ func TestCommandsServeStatusAndPorts(t *testing.T) {
 	runCommand := func(args ...string) string {
 		t.Helper()
 
-		stdout := &bytes.Buffer{}
-		stderr := &bytes.Buffer{}
-		cmd := NewRootCommand(stdout, stderr, Commands{
-			Serve: NewServeCommand(manager, func(port int) HTTPServer {
-				return &commandServerStub{manager: manager, port: port}
-			}),
-			Status: NewStatusCommand(manager),
-			Ports:  NewPortsCommand(manager),
-		})
-		cmd.SetArgs(args)
-
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("execute %v: %v\nstderr: %s", args, err, stderr.String())
-		}
-
-		return stdout.String()
+		return executeCommand(t, manager, args...)
 	}
 
 	runCommand("serve", "--port", "9090")
@@ -83,4 +68,36 @@ func TestCommandsServeStatusAndPorts(t *testing.T) {
 	if got, want := strings.TrimSpace(portsOutput), "8080\n9090"; got != want {
 		t.Fatalf("unexpected ports output: got %q want %q", got, want)
 	}
+}
+
+func TestCommandsRenderEmptyRuntimeStatus(t *testing.T) {
+	t.Helper()
+
+	manager := runtime.New(nil)
+	statusOutput := executeCommand(t, manager, "status")
+
+	if got, want := statusOutput, "Services:\n  (none)\nPorts:\n  (none)\n"; got != want {
+		t.Fatalf("unexpected empty status output:\n got %q\nwant %q", got, want)
+	}
+}
+
+func executeCommand(t *testing.T, manager *runtime.Manager, args ...string) string {
+	t.Helper()
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd := NewRootCommand(stdout, stderr, Commands{
+		Serve: NewServeCommand(manager, func(port int) HTTPServer {
+			return &commandServerStub{manager: manager, port: port}
+		}),
+		Status: NewStatusCommand(manager),
+		Ports:  NewPortsCommand(manager),
+	})
+	cmd.SetArgs(args)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute %v: %v\nstderr: %s", args, err, stderr.String())
+	}
+
+	return stdout.String()
 }
