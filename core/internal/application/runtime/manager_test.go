@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
-	"github.com/michasdev/mildstack/core/internal/composition"
 )
 
 var _ orchestrator.Service = (*serviceStub)(nil)
@@ -45,7 +44,7 @@ func TestManagerCopiesMetadataAndTracksMultiplePorts(t *testing.T) {
 	}
 
 	services := []orchestrator.Service{first, second}
-	manager := New(composition.Assemble(services).Services)
+	manager := New(services)
 
 	services[0] = second
 	first.metadata.Name = "mutated"
