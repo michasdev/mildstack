@@ -7,4 +7,9 @@ out
 tmp
 pnpm-lock.yaml
 .planning/
+.planning/*
+.planning/REQUIREMENTS.md  
+.planning/ROADMAP.md  
+.planning/STATE.md  
+
 AGENTS.md
