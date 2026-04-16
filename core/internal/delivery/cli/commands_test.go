@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
@@ -54,18 +53,12 @@ func TestCommandsServeStatusAndPorts(t *testing.T) {
 	runCommand("serve", "--port", "8080")
 
 	statusOutput := runCommand("status")
-	if !strings.Contains(statusOutput, "alpha") || !strings.Contains(statusOutput, "beta") {
-		t.Fatalf("status output missing service metadata: %q", statusOutput)
-	}
-	if !strings.Contains(statusOutput, "9090") || !strings.Contains(statusOutput, "8080") {
-		t.Fatalf("status output missing ports: %q", statusOutput)
-	}
-	if strings.Index(statusOutput, "8080") > strings.Index(statusOutput, "9090") {
-		t.Fatalf("status ports not ordered ascending: %q", statusOutput)
+	if got, want := statusOutput, "Services:\n- alpha v1\n- beta v2\nPorts:\n- 8080\n- 9090\n"; got != want {
+		t.Fatalf("unexpected status output:\n got %q\nwant %q", got, want)
 	}
 
 	portsOutput := runCommand("ports")
-	if got, want := strings.TrimSpace(portsOutput), "8080\n9090"; got != want {
+	if got, want := portsOutput, "8080\n9090\n"; got != want {
 		t.Fatalf("unexpected ports output: got %q want %q", got, want)
 	}
 }
