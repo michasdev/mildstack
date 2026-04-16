@@ -22,7 +22,7 @@ func NewServeCommand(manager *runtime.Manager, factories ...HTTPServerFactory) *
 
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Register an API instance in the shared runtime",
+		Short: "Start the shared HTTP runtime",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if factory != nil {
 				server := factory(port)
