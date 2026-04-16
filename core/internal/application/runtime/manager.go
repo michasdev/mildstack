@@ -1,0 +1,103 @@
+package runtime
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"sync"
+
+	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
+	"github.com/michasdev/mildstack/core/internal/composition"
+)
+
+type Snapshot struct {
+	Services []orchestrator.Metadata
+	Ports    []int
+}
+
+type Manager struct {
+	mu       sync.Mutex
+	services []orchestrator.Metadata
+	ports    []int
+}
+
+func New(root composition.Root) *Manager {
+	services := make([]orchestrator.Metadata, 0, len(root.Services))
+	for _, service := range root.Services {
+		if service == nil {
+			continue
+		}
+		services = append(services, cloneMetadata(service.Metadata()))
+	}
+
+	return &Manager{services: services}
+}
+
+func (m *Manager) Serve(ctx context.Context, port int) error {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, existing := range m.ports {
+		if existing == port {
+			return fmt.Errorf("runtime: port %d is already registered", port)
+		}
+	}
+
+	m.ports = append(m.ports, port)
+	return nil
+}
+
+func (m *Manager) Snapshot(ctx context.Context) Snapshot {
+	if ctx != nil {
+		_ = ctx.Err()
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return Snapshot{
+		Services: cloneMetadataSlice(m.services),
+		Ports:    sortedPorts(m.ports),
+	}
+}
+
+func (m *Manager) Ports(ctx context.Context) []int {
+	if ctx != nil {
+		_ = ctx.Err()
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return sortedPorts(m.ports)
+}
+
+func cloneMetadata(metadata orchestrator.Metadata) orchestrator.Metadata {
+	copied := orchestrator.Metadata{
+		Name:        metadata.Name,
+		Description: metadata.Description,
+		Version:     metadata.Version,
+		Tags:        append([]string(nil), metadata.Tags...),
+	}
+	return copied
+}
+
+func cloneMetadataSlice(metadata []orchestrator.Metadata) []orchestrator.Metadata {
+	copied := make([]orchestrator.Metadata, len(metadata))
+	for i, item := range metadata {
+		copied[i] = cloneMetadata(item)
+	}
+	return copied
+}
+
+func sortedPorts(ports []int) []int {
+	copied := append([]int(nil), ports...)
+	sort.Ints(copied)
+	return copied
+}
