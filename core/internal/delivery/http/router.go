@@ -36,7 +36,13 @@ func NewRouter(config Config, snapshotter Snapshotter) *Router {
 	engine.Use(gin.Recovery())
 
 	base := engine.Group(config.BasePath)
-	base.Group("runtime")
+	runtimeGroup := base.Group("runtime")
+
+	health := newHealthHandler(snapshotter)
+	info := newRuntimeHandler(snapshotter)
+	runtimeGroup.GET("/health", health.handleHealth)
+	runtimeGroup.GET("/ready", health.handleReady)
+	runtimeGroup.GET("/info", info.handleInfo)
 
 	return &Router{
 		engine:      engine,
