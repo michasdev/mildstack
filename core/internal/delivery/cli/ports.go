@@ -13,7 +13,7 @@ func NewPortsCommand(manager *runtime.Manager) *cobra.Command {
 		Short: "List active runtime ports",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ports := manager.Ports(context.Background())
-			cmd.Print(PresentPorts(ports))
+			cmd.Print(RenderPorts(DefaultTheme(), NewPresenter(runtime.Snapshot{Ports: ports})))
 			return nil
 		},
 	}

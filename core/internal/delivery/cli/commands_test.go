@@ -53,7 +53,7 @@ func TestCommandsServeStatusAndPorts(t *testing.T) {
 	runCommand("serve", "--port", "8080")
 
 	statusOutput := runCommand("status")
-	if got, want := statusOutput, "Services:\n- alpha v1\n- beta v2\nPorts:\n- 8080\n- 9090\n"; got != want {
+	if got, want := statusOutput, "Runtime Status\nState: ready\n\nServices\n  alpha v1\n  beta v2\n\nPorts\n  8080\n  9090\n"; got != want {
 		t.Fatalf("unexpected status output:\n got %q\nwant %q", got, want)
 	}
 
@@ -69,7 +69,7 @@ func TestCommandsRenderEmptyRuntimeStatus(t *testing.T) {
 	manager := runtime.New(nil)
 	statusOutput := executeCommand(t, manager, "status")
 
-	if got, want := statusOutput, "Services:\n  (none)\nPorts:\n  (none)\n"; got != want {
+	if got, want := statusOutput, "Runtime Status\nState: not_ready\n\nServices\n  (none)\n\nPorts\n  (none)\n"; got != want {
 		t.Fatalf("unexpected empty status output:\n got %q\nwant %q", got, want)
 	}
 }

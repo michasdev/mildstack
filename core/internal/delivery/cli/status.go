@@ -14,7 +14,7 @@ func NewStatusCommand(manager *runtime.Manager) *cobra.Command {
 		Short: "Show the runtime snapshot",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			snapshot := manager.Snapshot(context.Background())
-			fmt.Fprint(cmd.OutOrStdout(), PresentStatus(snapshot))
+			fmt.Fprint(cmd.OutOrStdout(), RenderStatus(DefaultTheme(), NewPresenter(snapshot)))
 			return nil
 		},
 	}

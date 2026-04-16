@@ -61,6 +61,14 @@ func (p Presenter) PresentStatus() string {
 	return buf.String()
 }
 
+func (p Presenter) Services() []orchestrator.Metadata {
+	return cloneMetadata(p.services)
+}
+
+func (p Presenter) Ports() []int {
+	return append([]int(nil), p.ports...)
+}
+
 func (p Presenter) PresentPorts() string {
 	if len(p.ports) == 0 {
 		return ""
