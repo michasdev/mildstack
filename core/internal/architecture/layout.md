@@ -1,6 +1,6 @@
 # Core Internal Layout
 
-The architecture establishes a feature-oriented tree under `core/internal/`, where each feature owns its own layer subpackages:
+This repository uses a feature-oriented tree under `core/internal/`. New services should start from this layout:
 
 - `core/internal/<feature>/domain/`
 - `core/internal/<feature>/application/`
@@ -8,8 +8,13 @@ The architecture establishes a feature-oriented tree under `core/internal/`, whe
 - `core/internal/delivery/http/`
 - `core/internal/delivery/cli/`
 - `core/internal/application/orchestrator/`
+- `core/internal/application/runtime/`
 - `core/internal/composition/`
 
-`core/internal/<feature>/domain` and `core/internal/<feature>/application` stay framework-free. Feature packages own their own subpackages inside each layer, so future AWS services can grow without inventing new top-level structure.
+Current feature trees live under `core/internal/s3/` and `core/internal/dynamodb/`. Their `domain` and `application` packages stay framework-free, and the architecture guard tests that boundary directly.
 
-`core/internal/api` and `core/internal/cli` are not part of the phase-1 structure. Delivery is split by transport under `core/internal/delivery/http/` and `core/internal/delivery/cli/`, while shared assembly belongs in `core/internal/composition/`.
+Delivery is transport-specific. HTTP and CLI formatting stay under `core/internal/delivery/`, while shared wiring belongs in `core/internal/composition/`. Bootstrap is explicit and one-time: composition attaches service state before assembling the root, and services expose routes through the orchestrator contract rather than by mutating core runtime code.
+
+Runtime snapshots are copy-on-read and sorted for stable presentation. Shared service state is mutex-backed and cloned so presentation layers and services cannot alias internal runtime storage.
+
+For the practical service checklist, start with [service onboarding](./service_onboarding.md).
