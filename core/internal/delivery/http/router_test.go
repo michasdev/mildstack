@@ -20,6 +20,9 @@ func TestNewRouterUsesVersionedBasePath(t *testing.T) {
 	if got, want := router.RuntimePath(), "/api/v1/runtime"; got != want {
 		t.Fatalf("unexpected runtime path: got %q want %q", got, want)
 	}
+	if got, want := router.ServicesPath(), "/api/v1/runtime/services"; got != want {
+		t.Fatalf("unexpected services path: got %q want %q", got, want)
+	}
 	if router.Engine() == nil {
 		t.Fatal("expected gin engine to be initialized")
 	}
@@ -36,6 +39,9 @@ func TestNewRouterNormalizesCustomBasePath(t *testing.T) {
 	}
 	if got, want := router.RuntimePath(), "/api/v1/runtime"; got != want {
 		t.Fatalf("unexpected normalized runtime path: got %q want %q", got, want)
+	}
+	if got, want := router.ServicesPath(), "/api/v1/runtime/services"; got != want {
+		t.Fatalf("unexpected normalized services path: got %q want %q", got, want)
 	}
 	if snapshot := router.snapshotter.Snapshot(context.Background()); len(snapshot.Ports) != 0 {
 		t.Fatalf("expected empty snapshot from runtime manager, got %v", snapshot.Ports)

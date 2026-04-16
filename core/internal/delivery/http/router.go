@@ -22,11 +22,13 @@ func DefaultConfig() Config {
 }
 
 type Router struct {
-	engine      *gin.Engine
-	config      Config
-	snapshotter Snapshotter
-	basePath    string
-	runtimePath string
+	engine       *gin.Engine
+	config       Config
+	registrar    *Registrar
+	snapshotter  Snapshotter
+	basePath     string
+	runtimePath  string
+	servicesPath string
 }
 
 func NewRouter(config Config, snapshotter Snapshotter) *Router {
@@ -35,21 +37,28 @@ func NewRouter(config Config, snapshotter Snapshotter) *Router {
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 
+	registrar := NewRegistrar()
+
 	base := engine.Group(config.BasePath)
 	runtimeGroup := base.Group("runtime")
 
 	health := newHealthHandler(snapshotter)
 	info := newRuntimeHandler(snapshotter)
+	services := newServicesHandler(snapshotter, registrar)
 	runtimeGroup.GET("/health", health.handleHealth)
 	runtimeGroup.GET("/ready", health.handleReady)
 	runtimeGroup.GET("/info", info.handleInfo)
+	runtimeGroup.GET("/services", services.handleIndex)
+	runtimeGroup.GET("/services/:service", services.handleService)
 
 	return &Router{
-		engine:      engine,
-		config:      config,
-		snapshotter: snapshotter,
-		basePath:    config.BasePath,
-		runtimePath: path.Join(config.BasePath, "runtime"),
+		engine:       engine,
+		config:       config,
+		registrar:    registrar,
+		snapshotter:  snapshotter,
+		basePath:     config.BasePath,
+		runtimePath:  path.Join(config.BasePath, "runtime"),
+		servicesPath: path.Join(config.BasePath, "runtime", "services"),
 	}
 }
 
@@ -63,6 +72,14 @@ func (r *Router) BasePath() string {
 
 func (r *Router) RuntimePath() string {
 	return r.runtimePath
+}
+
+func (r *Router) ServicesPath() string {
+	return r.servicesPath
+}
+
+func (r *Router) Registrar() *Registrar {
+	return r.registrar
 }
 
 func normalizeConfig(config Config) Config {
