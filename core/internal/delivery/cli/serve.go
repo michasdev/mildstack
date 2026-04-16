@@ -7,14 +7,31 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewServeCommand(manager *runtime.Manager) *cobra.Command {
+type HTTPServer interface {
+	Start(context.Context) error
+}
+
+type HTTPServerFactory func(port int) HTTPServer
+
+func NewServeCommand(manager *runtime.Manager, factories ...HTTPServerFactory) *cobra.Command {
 	var port int
+	var factory HTTPServerFactory
+	if len(factories) > 0 {
+		factory = factories[0]
+	}
 
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Register an API instance in the shared runtime",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return manager.Serve(context.Background(), port)
+			if factory != nil {
+				server := factory(port)
+				if server == nil {
+					return nil
+				}
+				return server.Start(cmd.Context())
+			}
+			return manager.Serve(cmd.Context(), port)
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", 8080, "API port")

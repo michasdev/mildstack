@@ -27,6 +27,15 @@ func (s *commandServiceStub) RegisterRoutes(orchestrator.RouteRegistrar) error {
 
 func (s *commandServiceStub) AttachState(orchestrator.StateHook) error { return nil }
 
+type commandServerStub struct {
+	manager *runtime.Manager
+	port    int
+}
+
+func (s *commandServerStub) Start(ctx context.Context) error {
+	return s.manager.Serve(ctx, s.port)
+}
+
 func TestCommandsServeStatusAndPorts(t *testing.T) {
 	t.Helper()
 
@@ -41,7 +50,9 @@ func TestCommandsServeStatusAndPorts(t *testing.T) {
 		stdout := &bytes.Buffer{}
 		stderr := &bytes.Buffer{}
 		cmd := NewRootCommand(stdout, stderr, Commands{
-			Serve:  NewServeCommand(manager),
+			Serve: NewServeCommand(manager, func(port int) HTTPServer {
+				return &commandServerStub{manager: manager, port: port}
+			}),
 			Status: NewStatusCommand(manager),
 			Ports:  NewPortsCommand(manager),
 		})
