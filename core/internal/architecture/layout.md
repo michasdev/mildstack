@@ -17,4 +17,4 @@ Delivery is transport-specific. HTTP and CLI formatting stay under `core/interna
 
 Runtime snapshots are copy-on-read and sorted for stable presentation. Shared service state is mutex-backed and cloned so presentation layers and services cannot alias internal runtime storage.
 
-For the practical service checklist, start with [service onboarding](./service_onboarding.md).
+For the practical service checklist and test matrix, start with [service onboarding](./service_onboarding.md).
