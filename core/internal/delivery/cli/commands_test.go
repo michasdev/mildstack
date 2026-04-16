@@ -42,7 +42,7 @@ func TestCommandsServeStatusAndPorts(t *testing.T) {
 	manager := runtime.New(composition.Assemble([]orchestrator.Service{
 		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
 		&commandServiceStub{metadata: orchestrator.Metadata{Name: "beta", Version: "v2"}},
-	}))
+	}).Services)
 
 	runCommand := func(args ...string) string {
 		t.Helper()

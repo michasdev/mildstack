@@ -22,7 +22,7 @@ func (r *registrarStub) Serve(context.Context, int) error {
 func TestServerStartAndShutdown(t *testing.T) {
 	t.Helper()
 
-	manager := runtime.New(composition.Assemble(nil))
+	manager := runtime.New(composition.Assemble(nil).Services)
 	router := NewRouter(DefaultConfig(), manager)
 	server := NewServer(manager, router, 0)
 

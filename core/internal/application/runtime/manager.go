@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
-	"github.com/michasdev/mildstack/core/internal/composition"
 )
 
 type Snapshot struct {
@@ -21,16 +20,19 @@ type Manager struct {
 	ports    []int
 }
 
-func New(root composition.Root) *Manager {
-	services := make([]orchestrator.Metadata, 0, len(root.Services))
-	for _, service := range root.Services {
+func New(services []orchestrator.Service) *Manager {
+	copied := make([]orchestrator.Service, len(services))
+	copy(copied, services)
+
+	metadata := make([]orchestrator.Metadata, 0, len(copied))
+	for _, service := range copied {
 		if service == nil {
 			continue
 		}
-		services = append(services, cloneMetadata(service.Metadata()))
+		metadata = append(metadata, cloneMetadata(service.Metadata()))
 	}
 
-	return &Manager{services: services}
+	return &Manager{services: metadata}
 }
 
 func (m *Manager) Serve(ctx context.Context, port int) error {

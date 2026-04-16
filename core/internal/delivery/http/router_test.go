@@ -11,7 +11,7 @@ import (
 func TestNewRouterUsesVersionedBasePath(t *testing.T) {
 	t.Helper()
 
-	manager := runtime.New(composition.Assemble(nil))
+	manager := runtime.New(composition.Assemble(nil).Services)
 	router := NewRouter(Config{}, manager)
 
 	if got, want := router.BasePath(), "/api/v1"; got != want {
@@ -31,7 +31,7 @@ func TestNewRouterUsesVersionedBasePath(t *testing.T) {
 func TestNewRouterNormalizesCustomBasePath(t *testing.T) {
 	t.Helper()
 
-	manager := runtime.New(composition.Assemble(nil))
+	manager := runtime.New(composition.Assemble(nil).Services)
 	router := NewRouter(Config{BasePath: "api/v1/"}, manager)
 
 	if got, want := router.BasePath(), "/api/v1"; got != want {

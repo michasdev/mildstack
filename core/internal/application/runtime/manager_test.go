@@ -45,7 +45,7 @@ func TestManagerCopiesMetadataAndTracksMultiplePorts(t *testing.T) {
 	}
 
 	services := []orchestrator.Service{first, second}
-	manager := New(composition.Assemble(services))
+	manager := New(composition.Assemble(services).Services)
 
 	services[0] = second
 	first.metadata.Name = "mutated"
@@ -84,7 +84,7 @@ func TestManagerCopiesMetadataAndTracksMultiplePorts(t *testing.T) {
 func TestManagerRejectsDuplicatePorts(t *testing.T) {
 	t.Helper()
 
-	manager := New(composition.Root{})
+	manager := New(nil)
 
 	if err := manager.Serve(context.Background(), 8080); err != nil {
 		t.Fatalf("serve 8080: %v", err)
