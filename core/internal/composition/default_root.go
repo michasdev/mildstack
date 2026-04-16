@@ -5,15 +5,25 @@ import (
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
+	"github.com/michasdev/mildstack/core/internal/dynamodb"
 	"github.com/michasdev/mildstack/core/internal/s3"
 )
 
 func DefaultRoot() Root {
-	service := s3.New()
-	hook := runtime.NewStateHook()
-	if err := service.AttachState(hook); err != nil {
-		panic(fmt.Sprintf("composition: attach s3 state: %v", err))
+	return defaultRootWithHook(runtime.NewStateHook())
+}
+
+func defaultRootWithHook(hook orchestrator.StateHook) Root {
+	services := []orchestrator.Service{
+		s3.New(),
+		dynamodb.New(),
 	}
 
-	return Assemble([]orchestrator.Service{service})
+	for _, service := range services {
+		if err := service.AttachState(hook); err != nil {
+			panic(fmt.Sprintf("composition: attach %s state: %v", service.Metadata().Name, err))
+		}
+	}
+
+	return Assemble(services)
 }
