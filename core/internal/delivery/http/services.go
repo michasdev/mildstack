@@ -1,6 +1,7 @@
 package http
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 
@@ -13,6 +14,8 @@ type servicesHandler struct {
 	snapshotter Snapshotter
 	registrar   *Registrar
 }
+
+var errServiceRoutesNotRegistered = errors.New("service routes not registered")
 
 type servicesResponse struct {
 	Services []serviceSummary `json:"services"`
@@ -49,9 +52,12 @@ func newServicesHandler(snapshotter Snapshotter, registrar *Registrar) servicesH
 
 func (h servicesHandler) handleIndex(c *gin.Context) {
 	snapshot := h.snapshotter.Snapshot(c.Request.Context())
-	c.JSON(http.StatusOK, servicesResponse{
-		Services: h.buildSummaries(snapshot),
-	})
+	summaries, err := h.buildSummaries(snapshot)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, servicesResponse{Services: summaries})
 }
 
 func (h servicesHandler) handleService(c *gin.Context) {
@@ -63,7 +69,11 @@ func (h servicesHandler) handleService(c *gin.Context) {
 		return
 	}
 
-	entry, _ := h.registrar.Service(serviceName)
+	entry, err := h.serviceRoutesForName(serviceName)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, serviceResponse{
 		Name:        metadata.Name,
 		Description: metadata.Description,
@@ -73,11 +83,14 @@ func (h servicesHandler) handleService(c *gin.Context) {
 	})
 }
 
-func (h servicesHandler) buildSummaries(snapshot runtime.Snapshot) []serviceSummary {
+func (h servicesHandler) buildSummaries(snapshot runtime.Snapshot) ([]serviceSummary, error) {
 	metadata := cloneAndSortMetadata(snapshot.Services)
 	summaries := make([]serviceSummary, 0, len(metadata))
 	for _, service := range metadata {
-		entry, _ := h.registrar.Service(service.Name)
+		entry, err := h.serviceRoutesForName(service.Name)
+		if err != nil {
+			return nil, err
+		}
 		summaries = append(summaries, serviceSummary{
 			Name:        service.Name,
 			Description: service.Description,
@@ -86,7 +99,15 @@ func (h servicesHandler) buildSummaries(snapshot runtime.Snapshot) []serviceSumm
 			RouteCount:  len(entry.Routes),
 		})
 	}
-	return summaries
+	return summaries, nil
+}
+
+func (h servicesHandler) serviceRoutesForName(serviceName string) (ServiceCatalogEntry, error) {
+	entry, ok := h.registrar.Service(serviceName)
+	if !ok {
+		return ServiceCatalogEntry{}, errServiceRoutesNotRegistered
+	}
+	return entry, nil
 }
 
 func cloneAndSortMetadata(services []orchestrator.Metadata) []orchestrator.Metadata {

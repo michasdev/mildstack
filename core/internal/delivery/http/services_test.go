@@ -148,3 +148,69 @@ func TestServiceEndpointReturnsNotFoundForUnknownService(t *testing.T) {
 		t.Fatalf("unexpected status code: got %d want %d", got, want)
 	}
 }
+
+func TestServicesIndexReturnsInternalServerErrorForMissingRegistrarEntry(t *testing.T) {
+	t.Helper()
+
+	router := NewRouter(DefaultConfig(), snapshotStub{
+		snapshot: runtime.Snapshot{
+			Services: []orchestrator.Metadata{
+				{
+					Name:        "alpha",
+					Description: "first service",
+					Version:     "v1",
+					Tags:        []string{"alpha"},
+				},
+			},
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/runtime/services", nil)
+	router.Engine().ServeHTTP(recorder, request)
+
+	if got, want := recorder.Code, http.StatusInternalServerError; got != want {
+		t.Fatalf("unexpected status code: got %d want %d", got, want)
+	}
+
+	var response map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal services error response: %v", err)
+	}
+	if got, want := response["error"], errServiceRoutesNotRegistered.Error(); got != want {
+		t.Fatalf("unexpected error body: got %q want %q", got, want)
+	}
+}
+
+func TestServiceEndpointReturnsInternalServerErrorForMissingRegistrarEntry(t *testing.T) {
+	t.Helper()
+
+	router := NewRouter(DefaultConfig(), snapshotStub{
+		snapshot: runtime.Snapshot{
+			Services: []orchestrator.Metadata{
+				{
+					Name:        "alpha",
+					Description: "first service",
+					Version:     "v1",
+					Tags:        []string{"core", "alpha"},
+				},
+			},
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/runtime/services/alpha", nil)
+	router.Engine().ServeHTTP(recorder, request)
+
+	if got, want := recorder.Code, http.StatusInternalServerError; got != want {
+		t.Fatalf("unexpected status code: got %d want %d", got, want)
+	}
+
+	var response map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal service error response: %v", err)
+	}
+	if got, want := response["error"], errServiceRoutesNotRegistered.Error(); got != want {
+		t.Fatalf("unexpected error body: got %q want %q", got, want)
+	}
+}
