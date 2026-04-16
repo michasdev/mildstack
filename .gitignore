@@ -7,3 +7,4 @@ out
 tmp
 pnpm-lock.yaml
 .planning/
+AGENTS.md

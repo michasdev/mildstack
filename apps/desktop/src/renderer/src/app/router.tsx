@@ -1,6 +1,6 @@
 import { createHashRouter } from 'react-router'
-import HomePage from '@renderer/app/routes/home'
-import NotFoundPage from '@renderer/app/routes/not-found'
+import HomePage from '@renderer/app/pages/home'
+import NotFoundPage from '@renderer/app/pages/not-found'
 
 export const router = createHashRouter([
   {
