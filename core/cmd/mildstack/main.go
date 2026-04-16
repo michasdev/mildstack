@@ -8,6 +8,7 @@ import (
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	"github.com/michasdev/mildstack/core/internal/composition"
 	"github.com/michasdev/mildstack/core/internal/delivery/cli"
+	cliui "github.com/michasdev/mildstack/core/internal/delivery/cli/ui"
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
 )
 
@@ -25,6 +26,7 @@ func main() {
 		Serve:  cli.NewServeCommand(manager, httpServerFactory),
 		Status: cli.NewStatusCommand(manager),
 		Ports:  cli.NewPortsCommand(manager),
+		UI:     cliui.NewUICommand(manager),
 	}
 
 	if err := cli.Execute(context.Background(), os.Stdout, os.Stderr, commands); err != nil {

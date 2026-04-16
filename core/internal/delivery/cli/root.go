@@ -15,6 +15,7 @@ type Commands struct {
 	Serve  *cobra.Command
 	Status *cobra.Command
 	Ports  *cobra.Command
+	UI     *cobra.Command
 }
 
 func NewRootCommand(out, err io.Writer, commands Commands) *cobra.Command {
@@ -26,7 +27,7 @@ func NewRootCommand(out, err io.Writer, commands Commands) *cobra.Command {
 	cmd.SetOut(out)
 	cmd.SetErr(err)
 
-	for _, subcommand := range []*cobra.Command{commands.Serve, commands.Status, commands.Ports} {
+	for _, subcommand := range []*cobra.Command{commands.Serve, commands.Status, commands.Ports, commands.UI} {
 		if subcommand != nil {
 			cmd.AddCommand(subcommand)
 		}
