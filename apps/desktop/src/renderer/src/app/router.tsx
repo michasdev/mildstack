@@ -1,13 +1,13 @@
 import { createHashRouter } from 'react-router'
-import HomePage from '@renderer/app/pages/home'
 import NotFoundPage from '@renderer/app/pages/not-found'
+import ResourcesPage from '@renderer/features/resources/resources'
 
 export const router = createHashRouter([
   {
     path: '/',
-    element: <HomePage />,
+    element: <ResourcesPage />,
     children: [
-      { index: true, element: <HomePage /> },
+      { index: true, element: <ResourcesPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

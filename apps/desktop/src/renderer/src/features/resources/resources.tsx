@@ -1,4 +1,4 @@
-function HomePage(): React.JSX.Element {
+function ResourcesPage(): React.JSX.Element {
   return (
     <div className="p-6">
       <h1 className="text-2xl font-semibold">MildStack Services</h1>
@@ -9,4 +9,4 @@ function HomePage(): React.JSX.Element {
   )
 }
 
-export default HomePage
+export default ResourcesPage
