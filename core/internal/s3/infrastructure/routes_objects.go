@@ -15,6 +15,11 @@ func objectRoutes() []orchestrator.Route {
 			Name:   "s3.objects.show",
 		},
 		{
+			Method: "HEAD",
+			Path:   "/s3/buckets/:bucket/objects/:object",
+			Name:   "s3.objects.head",
+		},
+		{
 			Method: "PUT",
 			Path:   "/s3/buckets/:bucket/objects/:object",
 			Name:   "s3.objects.update",

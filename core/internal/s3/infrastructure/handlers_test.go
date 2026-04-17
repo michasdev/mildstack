@@ -51,7 +51,7 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	putResp, err := handlers.PutObject(infrastructure.PutObjectRequest{
 		Bucket:      createResp.Bucket.Name,
 		Key:         "archive.txt",
-		Size:        42,
+		Body:        []byte("archive payload"),
 		ContentType: "text/plain",
 	})
 	if err != nil {
@@ -79,29 +79,29 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	if got, want := againObjects.Object.Key, "archive.txt"; got != want {
 		t.Fatalf("object payload was not copied: got %q want %q", got, want)
 	}
-	if got, want := string(againObjects.Object.Body), "archive.txt"; got == want {
-		t.Fatalf("test setup is invalid: object body should not equal object key")
+	if got, want := string(againObjects.Object.Body), "archive payload"; got != want {
+		t.Fatalf("unexpected object body: got %q want %q", got, want)
 	}
 
-	headResp, err := handlers.HeadObject(infrastructure.HeadObjectRequest{
+	headObjectResp, err := handlers.HeadObject(infrastructure.HeadObjectRequest{
 		Bucket: createResp.Bucket.Name,
 		Key:    putResp.Object.Key,
 	})
 	if err != nil {
 		t.Fatalf("head object: %v", err)
 	}
-	if got, want := headResp.Object.ETag, putResp.Object.ETag; got != want {
+	if got, want := headObjectResp.Object.ETag, putResp.Object.ETag; got != want {
 		t.Fatalf("unexpected head object etag: got %q want %q", got, want)
 	}
-	if len(headResp.Object.Body) != 0 {
-		t.Fatalf("expected head payload body to be empty, got %d bytes", len(headResp.Object.Body))
+	if len(headObjectResp.Object.Body) != 0 {
+		t.Fatalf("expected head payload body to be empty, got %d bytes", len(headObjectResp.Object.Body))
 	}
 
 	copyResp, err := handlers.CopyObject(infrastructure.CopyObjectRequest{
-		Bucket:           createResp.Bucket.Name,
-		Key:              "archive-copy.txt",
-		SourceBucket:     createResp.Bucket.Name,
-		SourceObjectKey:  putResp.Object.Key,
+		Bucket:          createResp.Bucket.Name,
+		Key:             "archive-copy.txt",
+		SourceBucket:    createResp.Bucket.Name,
+		SourceObjectKey: putResp.Object.Key,
 	})
 	if err != nil {
 		t.Fatalf("copy object: %v", err)
@@ -111,6 +111,9 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	}
 	if got, want := copyResp.Object.ETag, putResp.Object.ETag; got != want {
 		t.Fatalf("unexpected copied etag: got %q want %q", got, want)
+	}
+	if got, want := string(copyResp.Object.Body), "archive payload"; got != want {
+		t.Fatalf("unexpected copied body: got %q want %q", got, want)
 	}
 
 	deleteResp, err := handlers.DeleteObject(infrastructure.DeleteObjectRequest{
@@ -134,6 +137,12 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 		Key:    putResp.Object.Key,
 	}); err == nil {
 		t.Fatal("expected deleted object lookup to fail")
+	}
+	if _, err := handlers.DeleteObject(infrastructure.DeleteObjectRequest{
+		Bucket: createResp.Bucket.Name,
+		Key:    copyResp.Object.Key,
+	}); err != nil {
+		t.Fatalf("delete copied object: %v", err)
 	}
 
 	if _, err := handlers.DeleteBucket(infrastructure.DeleteBucketRequest{Name: "mildstack-assets"}); err == nil {
@@ -177,10 +186,10 @@ func TestHandlersSurfaceServiceErrors(t *testing.T) {
 	}); err == nil {
 		t.Fatal("expected missing object copy to fail")
 	}
-	if _, err := handlers.PutObject(infrastructure.PutObjectRequest{Bucket: "missing", Key: "key", Size: 1}); err == nil {
+	if _, err := handlers.PutObject(infrastructure.PutObjectRequest{Bucket: "missing", Key: "key", Body: []byte("x")}); err == nil {
 		t.Fatal("expected put on missing bucket to fail")
 	}
-	if _, err := handlers.DeleteObject(infrastructure.DeleteObjectRequest{Bucket: "missing", Key: "key"}); err != nil {
-		t.Fatalf("expected delete on missing object to succeed: %v", err)
+	if _, err := handlers.DeleteObject(infrastructure.DeleteObjectRequest{Bucket: "mildstack-assets", Key: "missing"}); err != nil {
+		t.Fatalf("expected delete on missing key to succeed: %v", err)
 	}
 }

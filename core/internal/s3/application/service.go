@@ -32,7 +32,9 @@ func newService(state domain.State, repo Repository) *Service {
 				"delete bucket",
 				"list objects",
 				"get object",
+				"head object",
 				"put object",
+				"copy object",
 				"delete object",
 			},
 			[]string{

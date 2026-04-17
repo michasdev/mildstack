@@ -13,7 +13,9 @@ type Service interface {
 	DeleteBucket(name string) error
 	ListObjects(bucket string) ([]domain.Object, error)
 	GetObject(bucket, key string) (domain.Object, error)
-	PutObject(bucket, key string, size int64, contentType string) (domain.Object, error)
+	HeadObject(bucket, key string) (domain.Object, error)
+	PutObject(bucket, key string, body []byte, contentType string) (domain.Object, error)
+	CopyObject(bucket, key, sourceBucket, sourceKey string) (domain.Object, error)
 	DeleteObject(bucket, key string) error
 }
 
@@ -28,10 +30,13 @@ type BucketPayload struct {
 }
 
 type ObjectPayload struct {
-	Bucket      string `json:"bucket"`
-	Key         string `json:"key"`
-	Size        int64  `json:"size"`
-	ContentType string `json:"content_type"`
+	Bucket       string    `json:"bucket"`
+	Key          string    `json:"key"`
+	Body         []byte    `json:"body,omitempty"`
+	Size         int64     `json:"size"`
+	ContentType  string    `json:"content_type"`
+	ETag         string    `json:"etag,omitempty"`
+	LastModified time.Time `json:"last_modified,omitempty"`
 }
 
 type ListBucketsResponse struct {
@@ -83,7 +88,7 @@ type GetObjectResponse struct {
 type PutObjectRequest struct {
 	Bucket      string
 	Key         string
-	Size        int64
+	Body        []byte
 	ContentType string
 }
 
@@ -98,6 +103,26 @@ type DeleteObjectRequest struct {
 
 type DeleteObjectResponse struct {
 	Deleted bool `json:"deleted"`
+}
+
+type HeadObjectRequest struct {
+	Bucket string
+	Key    string
+}
+
+type HeadObjectResponse struct {
+	Object ObjectPayload `json:"object"`
+}
+
+type CopyObjectRequest struct {
+	Bucket          string
+	Key             string
+	SourceBucket    string
+	SourceObjectKey string
+}
+
+type CopyObjectResponse struct {
+	Object ObjectPayload `json:"object"`
 }
 
 func NewHandlers(service Service) Handlers {
