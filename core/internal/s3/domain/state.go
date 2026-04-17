@@ -47,6 +47,70 @@ type ObjectListPage struct {
 	NextMarker     string
 }
 
+type ListObjectsV1Request struct {
+	Bucket    string
+	Prefix    string
+	Delimiter string
+	Marker    string
+	MaxKeys   int
+}
+
+type ListObjectsV1Result struct {
+	Bucket         string
+	Prefix         string
+	Marker         string
+	Delimiter      string
+	MaxKeys        int
+	IsTruncated    bool
+	NextMarker     string
+	Objects        []Object
+	CommonPrefixes []string
+}
+
+type ListObjectsV2Request struct {
+	Bucket            string
+	Prefix            string
+	Delimiter         string
+	ContinuationToken string
+	StartAfter        string
+	MaxKeys           int
+}
+
+type ListObjectsV2Result struct {
+	Bucket                string
+	Prefix                string
+	Delimiter             string
+	ContinuationToken     string
+	StartAfter            string
+	MaxKeys               int
+	KeyCount              int
+	IsTruncated           bool
+	NextContinuationToken string
+	Objects               []Object
+	CommonPrefixes        []string
+}
+
+type DeleteObjectsRequest struct {
+	Bucket string
+	Keys   []string
+	Quiet  bool
+}
+
+type DeletedObject struct {
+	Key string
+}
+
+type DeleteObjectsError struct {
+	Key     string
+	Code    string
+	Message string
+}
+
+type DeleteObjectsResult struct {
+	Deleted []DeletedObject
+	Errors  []DeleteObjectsError
+}
+
 func NewState() State {
 	return State{
 		Service: "s3",

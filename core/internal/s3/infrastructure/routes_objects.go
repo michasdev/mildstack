@@ -7,7 +7,17 @@ func objectRoutes() []orchestrator.Route {
 		{
 			Method: "GET",
 			Path:   "/s3/buckets/:bucket/objects",
-			Name:   "s3.objects.index",
+			Name:   "s3.objects.list-v1",
+		},
+		{
+			Method: "GET",
+			Path:   "/s3/buckets/:bucket/objects/v2",
+			Name:   "s3.objects.list-v2",
+		},
+		{
+			Method: "POST",
+			Path:   "/s3/buckets/:bucket/objects/delete",
+			Name:   "s3.objects.delete-batch",
 		},
 		{
 			Method: "GET",

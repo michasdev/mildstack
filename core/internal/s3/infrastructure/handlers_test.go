@@ -239,3 +239,101 @@ func TestHandlersCopyResponsesDoNotAliasStoredBodies(t *testing.T) {
 		t.Fatalf("copied response body was aliased: got %q want %q", got, want)
 	}
 }
+
+func TestHandlersExposeListVariantsAndBatchDeleteDeterministically(t *testing.T) {
+	t.Helper()
+
+	service := application.New()
+	handlers := infrastructure.NewHandlers(service)
+
+	createResp, err := handlers.CreateBucket(infrastructure.CreateBucketRequest{
+		Name:   "catalog-bucket",
+		Region: "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+
+	for _, key := range []string{"charlie.txt", "alpha.txt", "bravo.txt"} {
+		if _, err := handlers.PutObject(infrastructure.PutObjectRequest{
+			Bucket:      createResp.Bucket.Name,
+			Key:         key,
+			Body:        []byte(key),
+			ContentType: "text/plain",
+		}); err != nil {
+			t.Fatalf("put object %q: %v", key, err)
+		}
+	}
+
+	v1, err := handlers.ListObjectsV1(infrastructure.ListObjectsV1Request{
+		Bucket:  createResp.Bucket.Name,
+		MaxKeys: 2,
+	})
+	if err != nil {
+		t.Fatalf("list objects v1: %v", err)
+	}
+	if got, want := len(v1.Objects), 2; got != want {
+		t.Fatalf("unexpected v1 object count: got %d want %d", got, want)
+	}
+	if got, want := v1.Objects[0].Key, "alpha.txt"; got != want {
+		t.Fatalf("unexpected v1 first key: got %q want %q", got, want)
+	}
+	v1.Objects[0].Key = "mutated"
+
+	v1Again, err := handlers.ListObjectsV1(infrastructure.ListObjectsV1Request{
+		Bucket: createResp.Bucket.Name,
+	})
+	if err != nil {
+		t.Fatalf("list objects v1 again: %v", err)
+	}
+	if got, want := v1Again.Objects[0].Key, "alpha.txt"; got != want {
+		t.Fatalf("v1 payload was aliased: got %q want %q", got, want)
+	}
+
+	v2, err := handlers.ListObjectsV2(infrastructure.ListObjectsV2Request{
+		Bucket:  createResp.Bucket.Name,
+		MaxKeys: 2,
+	})
+	if err != nil {
+		t.Fatalf("list objects v2: %v", err)
+	}
+	if !v2.IsTruncated {
+		t.Fatal("expected v2 response to be truncated")
+	}
+	if v2.NextContinuationToken == "" {
+		t.Fatal("expected continuation token")
+	}
+
+	deleteResp, err := handlers.DeleteObjects(infrastructure.DeleteObjectsRequest{
+		Bucket: createResp.Bucket.Name,
+		Keys:   []string{"missing.txt", "bravo.txt", "alpha.txt"},
+	})
+	if err != nil {
+		t.Fatalf("delete objects: %v", err)
+	}
+	if got, want := len(deleteResp.Deleted), 3; got != want {
+		t.Fatalf("unexpected delete count: got %d want %d", got, want)
+	}
+	if got, want := deleteResp.Deleted[0].Key, "missing.txt"; got != want {
+		t.Fatalf("unexpected first deleted key: got %q want %q", got, want)
+	}
+	if got, want := deleteResp.Deleted[1].Key, "bravo.txt"; got != want {
+		t.Fatalf("unexpected second deleted key: got %q want %q", got, want)
+	}
+	if got, want := deleteResp.Deleted[2].Key, "alpha.txt"; got != want {
+		t.Fatalf("unexpected third deleted key: got %q want %q", got, want)
+	}
+
+	remaining, err := handlers.ListObjectsV1(infrastructure.ListObjectsV1Request{
+		Bucket: createResp.Bucket.Name,
+	})
+	if err != nil {
+		t.Fatalf("list remaining objects: %v", err)
+	}
+	if got, want := len(remaining.Objects), 1; got != want {
+		t.Fatalf("unexpected remaining object count: got %d want %d", got, want)
+	}
+	if got, want := remaining.Objects[0].Key, "charlie.txt"; got != want {
+		t.Fatalf("unexpected remaining key: got %q want %q", got, want)
+	}
+}

@@ -8,48 +8,14 @@ import (
 	"github.com/michasdev/mildstack/core/internal/s3/domain"
 )
 
-type ListObjectsV1Request struct {
-	Bucket    string
-	Prefix    string
-	Delimiter string
-	Marker    string
-	MaxKeys   int
-}
-
-type ListObjectsV1Result struct {
-	Bucket         string
-	Prefix         string
-	Marker         string
-	Delimiter      string
-	MaxKeys        int
-	IsTruncated    bool
-	NextMarker     string
-	Objects        []domain.Object
-	CommonPrefixes []string
-}
-
-type ListObjectsV2Request struct {
-	Bucket            string
-	Prefix            string
-	Delimiter         string
-	ContinuationToken string
-	StartAfter        string
-	MaxKeys           int
-}
-
-type ListObjectsV2Result struct {
-	Bucket                string
-	Prefix                string
-	Delimiter             string
-	ContinuationToken     string
-	StartAfter            string
-	MaxKeys               int
-	KeyCount              int
-	IsTruncated           bool
-	NextContinuationToken string
-	Objects               []domain.Object
-	CommonPrefixes        []string
-}
+type ListObjectsV1Request = domain.ListObjectsV1Request
+type ListObjectsV1Result = domain.ListObjectsV1Result
+type ListObjectsV2Request = domain.ListObjectsV2Request
+type ListObjectsV2Result = domain.ListObjectsV2Result
+type DeleteObjectsRequest = domain.DeleteObjectsRequest
+type DeletedObject = domain.DeletedObject
+type DeleteObjectsError = domain.DeleteObjectsError
+type DeleteObjectsResult = domain.DeleteObjectsResult
 
 func (s *Service) ListObjects(bucket string) ([]domain.Object, error) {
 	result, err := s.ListObjectsV1(ListObjectsV1Request{Bucket: bucket})
@@ -246,6 +212,33 @@ func (s *Service) DeleteObject(bucket, key string) error {
 	}
 	s.state.DeleteObject(bucket, key)
 	return s.persist()
+}
+
+func (s *Service) DeleteObjects(request DeleteObjectsRequest) (DeleteObjectsResult, error) {
+	bucket, err := s.requireBucket(request.Bucket)
+	if err != nil {
+		return DeleteObjectsResult{}, err
+	}
+
+	result := DeleteObjectsResult{
+		Deleted: make([]DeletedObject, 0, len(request.Keys)),
+		Errors:  make([]DeleteObjectsError, 0),
+	}
+	for _, key := range request.Keys {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			continue
+		}
+		s.state.DeleteObject(bucket, trimmed)
+		if !request.Quiet {
+			result.Deleted = append(result.Deleted, DeletedObject{Key: trimmed})
+		}
+	}
+
+	if err := s.persist(); err != nil {
+		return DeleteObjectsResult{}, err
+	}
+	return result, nil
 }
 
 func (s *Service) requireBucket(bucket string) (string, error) {
