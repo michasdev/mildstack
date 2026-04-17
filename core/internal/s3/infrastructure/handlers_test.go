@@ -17,6 +17,9 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	if got, want := len(buckets.Buckets), 1; got != want {
 		t.Fatalf("unexpected initial bucket count: got %d want %d", got, want)
 	}
+	if buckets.Buckets[0].CreatedAt.IsZero() {
+		t.Fatal("expected bucket payload to include created_at")
+	}
 	buckets.Buckets[0].Name = "mutated"
 	again := handlers.ListBuckets()
 	if got, want := again.Buckets[0].Name, "mildstack-assets"; got != want {
@@ -32,6 +35,17 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	}
 	if got, want := createResp.Bucket.Name, "mildstack-logs"; got != want {
 		t.Fatalf("unexpected bucket name: got %q want %q", got, want)
+	}
+	if createResp.Bucket.CreatedAt.IsZero() {
+		t.Fatal("expected create bucket response to include created_at")
+	}
+
+	headResp, err := handlers.HeadBucket(infrastructure.HeadBucketRequest{Name: createResp.Bucket.Name})
+	if err != nil {
+		t.Fatalf("head bucket: %v", err)
+	}
+	if got, want := headResp.Bucket.Region, "us-west-2"; got != want {
+		t.Fatalf("unexpected head bucket region: got %q want %q", got, want)
 	}
 
 	putResp, err := handlers.PutObject(infrastructure.PutObjectRequest{
@@ -82,6 +96,18 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	}); err == nil {
 		t.Fatal("expected deleted object lookup to fail")
 	}
+
+	if _, err := handlers.DeleteBucket(infrastructure.DeleteBucketRequest{Name: "mildstack-assets"}); err == nil {
+		t.Fatal("expected non-empty bucket delete to fail")
+	}
+
+	deleteBucketResp, err := handlers.DeleteBucket(infrastructure.DeleteBucketRequest{Name: createResp.Bucket.Name})
+	if err != nil {
+		t.Fatalf("delete bucket: %v", err)
+	}
+	if !deleteBucketResp.Deleted {
+		t.Fatal("expected delete bucket response to report success")
+	}
 }
 
 func TestHandlersSurfaceServiceErrors(t *testing.T) {
@@ -91,6 +117,12 @@ func TestHandlersSurfaceServiceErrors(t *testing.T) {
 
 	if _, err := handlers.CreateBucket(infrastructure.CreateBucketRequest{}); err == nil {
 		t.Fatal("expected empty bucket creation to fail")
+	}
+	if _, err := handlers.HeadBucket(infrastructure.HeadBucketRequest{Name: "missing"}); err == nil {
+		t.Fatal("expected missing bucket head to fail")
+	}
+	if _, err := handlers.DeleteBucket(infrastructure.DeleteBucketRequest{Name: "missing"}); err == nil {
+		t.Fatal("expected missing bucket delete to fail")
 	}
 	if _, err := handlers.ListObjects(infrastructure.ListObjectsRequest{Bucket: "missing"}); err == nil {
 		t.Fatal("expected missing bucket listing to fail")
