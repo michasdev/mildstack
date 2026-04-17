@@ -18,7 +18,7 @@ describe('router configuration', () => {
   })
 
   it('router module exports a router object', async () => {
-    const mod = await import('@renderer/app/router')
+    const mod = await import('@renderer/router')
     expect(mod.router).toBeDefined()
     expect(typeof mod.router).toBe('object')
   })

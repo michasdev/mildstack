@@ -1,5 +1,5 @@
 import { createHashRouter } from 'react-router'
-import NotFoundPage from '@renderer/app/pages/not-found'
+import NotFoundPage from '@renderer/shared/not-found'
 import ResourcesPage from '@renderer/features/resources/resources'
 import InstancesPage from '@renderer/features/instances/instances'
 import { Layout } from '@renderer/shared/layout'
