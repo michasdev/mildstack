@@ -19,6 +19,10 @@ func (s *statefulServiceStub) Stop(context.Context) error { return nil }
 
 func (s *statefulServiceStub) Metadata() orchestrator.Metadata { return s.metadata }
 
+func (s *statefulServiceStub) Policy() orchestrator.EmulationPolicy {
+	return orchestrator.NewEmulationPolicy(orchestrator.FidelityExemplar, nil, nil, "runtime-contract")
+}
+
 func (s *statefulServiceStub) RegisterRoutes(orchestrator.RouteRegistrar) error { return nil }
 
 func (s *statefulServiceStub) AttachState(hook orchestrator.StateHook) error {

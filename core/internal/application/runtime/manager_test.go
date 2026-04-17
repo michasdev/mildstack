@@ -19,6 +19,10 @@ func (s *serviceStub) Stop(context.Context) error { return nil }
 
 func (s *serviceStub) Metadata() orchestrator.Metadata { return s.metadata }
 
+func (s *serviceStub) Policy() orchestrator.EmulationPolicy {
+	return orchestrator.NewEmulationPolicy(orchestrator.FidelityExemplar, nil, nil, "runtime-test")
+}
+
 func (s *serviceStub) RegisterRoutes(orchestrator.RouteRegistrar) error { return nil }
 
 func (s *serviceStub) AttachState(orchestrator.StateHook) error { return nil }
@@ -74,9 +78,30 @@ func TestManagerCopiesMetadataAndTracksMultiplePorts(t *testing.T) {
 		t.Fatalf("unexpected ports: got %v want %v", got, want)
 	}
 
+	snapshot.Services[0].Name = "mutated"
+	snapshot.Services[0].Tags[0] = "changed"
+	snapshot.Ports[0] = 9999
+
+	again := manager.Snapshot(context.Background())
+	if got, want := again.Services[0].Name, "alpha"; got != want {
+		t.Fatalf("unexpected restored first service name: got %q want %q", got, want)
+	}
+	if got, want := again.Services[0].Tags[0], "core"; got != want {
+		t.Fatalf("unexpected restored first service tag: got %q want %q", got, want)
+	}
+	if got, want := again.Ports, []int{8080, 9090}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("unexpected restored ports: got %v want %v", got, want)
+	}
+
 	ports := manager.Ports(context.Background())
 	if len(ports) != 2 || ports[0] != 8080 || ports[1] != 9090 {
 		t.Fatalf("unexpected ports snapshot: %v", ports)
+	}
+
+	ports[0] = 7777
+	againPorts := manager.Ports(context.Background())
+	if len(againPorts) != 2 || againPorts[0] != 8080 || againPorts[1] != 9090 {
+		t.Fatalf("unexpected restored ports snapshot: %v", againPorts)
 	}
 }
 

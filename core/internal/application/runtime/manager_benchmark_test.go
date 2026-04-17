@@ -53,6 +53,10 @@ func (s *benchmarkServiceStub) Stop(context.Context) error { return nil }
 
 func (s *benchmarkServiceStub) Metadata() orchestrator.Metadata { return s.metadata }
 
+func (s *benchmarkServiceStub) Policy() orchestrator.EmulationPolicy {
+	return orchestrator.NewEmulationPolicy(orchestrator.FidelityExemplar, nil, nil, "runtime-benchmark")
+}
+
 func (s *benchmarkServiceStub) RegisterRoutes(orchestrator.RouteRegistrar) error { return nil }
 
 func (s *benchmarkServiceStub) AttachState(orchestrator.StateHook) error { return nil }

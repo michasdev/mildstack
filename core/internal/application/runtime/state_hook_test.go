@@ -69,6 +69,60 @@ func TestMemoryStateHookDoesNotExposeInternalMapStorage(t *testing.T) {
 	}
 }
 
+func TestMemoryStateHookClonesTypedContainers(t *testing.T) {
+	t.Helper()
+
+	hook := NewStateHook()
+
+	typedMap := map[string]string{
+		"namespace": "s3",
+		"bucket":    "alpha",
+	}
+	typedSlice := []string{"one", "two"}
+
+	hook.Set("typed-map", typedMap)
+	hook.Set("typed-slice", typedSlice)
+
+	typedMap["namespace"] = "mutated"
+	typedSlice[0] = "mutated"
+
+	mapValue, ok := hook.Get("typed-map")
+	if !ok {
+		t.Fatal("expected typed map value to be present")
+	}
+	storedMap := mapValue.(map[string]string)
+	if got, want := storedMap["namespace"], "s3"; got != want {
+		t.Fatalf("unexpected stored map value: got %q want %q", got, want)
+	}
+
+	storedMap["namespace"] = "changed"
+	againMap, ok := hook.Get("typed-map")
+	if !ok {
+		t.Fatal("expected typed map value to remain present")
+	}
+	if got, want := againMap.(map[string]string)["namespace"], "s3"; got != want {
+		t.Fatalf("unexpected restored map value: got %q want %q", got, want)
+	}
+
+	sliceValue, ok := hook.Get("typed-slice")
+	if !ok {
+		t.Fatal("expected typed slice value to be present")
+	}
+	storedSlice := sliceValue.([]string)
+	if got, want := storedSlice[0], "one"; got != want {
+		t.Fatalf("unexpected stored slice value: got %q want %q", got, want)
+	}
+
+	storedSlice[0] = "changed"
+	againSlice, ok := hook.Get("typed-slice")
+	if !ok {
+		t.Fatal("expected typed slice value to remain present")
+	}
+	if got, want := againSlice.([]string)[0], "one"; got != want {
+		t.Fatalf("unexpected restored slice value: got %q want %q", got, want)
+	}
+}
+
 func TestMemoryStateHookConcurrentAccess(t *testing.T) {
 	t.Helper()
 
