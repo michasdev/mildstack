@@ -44,7 +44,7 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := policy.ErrorPrefix, "s3"; got != want {
 		t.Fatalf("unexpected policy error prefix: got %q want %q", got, want)
 	}
-	if got, want := len(policy.Supported), 20; got != want {
+	if got, want := len(policy.Supported), 23; got != want {
 		t.Fatalf("unexpected supported count: got %d want %d", got, want)
 	}
 	if got, want := len(policy.Unsupported), 1; got != want {
@@ -81,7 +81,7 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if !ok {
 		t.Fatal("expected s3 service to be registered")
 	}
-	if got, want := len(entry.Routes), 35; got != want {
+	if got, want := len(entry.Routes), 42; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 	expectedRoutes := []struct {
@@ -110,6 +110,13 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/tagging", "s3.buckets.tagging.show"},
 		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/tagging", "s3.buckets.tagging.update"},
 		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/tagging", "s3.buckets.tagging.delete"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/notification", "s3.buckets.notification.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/notification", "s3.buckets.notification.update"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/logging", "s3.buckets.logging.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/logging", "s3.buckets.logging.update"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/replication", "s3.buckets.replication.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/replication", "s3.buckets.replication.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/replication", "s3.buckets.replication.delete"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/versioning", "s3.buckets.versioning.show"},
 		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/versioning", "s3.buckets.versioning.update"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/versions", "s3.objects.versions"},
@@ -334,6 +341,61 @@ func TestServiceBucketGovernanceSubresourcesRoundTripAndCleanup(t *testing.T) {
 		t.Fatalf("unexpected stored ACL body: got %q want %q", got, want)
 	}
 
+	assertRoundTrip("notification",
+		func(body []byte) ([]byte, error) { return service.PutBucketNotification(bucket.Name, body) },
+		func() ([]byte, error) { return service.GetBucketNotification(bucket.Name) },
+		`<NotificationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"/>`,
+	)
+	assertRoundTrip("logging",
+		func(body []byte) ([]byte, error) { return service.PutBucketLogging(bucket.Name, body) },
+		func() ([]byte, error) { return service.GetBucketLogging(bucket.Name) },
+		`<BucketLoggingStatus xmlns="http://s3.amazonaws.com/doc/2006-03-01/"/>`,
+	)
+
+	if _, err := service.GetBucketReplication(bucket.Name); err == nil {
+		t.Fatal("expected missing replication config to fail")
+	}
+	if _, err := service.PutBucketReplication(bucket.Name, []byte(`<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::123456789012:role/replication</Role><Rule><ID>rule-1</ID><Status>Enabled</Status></Rule></ReplicationConfiguration>`)); err == nil {
+		t.Fatal("expected replication put to fail before versioning is enabled")
+	}
+
+	versioned, err := service.CreateBucket("mildstack-replicated", "us-east-1")
+	if err != nil {
+		t.Fatalf("create versioned replication bucket: %v", err)
+	}
+	if _, err := service.PutBucketVersioning(versioned.Name, domain.VersioningEnabled); err != nil {
+		t.Fatalf("enable versioning for replication: %v", err)
+	}
+	destination, err := service.CreateBucket("mildstack-replica-destination", "us-east-1")
+	if err != nil {
+		t.Fatalf("create replication destination bucket: %v", err)
+	}
+	if _, err := service.PutBucketVersioning(destination.Name, domain.VersioningEnabled); err != nil {
+		t.Fatalf("enable versioning for replication destination: %v", err)
+	}
+	replicationBody := []byte(`<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::123456789012:role/replication</Role><Rule><Status>Enabled</Status><Destination><Bucket>mildstack-replica-destination</Bucket><StorageClass>STANDARD</StorageClass></Destination></Rule></ReplicationConfiguration>`)
+	storedReplication, err := service.PutBucketReplication(versioned.Name, replicationBody)
+	if err != nil {
+		t.Fatalf("put replication: %v", err)
+	}
+	if len(storedReplication) == 0 {
+		t.Fatal("expected stored replication body")
+	}
+	storedReplication[0] = 'X'
+	againReplication, err := service.GetBucketReplication(versioned.Name)
+	if err != nil {
+		t.Fatalf("get replication: %v", err)
+	}
+	if !strings.Contains(string(againReplication), "ReplicationConfiguration") {
+		t.Fatalf("unexpected replication response: %q", string(againReplication))
+	}
+	if err := service.DeleteBucketReplication(versioned.Name); err != nil {
+		t.Fatalf("delete replication: %v", err)
+	}
+	if _, err := service.GetBucketReplication(versioned.Name); err == nil {
+		t.Fatal("expected deleted replication config to fail")
+	}
+
 	if err := service.DeleteBucket(bucket.Name); err != nil {
 		t.Fatalf("delete governed bucket: %v", err)
 	}
@@ -347,6 +409,16 @@ func TestServiceBucketGovernanceSubresourcesRoundTripAndCleanup(t *testing.T) {
 	}
 	if _, err := service.GetBucketPolicy(bucket.Name); err == nil {
 		t.Fatal("expected cleared policy lookup to fail after bucket deletion")
+	}
+	if got, err := service.GetBucketNotification(bucket.Name); err != nil {
+		t.Fatalf("get recreated bucket notification: %v", err)
+	} else if string(got) != string(notificationDefaultBody()) {
+		t.Fatalf("expected recreated bucket notification to default, got %q", string(got))
+	}
+	if got, err := service.GetBucketLogging(bucket.Name); err != nil {
+		t.Fatalf("get recreated bucket logging: %v", err)
+	} else if string(got) != string(loggingDefaultBody()) {
+		t.Fatalf("expected recreated bucket logging to default, got %q", string(got))
 	}
 
 	rebuiltACL, err := service.GetBucketACL(bucket.Name)

@@ -172,6 +172,27 @@ func TestHandlersSurfaceServiceErrors(t *testing.T) {
 	if _, err := handlers.DeleteBucket(infrastructure.DeleteBucketRequest{Name: "missing"}); err == nil {
 		t.Fatal("expected missing bucket delete to fail")
 	}
+	if _, err := handlers.GetBucketNotification(infrastructure.GetBucketNotificationRequest{Bucket: "missing"}); err == nil {
+		t.Fatal("expected missing bucket notification lookup to fail")
+	}
+	if _, err := handlers.PutBucketNotification(infrastructure.PutBucketNotificationRequest{Bucket: "missing", Body: []byte("<NotificationConfiguration/>")}); err == nil {
+		t.Fatal("expected missing bucket notification update to fail")
+	}
+	if _, err := handlers.GetBucketLogging(infrastructure.GetBucketLoggingRequest{Bucket: "missing"}); err == nil {
+		t.Fatal("expected missing bucket logging lookup to fail")
+	}
+	if _, err := handlers.PutBucketLogging(infrastructure.PutBucketLoggingRequest{Bucket: "missing", Body: []byte("<BucketLoggingStatus/>")}); err == nil {
+		t.Fatal("expected missing bucket logging update to fail")
+	}
+	if _, err := handlers.GetBucketReplication(infrastructure.GetBucketReplicationRequest{Bucket: "missing"}); err == nil {
+		t.Fatal("expected missing bucket replication lookup to fail")
+	}
+	if _, err := handlers.PutBucketReplication(infrastructure.PutBucketReplicationRequest{Bucket: "missing", Body: []byte("<ReplicationConfiguration/>")}); err == nil {
+		t.Fatal("expected missing bucket replication update to fail")
+	}
+	if _, err := handlers.DeleteBucketReplication(infrastructure.DeleteBucketReplicationRequest{Bucket: "missing"}); err == nil {
+		t.Fatal("expected missing bucket replication delete to fail")
+	}
 	if _, err := handlers.GetBucketVersioning(infrastructure.GetBucketVersioningRequest{Bucket: "missing"}); err == nil {
 		t.Fatal("expected missing bucket versioning lookup to fail")
 	}

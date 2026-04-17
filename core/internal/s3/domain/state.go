@@ -10,17 +10,20 @@ import (
 const StateKey = "services/s3"
 
 type State struct {
-	Service          string
-	Buckets          []Bucket
-	Objects          []Object
-	BucketVersioning []BucketVersioning
-	VersionHistory   VersionHistory
-	BucketPolicies   map[string][]byte
-	BucketEncryption map[string][]byte
-	BucketLifecycle  map[string][]byte
-	BucketCORS       map[string][]byte
-	BucketACL        map[string][]byte
-	BucketTagging    map[string][]byte
+	Service             string
+	Buckets             []Bucket
+	Objects             []Object
+	BucketVersioning    []BucketVersioning
+	VersionHistory      VersionHistory
+	BucketPolicies      map[string][]byte
+	BucketEncryption    map[string][]byte
+	BucketLifecycle     map[string][]byte
+	BucketCORS          map[string][]byte
+	BucketACL           map[string][]byte
+	BucketTagging       map[string][]byte
+	BucketNotifications map[string][]byte
+	BucketLogging       map[string][]byte
+	BucketReplication   map[string]BucketReplicationConfig
 }
 
 type Bucket struct {
@@ -39,6 +42,23 @@ type Object struct {
 	LastModified     time.Time         `json:"last_modified,omitempty"`
 	Metadata         map[string]string `json:"metadata,omitempty"`
 	PreservedHeaders map[string]string `json:"preserved_headers,omitempty"`
+}
+
+type BucketReplicationConfig struct {
+	Role  string                  `json:"role"`
+	Rules []BucketReplicationRule `json:"rules,omitempty"`
+}
+
+type BucketReplicationRule struct {
+	ID          string                       `json:"id,omitempty"`
+	Status      string                       `json:"status,omitempty"`
+	Prefix      string                       `json:"prefix,omitempty"`
+	Destination BucketReplicationDestination `json:"destination,omitempty"`
+}
+
+type BucketReplicationDestination struct {
+	Bucket       string `json:"bucket,omitempty"`
+	StorageClass string `json:"storage_class,omitempty"`
 }
 
 type ListObjectsOptions struct {
@@ -391,19 +411,25 @@ func (s State) Snapshot() map[string]any {
 	cors := bucketBodySnapshot(s.BucketCORS)
 	acl := bucketBodySnapshot(s.BucketACL)
 	tagging := bucketBodySnapshot(s.BucketTagging)
+	notifications := bucketBodySnapshot(s.BucketNotifications)
+	logging := bucketBodySnapshot(s.BucketLogging)
+	replication := bucketReplicationSnapshot(s.BucketReplication)
 
 	return map[string]any{
-		"service":           s.Service,
-		"buckets":           buckets,
-		"objects":           objects,
-		"bucket_versioning": versioning,
-		"version_history":   versionHistory,
-		"bucket_policies":   policies,
-		"bucket_encryption": encryption,
-		"bucket_lifecycle":  lifecycle,
-		"bucket_cors":       cors,
-		"bucket_acl":        acl,
-		"bucket_tagging":    tagging,
+		"service":              s.Service,
+		"buckets":              buckets,
+		"objects":              objects,
+		"bucket_versioning":    versioning,
+		"version_history":      versionHistory,
+		"bucket_policies":      policies,
+		"bucket_encryption":    encryption,
+		"bucket_lifecycle":     lifecycle,
+		"bucket_cors":          cors,
+		"bucket_acl":           acl,
+		"bucket_tagging":       tagging,
+		"bucket_notifications": notifications,
+		"bucket_logging":       logging,
+		"bucket_replication":   replication,
 	}
 }
 
@@ -529,6 +555,40 @@ func (s *State) SetBucketTaggingConfig(bucket string, body []byte) []byte {
 	return cloneBytes(body)
 }
 
+func (s State) BucketNotification(bucket string) ([]byte, bool) {
+	return bucketBodyValue(s.BucketNotifications, bucket)
+}
+
+func (s State) BucketLoggingConfig(bucket string) ([]byte, bool) {
+	return bucketBodyValue(s.BucketLogging, bucket)
+}
+
+func (s State) BucketReplicationConfig(bucket string) (BucketReplicationConfig, bool) {
+	config, ok := s.BucketReplication[bucket]
+	if !ok {
+		return BucketReplicationConfig{}, false
+	}
+	return cloneBucketReplicationConfig(config), true
+}
+
+func (s *State) SetBucketNotification(bucket string, body []byte) []byte {
+	s.BucketNotifications = upsertBucketBodyMap(s.BucketNotifications, bucket, body)
+	return cloneBytes(body)
+}
+
+func (s *State) SetBucketLoggingConfig(bucket string, body []byte) []byte {
+	s.BucketLogging = upsertBucketBodyMap(s.BucketLogging, bucket, body)
+	return cloneBytes(body)
+}
+
+func (s *State) SetBucketReplicationConfig(bucket string, config BucketReplicationConfig) BucketReplicationConfig {
+	if config.Rules == nil {
+		config.Rules = nil
+	}
+	s.BucketReplication = upsertBucketReplicationMap(s.BucketReplication, bucket, config)
+	return cloneBucketReplicationConfig(config)
+}
+
 func (s *State) DeleteBucketPolicy(bucket string) bool {
 	return deleteBucketBodyMap(&s.BucketPolicies, bucket)
 }
@@ -553,6 +613,18 @@ func (s *State) DeleteBucketTaggingConfig(bucket string) bool {
 	return deleteBucketBodyMap(&s.BucketTagging, bucket)
 }
 
+func (s *State) DeleteBucketNotification(bucket string) bool {
+	return deleteBucketBodyMap(&s.BucketNotifications, bucket)
+}
+
+func (s *State) DeleteBucketLoggingConfig(bucket string) bool {
+	return deleteBucketBodyMap(&s.BucketLogging, bucket)
+}
+
+func (s *State) DeleteBucketReplicationConfig(bucket string) bool {
+	return deleteBucketReplicationMap(&s.BucketReplication, bucket)
+}
+
 func (s *State) removeBucketGovernance(bucket string) {
 	s.DeleteBucketPolicy(bucket)
 	s.DeleteBucketEncryptionConfig(bucket)
@@ -560,6 +632,9 @@ func (s *State) removeBucketGovernance(bucket string) {
 	s.DeleteBucketCORSConfig(bucket)
 	s.DeleteBucketACLConfig(bucket)
 	s.DeleteBucketTaggingConfig(bucket)
+	s.DeleteBucketNotification(bucket)
+	s.DeleteBucketLoggingConfig(bucket)
+	s.DeleteBucketReplicationConfig(bucket)
 }
 
 func bucketBodySnapshot(values map[string][]byte) []any {
@@ -579,6 +654,58 @@ func bucketBodySnapshot(values map[string][]byte) []any {
 			"bucket": bucket,
 			"body":   string(values[bucket]),
 		})
+	}
+	return snapshot
+}
+
+func bucketReplicationSnapshot(values map[string]BucketReplicationConfig) []any {
+	if len(values) == 0 {
+		return nil
+	}
+
+	buckets := make([]string, 0, len(values))
+	for bucket := range values {
+		buckets = append(buckets, bucket)
+	}
+	sort.Strings(buckets)
+
+	snapshot := make([]any, 0, len(buckets))
+	for _, bucket := range buckets {
+		config := values[bucket]
+		snapshot = append(snapshot, map[string]any{
+			"bucket": bucket,
+			"role":   config.Role,
+			"rules":  bucketReplicationRulesSnapshot(config.Rules),
+		})
+	}
+	return snapshot
+}
+
+func bucketReplicationRulesSnapshot(rules []BucketReplicationRule) []any {
+	if len(rules) == 0 {
+		return nil
+	}
+
+	snapshot := make([]any, 0, len(rules))
+	for _, rule := range rules {
+		entry := map[string]any{
+			"id":     rule.ID,
+			"status": rule.Status,
+		}
+		if rule.Prefix != "" {
+			entry["prefix"] = rule.Prefix
+		}
+		dest := make(map[string]any)
+		if rule.Destination.Bucket != "" {
+			dest["bucket"] = rule.Destination.Bucket
+		}
+		if rule.Destination.StorageClass != "" {
+			dest["storage_class"] = rule.Destination.StorageClass
+		}
+		if len(dest) > 0 {
+			entry["destination"] = dest
+		}
+		snapshot = append(snapshot, entry)
 	}
 	return snapshot
 }
@@ -616,4 +743,38 @@ func deleteBucketBodyMap(values *map[string][]byte, bucket string) bool {
 
 func cloneBytes(values []byte) []byte {
 	return append([]byte(nil), values...)
+}
+
+func cloneBucketReplicationConfig(config BucketReplicationConfig) BucketReplicationConfig {
+	cloned := BucketReplicationConfig{
+		Role:  config.Role,
+		Rules: make([]BucketReplicationRule, len(config.Rules)),
+	}
+	for i := range config.Rules {
+		cloned.Rules[i] = config.Rules[i]
+	}
+	return cloned
+}
+
+func upsertBucketReplicationMap(values map[string]BucketReplicationConfig, bucket string, config BucketReplicationConfig) map[string]BucketReplicationConfig {
+	if values == nil {
+		values = make(map[string]BucketReplicationConfig)
+	}
+	values[bucket] = cloneBucketReplicationConfig(config)
+	return values
+}
+
+func deleteBucketReplicationMap(values *map[string]BucketReplicationConfig, bucket string) bool {
+	if values == nil || *values == nil {
+		return false
+	}
+	store := *values
+	if _, ok := store[bucket]; !ok {
+		return false
+	}
+	delete(store, bucket)
+	if len(store) == 0 {
+		*values = nil
+	}
+	return true
 }

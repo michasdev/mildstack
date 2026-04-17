@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/michasdev/mildstack/core/internal/s3/domain"
@@ -158,6 +159,8 @@ func validateState(state domain.State) error {
 		{name: "bucket cors", value: state.BucketCORS},
 		{name: "bucket acl", value: state.BucketACL},
 		{name: "bucket tagging", value: state.BucketTagging},
+		{name: "bucket notifications", value: state.BucketNotifications},
+		{name: "bucket logging", value: state.BucketLogging},
 	} {
 		for bucket := range entry.value {
 			if bucket == "" {
@@ -169,22 +172,40 @@ func validateState(state domain.State) error {
 		}
 	}
 
+	for bucket, config := range state.BucketReplication {
+		if bucket == "" {
+			return fmt.Errorf("invalid bucket replication entry: empty bucket")
+		}
+		if _, ok := buckets[bucket]; !ok {
+			return fmt.Errorf("invalid bucket replication %q: bucket not found", bucket)
+		}
+		if strings.TrimSpace(config.Role) == "" {
+			return fmt.Errorf("invalid bucket replication %q: empty role", bucket)
+		}
+		if len(config.Rules) == 0 {
+			return fmt.Errorf("invalid bucket replication %q: empty rules", bucket)
+		}
+	}
+
 	return nil
 }
 
 func normalizeState(state domain.State) domain.State {
 	normalized := domain.State{
-		Service:          state.Service,
-		Buckets:          make([]domain.Bucket, len(state.Buckets)),
-		Objects:          make([]domain.Object, len(state.Objects)),
-		BucketVersioning: make([]domain.BucketVersioning, len(state.BucketVersioning)),
-		VersionHistory:   make(domain.VersionHistory, len(state.VersionHistory)),
-		BucketPolicies:   cloneBucketBodies(state.BucketPolicies),
-		BucketEncryption: cloneBucketBodies(state.BucketEncryption),
-		BucketLifecycle:  cloneBucketBodies(state.BucketLifecycle),
-		BucketCORS:       cloneBucketBodies(state.BucketCORS),
-		BucketACL:        cloneBucketBodies(state.BucketACL),
-		BucketTagging:    cloneBucketBodies(state.BucketTagging),
+		Service:             state.Service,
+		Buckets:             make([]domain.Bucket, len(state.Buckets)),
+		Objects:             make([]domain.Object, len(state.Objects)),
+		BucketVersioning:    make([]domain.BucketVersioning, len(state.BucketVersioning)),
+		VersionHistory:      make(domain.VersionHistory, len(state.VersionHistory)),
+		BucketPolicies:      cloneBucketBodies(state.BucketPolicies),
+		BucketEncryption:    cloneBucketBodies(state.BucketEncryption),
+		BucketLifecycle:     cloneBucketBodies(state.BucketLifecycle),
+		BucketCORS:          cloneBucketBodies(state.BucketCORS),
+		BucketACL:           cloneBucketBodies(state.BucketACL),
+		BucketTagging:       cloneBucketBodies(state.BucketTagging),
+		BucketNotifications: cloneBucketBodies(state.BucketNotifications),
+		BucketLogging:       cloneBucketBodies(state.BucketLogging),
+		BucketReplication:   cloneBucketReplicationConfigs(state.BucketReplication),
 	}
 	copy(normalized.Buckets, state.Buckets)
 	copy(normalized.BucketVersioning, state.BucketVersioning)
@@ -305,6 +326,9 @@ func normalizeState(state domain.State) domain.State {
 	normalized.BucketCORS = pruneOrphanedBucketBodies(normalized.BucketCORS, normalized.Buckets)
 	normalized.BucketACL = pruneOrphanedBucketBodies(normalized.BucketACL, normalized.Buckets)
 	normalized.BucketTagging = pruneOrphanedBucketBodies(normalized.BucketTagging, normalized.Buckets)
+	normalized.BucketNotifications = pruneOrphanedBucketBodies(normalized.BucketNotifications, normalized.Buckets)
+	normalized.BucketLogging = pruneOrphanedBucketBodies(normalized.BucketLogging, normalized.Buckets)
+	normalized.BucketReplication = pruneOrphanedBucketReplication(normalized.BucketReplication, normalized.Buckets)
 
 	return normalized
 }
@@ -355,4 +379,61 @@ func pruneOrphanedBucketBodies(values map[string][]byte, buckets []domain.Bucket
 		return nil
 	}
 	return pruned
+}
+
+func cloneBucketReplicationConfigs(values map[string]domain.BucketReplicationConfig) map[string]domain.BucketReplicationConfig {
+	if len(values) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]domain.BucketReplicationConfig, len(values))
+	for bucket, config := range values {
+		cloned[bucket] = cloneBucketReplicationConfig(config)
+	}
+	return cloned
+}
+
+func pruneOrphanedBucketReplication(values map[string]domain.BucketReplicationConfig, buckets []domain.Bucket) map[string]domain.BucketReplicationConfig {
+	if len(values) == 0 {
+		return nil
+	}
+
+	known := make(map[string]struct{}, len(buckets))
+	for _, bucket := range buckets {
+		known[bucket.Name] = struct{}{}
+	}
+
+	pruned := make(map[string]domain.BucketReplicationConfig, len(values))
+	for bucket, config := range values {
+		if _, ok := known[bucket]; !ok {
+			continue
+		}
+		pruned[bucket] = normalizeBucketReplicationConfig(config)
+	}
+	if len(pruned) == 0 {
+		return nil
+	}
+	return pruned
+}
+
+func normalizeBucketReplicationConfig(config domain.BucketReplicationConfig) domain.BucketReplicationConfig {
+	config = cloneBucketReplicationConfig(config)
+	for i := range config.Rules {
+		if config.Rules[i].ID == "" {
+			config.Rules[i].ID = fmt.Sprintf("rule-%d", i+1)
+		}
+		if config.Rules[i].Status == "" {
+			config.Rules[i].Status = "Enabled"
+		}
+	}
+	return config
+}
+
+func cloneBucketReplicationConfig(config domain.BucketReplicationConfig) domain.BucketReplicationConfig {
+	cloned := domain.BucketReplicationConfig{
+		Role:  config.Role,
+		Rules: make([]domain.BucketReplicationRule, len(config.Rules)),
+	}
+	copy(cloned.Rules, config.Rules)
+	return cloned
 }

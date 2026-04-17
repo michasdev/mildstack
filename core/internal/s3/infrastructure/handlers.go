@@ -31,6 +31,13 @@ type Service interface {
 	GetBucketTagging(bucket string) ([]byte, error)
 	PutBucketTagging(bucket string, body []byte) ([]byte, error)
 	DeleteBucketTagging(bucket string) error
+	GetBucketNotification(bucket string) ([]byte, error)
+	PutBucketNotification(bucket string, body []byte) ([]byte, error)
+	GetBucketLogging(bucket string) ([]byte, error)
+	PutBucketLogging(bucket string, body []byte) ([]byte, error)
+	GetBucketReplication(bucket string) ([]byte, error)
+	PutBucketReplication(bucket string, body []byte) ([]byte, error)
+	DeleteBucketReplication(bucket string) error
 	ListObjects(bucket string) ([]domain.Object, error)
 	ListObjectsV1(request domain.ListObjectsV1Request) (domain.ListObjectsV1Result, error)
 	ListObjectsV2(request domain.ListObjectsV2Request) (domain.ListObjectsV2Result, error)

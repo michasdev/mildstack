@@ -9,7 +9,7 @@ func TestRoutesUseS3ServiceSegment(t *testing.T) {
 	t.Helper()
 
 	routes := Routes()
-	if got, want := len(routes), 35; got != want {
+	if got, want := len(routes), 42; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 
@@ -39,6 +39,13 @@ func TestRoutesUseS3ServiceSegment(t *testing.T) {
 		{method: "GET", path: "/s3/buckets/:bucket/tagging", name: "s3.buckets.tagging.show"},
 		{method: "PUT", path: "/s3/buckets/:bucket/tagging", name: "s3.buckets.tagging.update"},
 		{method: "DELETE", path: "/s3/buckets/:bucket/tagging", name: "s3.buckets.tagging.delete"},
+		{method: "GET", path: "/s3/buckets/:bucket/notification", name: "s3.buckets.notification.show"},
+		{method: "PUT", path: "/s3/buckets/:bucket/notification", name: "s3.buckets.notification.update"},
+		{method: "GET", path: "/s3/buckets/:bucket/logging", name: "s3.buckets.logging.show"},
+		{method: "PUT", path: "/s3/buckets/:bucket/logging", name: "s3.buckets.logging.update"},
+		{method: "GET", path: "/s3/buckets/:bucket/replication", name: "s3.buckets.replication.show"},
+		{method: "PUT", path: "/s3/buckets/:bucket/replication", name: "s3.buckets.replication.update"},
+		{method: "DELETE", path: "/s3/buckets/:bucket/replication", name: "s3.buckets.replication.delete"},
 		{method: "GET", path: "/s3/buckets/:bucket/versioning", name: "s3.buckets.versioning.show"},
 		{method: "PUT", path: "/s3/buckets/:bucket/versioning", name: "s3.buckets.versioning.update"},
 		{method: "GET", path: "/s3/buckets/:bucket/objects/versions", name: "s3.objects.versions"},

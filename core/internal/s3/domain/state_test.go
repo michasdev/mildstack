@@ -325,6 +325,17 @@ func TestStateBucketDeleteClearsGovernanceState(t *testing.T) {
 	state.SetBucketCORSConfig(bucket.Name, []byte("<CORSConfiguration/>"))
 	state.SetBucketACLConfig(bucket.Name, []byte("<AccessControlPolicy/>"))
 	state.SetBucketTaggingConfig(bucket.Name, []byte("<Tagging/>"))
+	state.SetBucketNotification(bucket.Name, []byte("<NotificationConfiguration/>"))
+	state.SetBucketLoggingConfig(bucket.Name, []byte("<BucketLoggingStatus/>"))
+	state.SetBucketReplicationConfig(bucket.Name, BucketReplicationConfig{
+		Role: "arn:aws:iam::123456789012:role/replication",
+		Rules: []BucketReplicationRule{
+			{
+				ID:     "rule-1",
+				Status: "Enabled",
+			},
+		},
+	})
 
 	if deleted := state.DeleteBucket(bucket.Name); !deleted {
 		t.Fatal("expected governed bucket delete to succeed")
@@ -347,6 +358,15 @@ func TestStateBucketDeleteClearsGovernanceState(t *testing.T) {
 	if _, ok := state.BucketTaggingConfig(bucket.Name); ok {
 		t.Fatal("expected bucket tagging to be cleared on delete")
 	}
+	if _, ok := state.BucketNotification(bucket.Name); ok {
+		t.Fatal("expected bucket notification to be cleared on delete")
+	}
+	if _, ok := state.BucketLoggingConfig(bucket.Name); ok {
+		t.Fatal("expected bucket logging to be cleared on delete")
+	}
+	if _, ok := state.BucketReplicationConfig(bucket.Name); ok {
+		t.Fatal("expected bucket replication to be cleared on delete")
+	}
 }
 
 func TestStateSnapshotCopiesGovernanceData(t *testing.T) {
@@ -356,6 +376,17 @@ func TestStateSnapshotCopiesGovernanceData(t *testing.T) {
 	bucket := state.UpsertBucket(Bucket{Name: "snapshot-governance", Region: "us-east-1"})
 	state.SetBucketPolicy(bucket.Name, []byte(`{"statement":"allow"}`))
 	state.SetBucketACLConfig(bucket.Name, []byte("<AccessControlPolicy/>"))
+	state.SetBucketNotification(bucket.Name, []byte("<NotificationConfiguration/>"))
+	state.SetBucketLoggingConfig(bucket.Name, []byte("<BucketLoggingStatus/>"))
+	state.SetBucketReplicationConfig(bucket.Name, BucketReplicationConfig{
+		Role: "arn:aws:iam::123456789012:role/replication",
+		Rules: []BucketReplicationRule{
+			{
+				ID:     "rule-1",
+				Status: "Enabled",
+			},
+		},
+	})
 
 	snapshot := state.Snapshot()
 	policies := snapshot["bucket_policies"].([]any)
@@ -367,5 +398,17 @@ func TestStateSnapshotCopiesGovernanceData(t *testing.T) {
 	}
 	if got, want := string(again), `{"statement":"allow"}`; got != want {
 		t.Fatalf("snapshot mutated live policy state: got %q want %q", got, want)
+	}
+
+	notifications := snapshot["bucket_notifications"].([]any)
+	notifications[0].(map[string]any)["body"] = "mutated"
+	if got, ok := state.BucketNotification(bucket.Name); !ok || string(got) != "<NotificationConfiguration/>" {
+		t.Fatalf("snapshot mutated live notification state: ok=%v body=%q", ok, string(got))
+	}
+
+	replication := snapshot["bucket_replication"].([]any)
+	replication[0].(map[string]any)["role"] = "mutated"
+	if got, ok := state.BucketReplicationConfig(bucket.Name); !ok || got.Role != "arn:aws:iam::123456789012:role/replication" {
+		t.Fatalf("snapshot mutated live replication state: ok=%v role=%q", ok, got.Role)
 	}
 }

@@ -48,6 +48,9 @@ func newService(state domain.State, repo Repository) *Service {
 				"delete objects",
 				"bucket versioning",
 				"multipart upload",
+				"bucket notification",
+				"bucket logging",
+				"bucket replication",
 			},
 			[]string{
 				"object locking",

@@ -140,6 +140,17 @@ func TestFSRepositoryPersistsGovernanceRoundTrip(t *testing.T) {
 	state.SetBucketCORSConfig(bucket.Name, []byte("<CORSConfiguration/>"))
 	state.SetBucketACLConfig(bucket.Name, []byte("<AccessControlPolicy/>"))
 	state.SetBucketTaggingConfig(bucket.Name, []byte("<Tagging/>"))
+	state.SetBucketNotification(bucket.Name, []byte("<NotificationConfiguration/>"))
+	state.SetBucketLoggingConfig(bucket.Name, []byte("<BucketLoggingStatus/>"))
+	state.SetBucketReplicationConfig(bucket.Name, domain.BucketReplicationConfig{
+		Role: "arn:aws:iam::123456789012:role/replication",
+		Rules: []domain.BucketReplicationRule{
+			{
+				ID:     "rule-1",
+				Status: "Enabled",
+			},
+		},
+	})
 
 	if err := repo.Save(state); err != nil {
 		t.Fatalf("save governed state: %v", err)
@@ -170,6 +181,18 @@ func TestFSRepositoryPersistsGovernanceRoundTrip(t *testing.T) {
 	}
 	if got, ok := loaded.BucketTaggingConfig(bucket.Name); !ok || string(got) != "<Tagging/>" {
 		t.Fatalf("unexpected loaded tagging: ok=%v body=%q", ok, string(got))
+	}
+	if got, ok := loaded.BucketNotification(bucket.Name); !ok || string(got) != "<NotificationConfiguration/>" {
+		t.Fatalf("unexpected loaded notification: ok=%v body=%q", ok, string(got))
+	}
+	if got, ok := loaded.BucketLoggingConfig(bucket.Name); !ok || string(got) != "<BucketLoggingStatus/>" {
+		t.Fatalf("unexpected loaded logging: ok=%v body=%q", ok, string(got))
+	}
+	if got, ok := loaded.BucketReplicationConfig(bucket.Name); !ok || got.Role != "arn:aws:iam::123456789012:role/replication" {
+		t.Fatalf("unexpected loaded replication: ok=%v role=%q", ok, got.Role)
+	}
+	if got, ok := loaded.BucketReplicationConfig(bucket.Name); !ok || len(got.Rules) != 1 || got.Rules[0].ID != "rule-1" {
+		t.Fatalf("unexpected loaded replication rules: ok=%v rules=%+v", ok, got.Rules)
 	}
 
 	if err := repo.Save(loaded); err != nil {
