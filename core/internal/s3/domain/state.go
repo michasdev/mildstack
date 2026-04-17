@@ -10,9 +10,17 @@ import (
 const StateKey = "services/s3"
 
 type State struct {
-	Service string
-	Buckets []Bucket
-	Objects []Object
+	Service          string
+	Buckets          []Bucket
+	Objects          []Object
+	BucketVersioning []BucketVersioning
+	VersionHistory   VersionHistory
+	BucketPolicies   map[string][]byte
+	BucketEncryption map[string][]byte
+	BucketLifecycle  map[string][]byte
+	BucketCORS       map[string][]byte
+	BucketACL        map[string][]byte
+	BucketTagging    map[string][]byte
 }
 
 type Bucket struct {
@@ -316,10 +324,15 @@ func (s *State) DeleteBucket(name string) bool {
 			return false
 		}
 	}
+	if hasVersionHistoryForBucket(s.VersionHistory, name) {
+		return false
+	}
 
 	for i := range s.Buckets {
 		if s.Buckets[i].Name == name {
 			s.Buckets = append(s.Buckets[:i], s.Buckets[i+1:]...)
+			s.removeBucketVersioning(name)
+			s.removeBucketGovernance(name)
 			return true
 		}
 	}
@@ -349,10 +362,48 @@ func (s State) Snapshot() map[string]any {
 		})
 	}
 
+	versioning := make([]any, 0, len(s.BucketVersioning))
+	for _, setting := range s.BucketVersioning {
+		versioning = append(versioning, map[string]any{
+			"bucket": setting.Bucket,
+			"status": setting.Status,
+		})
+	}
+
+	versionHistory := make([]any, 0, len(s.VersionHistory))
+	for _, record := range s.VersionHistory.sorted() {
+		versionHistory = append(versionHistory, map[string]any{
+			"bucket":           record.Bucket,
+			"key":              record.Key,
+			"version_id":       record.VersionID,
+			"sequence":         record.Sequence,
+			"is_delete_marker": record.IsDeleteMarker,
+			"size":             record.Size,
+			"content_type":     record.ContentType,
+			"etag":             record.ETag,
+			"last_modified":    record.LastModified,
+		})
+	}
+
+	policies := bucketBodySnapshot(s.BucketPolicies)
+	encryption := bucketBodySnapshot(s.BucketEncryption)
+	lifecycle := bucketBodySnapshot(s.BucketLifecycle)
+	cors := bucketBodySnapshot(s.BucketCORS)
+	acl := bucketBodySnapshot(s.BucketACL)
+	tagging := bucketBodySnapshot(s.BucketTagging)
+
 	return map[string]any{
-		"service": s.Service,
-		"buckets": buckets,
-		"objects": objects,
+		"service":           s.Service,
+		"buckets":           buckets,
+		"objects":           objects,
+		"bucket_versioning": versioning,
+		"version_history":   versionHistory,
+		"bucket_policies":   policies,
+		"bucket_encryption": encryption,
+		"bucket_lifecycle":  lifecycle,
+		"bucket_cors":       cors,
+		"bucket_acl":        acl,
+		"bucket_tagging":    tagging,
 	}
 }
 
@@ -422,4 +473,147 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (s State) BucketPolicy(bucket string) ([]byte, bool) {
+	return bucketBodyValue(s.BucketPolicies, bucket)
+}
+
+func (s State) BucketEncryptionConfig(bucket string) ([]byte, bool) {
+	return bucketBodyValue(s.BucketEncryption, bucket)
+}
+
+func (s State) BucketLifecycleConfig(bucket string) ([]byte, bool) {
+	return bucketBodyValue(s.BucketLifecycle, bucket)
+}
+
+func (s State) BucketCORSConfig(bucket string) ([]byte, bool) {
+	return bucketBodyValue(s.BucketCORS, bucket)
+}
+
+func (s State) BucketACLConfig(bucket string) ([]byte, bool) {
+	return bucketBodyValue(s.BucketACL, bucket)
+}
+
+func (s State) BucketTaggingConfig(bucket string) ([]byte, bool) {
+	return bucketBodyValue(s.BucketTagging, bucket)
+}
+
+func (s *State) SetBucketPolicy(bucket string, body []byte) []byte {
+	s.BucketPolicies = upsertBucketBodyMap(s.BucketPolicies, bucket, body)
+	return cloneBytes(body)
+}
+
+func (s *State) SetBucketEncryptionConfig(bucket string, body []byte) []byte {
+	s.BucketEncryption = upsertBucketBodyMap(s.BucketEncryption, bucket, body)
+	return cloneBytes(body)
+}
+
+func (s *State) SetBucketLifecycleConfig(bucket string, body []byte) []byte {
+	s.BucketLifecycle = upsertBucketBodyMap(s.BucketLifecycle, bucket, body)
+	return cloneBytes(body)
+}
+
+func (s *State) SetBucketCORSConfig(bucket string, body []byte) []byte {
+	s.BucketCORS = upsertBucketBodyMap(s.BucketCORS, bucket, body)
+	return cloneBytes(body)
+}
+
+func (s *State) SetBucketACLConfig(bucket string, body []byte) []byte {
+	s.BucketACL = upsertBucketBodyMap(s.BucketACL, bucket, body)
+	return cloneBytes(body)
+}
+
+func (s *State) SetBucketTaggingConfig(bucket string, body []byte) []byte {
+	s.BucketTagging = upsertBucketBodyMap(s.BucketTagging, bucket, body)
+	return cloneBytes(body)
+}
+
+func (s *State) DeleteBucketPolicy(bucket string) bool {
+	return deleteBucketBodyMap(&s.BucketPolicies, bucket)
+}
+
+func (s *State) DeleteBucketEncryptionConfig(bucket string) bool {
+	return deleteBucketBodyMap(&s.BucketEncryption, bucket)
+}
+
+func (s *State) DeleteBucketLifecycleConfig(bucket string) bool {
+	return deleteBucketBodyMap(&s.BucketLifecycle, bucket)
+}
+
+func (s *State) DeleteBucketCORSConfig(bucket string) bool {
+	return deleteBucketBodyMap(&s.BucketCORS, bucket)
+}
+
+func (s *State) DeleteBucketACLConfig(bucket string) bool {
+	return deleteBucketBodyMap(&s.BucketACL, bucket)
+}
+
+func (s *State) DeleteBucketTaggingConfig(bucket string) bool {
+	return deleteBucketBodyMap(&s.BucketTagging, bucket)
+}
+
+func (s *State) removeBucketGovernance(bucket string) {
+	s.DeleteBucketPolicy(bucket)
+	s.DeleteBucketEncryptionConfig(bucket)
+	s.DeleteBucketLifecycleConfig(bucket)
+	s.DeleteBucketCORSConfig(bucket)
+	s.DeleteBucketACLConfig(bucket)
+	s.DeleteBucketTaggingConfig(bucket)
+}
+
+func bucketBodySnapshot(values map[string][]byte) []any {
+	if len(values) == 0 {
+		return nil
+	}
+
+	buckets := make([]string, 0, len(values))
+	for bucket := range values {
+		buckets = append(buckets, bucket)
+	}
+	sort.Strings(buckets)
+
+	snapshot := make([]any, 0, len(buckets))
+	for _, bucket := range buckets {
+		snapshot = append(snapshot, map[string]any{
+			"bucket": bucket,
+			"body":   string(values[bucket]),
+		})
+	}
+	return snapshot
+}
+
+func bucketBodyValue(values map[string][]byte, bucket string) ([]byte, bool) {
+	body, ok := values[bucket]
+	if !ok {
+		return nil, false
+	}
+	return cloneBytes(body), true
+}
+
+func upsertBucketBodyMap(values map[string][]byte, bucket string, body []byte) map[string][]byte {
+	if values == nil {
+		values = make(map[string][]byte)
+	}
+	values[bucket] = cloneBytes(body)
+	return values
+}
+
+func deleteBucketBodyMap(values *map[string][]byte, bucket string) bool {
+	if values == nil || *values == nil {
+		return false
+	}
+	store := *values
+	if _, ok := store[bucket]; !ok {
+		return false
+	}
+	delete(store, bucket)
+	if len(store) == 0 {
+		*values = nil
+	}
+	return true
+}
+
+func cloneBytes(values []byte) []byte {
+	return append([]byte(nil), values...)
 }

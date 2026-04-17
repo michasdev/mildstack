@@ -2,15 +2,20 @@ package application
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/base64"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
+	"github.com/michasdev/mildstack/core/internal/s3/domain"
 )
 
 func TestServiceMetadataRoutesAndState(t *testing.T) {
@@ -39,10 +44,10 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := policy.ErrorPrefix, "s3"; got != want {
 		t.Fatalf("unexpected policy error prefix: got %q want %q", got, want)
 	}
-	if got, want := len(policy.Supported), 12; got != want {
+	if got, want := len(policy.Supported), 20; got != want {
 		t.Fatalf("unexpected supported count: got %d want %d", got, want)
 	}
-	if got, want := len(policy.Unsupported), 2; got != want {
+	if got, want := len(policy.Unsupported), 1; got != want {
 		t.Fatalf("unexpected unsupported count: got %d want %d", got, want)
 	}
 	policy.Supported[0] = "changed"
@@ -51,7 +56,19 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := again.Supported[0], "list buckets"; got != want {
 		t.Fatalf("policy supported slice was not copied: got %q want %q", got, want)
 	}
-	if got, want := again.Unsupported[0], "bucket versioning"; got != want {
+	if got, want := again.Supported[4], "bucket policy"; got != want {
+		t.Fatalf("expected policy to move into supported capabilities: got %q want %q", got, want)
+	}
+	if got, want := again.Supported[9], "bucket tagging"; got != want {
+		t.Fatalf("expected tagging to move into supported capabilities: got %q want %q", got, want)
+	}
+	if got, want := again.Supported[18], "bucket versioning"; got != want {
+		t.Fatalf("expected versioning to move into supported capabilities: got %q want %q", got, want)
+	}
+	if got, want := again.Supported[19], "multipart upload"; got != want {
+		t.Fatalf("expected multipart to move into supported capabilities: got %q want %q", got, want)
+	}
+	if got, want := again.Unsupported[0], "object locking"; got != want {
 		t.Fatalf("policy unsupported slice was not copied: got %q want %q", got, want)
 	}
 
@@ -64,53 +81,69 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if !ok {
 		t.Fatal("expected s3 service to be registered")
 	}
-	if got, want := len(entry.Routes), 11; got != want {
+	if got, want := len(entry.Routes), 35; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
-	if got, want := entry.Routes[0].Method, "DELETE"; got != want {
-		t.Fatalf("unexpected first route method: got %q want %q", got, want)
+	expectedRoutes := []struct {
+		method string
+		path   string
+		name   string
+	}{
+		{"GET", "/api/v1/runtime/services/s3/buckets", "s3.buckets.index"},
+		{"POST", "/api/v1/runtime/services/s3/buckets", "s3.buckets.create"},
+		{"HEAD", "/api/v1/runtime/services/s3/buckets/:bucket", "s3.buckets.head"},
+		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket", "s3.buckets.delete"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/policy", "s3.buckets.policy.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/policy", "s3.buckets.policy.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/policy", "s3.buckets.policy.delete"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/encryption", "s3.buckets.encryption.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/encryption", "s3.buckets.encryption.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/encryption", "s3.buckets.encryption.delete"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/lifecycle", "s3.buckets.lifecycle.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/lifecycle", "s3.buckets.lifecycle.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/lifecycle", "s3.buckets.lifecycle.delete"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/cors", "s3.buckets.cors.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/cors", "s3.buckets.cors.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/cors", "s3.buckets.cors.delete"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/acl", "s3.buckets.acl.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/acl", "s3.buckets.acl.update"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/tagging", "s3.buckets.tagging.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/tagging", "s3.buckets.tagging.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/tagging", "s3.buckets.tagging.delete"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/versioning", "s3.buckets.versioning.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/versioning", "s3.buckets.versioning.update"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/versions", "s3.objects.versions"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects", "s3.objects.list-v1"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/v2", "s3.objects.list-v2"},
+		{"POST", "/api/v1/runtime/services/s3/buckets/:bucket/objects/delete", "s3.objects.delete-batch"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object", "s3.objects.show"},
+		{"HEAD", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object", "s3.objects.head"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object", "s3.objects.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object", "s3.objects.delete"},
+		{"POST", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads", "s3.multipart.uploads.create"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads/:upload/parts/:part", "s3.multipart.uploads.part"},
+		{"POST", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads/:upload/complete", "s3.multipart.uploads.complete"},
+		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads/:upload", "s3.multipart.uploads.abort"},
 	}
-	if got, want := entry.Routes[0].Path, "/api/v1/runtime/services/s3/buckets/:bucket"; got != want {
-		t.Fatalf("unexpected first route path: got %q want %q", got, want)
-	}
-	if got, want := entry.Routes[1].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
-		t.Fatalf("unexpected second route path: got %q want %q", got, want)
-	}
-	if got, want := entry.Routes[2].Method, "GET"; got != want {
-		t.Fatalf("unexpected third route method: got %q want %q", got, want)
-	}
-	if got, want := entry.Routes[2].Path, "/api/v1/runtime/services/s3/buckets"; got != want {
-		t.Fatalf("unexpected third route path: got %q want %q", got, want)
-	}
-	if got, want := entry.Routes[3].Method, "GET"; got != want {
-		t.Fatalf("unexpected fourth route method: got %q want %q", got, want)
-	}
-	if got, want := entry.Routes[3].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects"; got != want {
-		t.Fatalf("unexpected fourth route path: got %q want %q", got, want)
-	}
-	if got, want := entry.Routes[5].Method, "GET"; got != want {
-		t.Fatalf("unexpected sixth route method: got %q want %q", got, want)
-	}
-	if got, want := entry.Routes[5].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/v2"; got != want {
-		t.Fatalf("unexpected sixth route path: got %q want %q", got, want)
-	}
-	if got, want := entry.Routes[8].Method, "POST"; got != want {
-		t.Fatalf("unexpected ninth route method: got %q want %q", got, want)
-	}
-	if got, want := entry.Routes[8].Path, "/api/v1/runtime/services/s3/buckets"; got != want {
-		t.Fatalf("unexpected ninth route path: got %q want %q", got, want)
-	}
-	if got, want := entry.Routes[9].Method, "POST"; got != want {
-		t.Fatalf("unexpected tenth route method: got %q want %q", got, want)
-	}
-	if got, want := entry.Routes[9].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/delete"; got != want {
-		t.Fatalf("unexpected tenth route path: got %q want %q", got, want)
-	}
-	if got, want := entry.Routes[10].Method, "PUT"; got != want {
-		t.Fatalf("unexpected last route method: got %q want %q", got, want)
-	}
-	if got, want := entry.Routes[10].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
-		t.Fatalf("unexpected last route path: got %q want %q", got, want)
+	sort.SliceStable(expectedRoutes, func(i, j int) bool {
+		if expectedRoutes[i].method != expectedRoutes[j].method {
+			return expectedRoutes[i].method < expectedRoutes[j].method
+		}
+		if expectedRoutes[i].path != expectedRoutes[j].path {
+			return expectedRoutes[i].path < expectedRoutes[j].path
+		}
+		return expectedRoutes[i].name < expectedRoutes[j].name
+	})
+	for i, expected := range expectedRoutes {
+		if got, want := entry.Routes[i].Method, expected.method; got != want {
+			t.Fatalf("unexpected route method at %d: got %q want %q", i, got, want)
+		}
+		if got, want := entry.Routes[i].Path, expected.path; got != want {
+			t.Fatalf("unexpected route path at %d: got %q want %q", i, got, want)
+		}
+		if got, want := entry.Routes[i].Name, expected.name; got != want {
+			t.Fatalf("unexpected route name at %d: got %q want %q", i, got, want)
+		}
 	}
 
 	hook := runtime.NewStateHook()
@@ -223,6 +256,272 @@ func TestServiceRealOperationsMutateState(t *testing.T) {
 	}
 }
 
+func TestServiceBucketGovernanceSubresourcesRoundTripAndCleanup(t *testing.T) {
+	t.Helper()
+
+	service := New()
+
+	bucket, err := service.CreateBucket("mildstack-governed", "us-east-1")
+	if err != nil {
+		t.Fatalf("create governed bucket: %v", err)
+	}
+
+	assertRoundTrip := func(name string, put func([]byte) ([]byte, error), get func() ([]byte, error), want string) {
+		t.Helper()
+
+		stored, err := put([]byte(want))
+		if err != nil {
+			t.Fatalf("put %s: %v", name, err)
+		}
+		if len(stored) > 0 {
+			stored[0] = 'X'
+		}
+
+		fetched, err := get()
+		if err != nil {
+			t.Fatalf("get %s: %v", name, err)
+		}
+		if got, want := string(fetched), want; got != want {
+			t.Fatalf("unexpected %s body: got %q want %q", name, got, want)
+		}
+	}
+
+	assertRoundTrip("policy",
+		func(body []byte) ([]byte, error) { return service.PutBucketPolicy(bucket.Name, body) },
+		func() ([]byte, error) { return service.GetBucketPolicy(bucket.Name) },
+		`{"Version":"2012-10-17"}`,
+	)
+	assertRoundTrip("encryption",
+		func(body []byte) ([]byte, error) { return service.PutBucketEncryption(bucket.Name, body) },
+		func() ([]byte, error) { return service.GetBucketEncryption(bucket.Name) },
+		"<ServerSideEncryptionConfiguration/>",
+	)
+	assertRoundTrip("lifecycle",
+		func(body []byte) ([]byte, error) { return service.PutBucketLifecycle(bucket.Name, body) },
+		func() ([]byte, error) { return service.GetBucketLifecycle(bucket.Name) },
+		"<LifecycleConfiguration/>",
+	)
+	assertRoundTrip("cors",
+		func(body []byte) ([]byte, error) { return service.PutBucketCORS(bucket.Name, body) },
+		func() ([]byte, error) { return service.GetBucketCORS(bucket.Name) },
+		"<CORSConfiguration/>",
+	)
+	assertRoundTrip("tagging",
+		func(body []byte) ([]byte, error) { return service.PutBucketTagging(bucket.Name, body) },
+		func() ([]byte, error) { return service.GetBucketTagging(bucket.Name) },
+		"<Tagging><TagSet><Tag><Key>env</Key><Value>dev</Value></Tag></TagSet></Tagging>",
+	)
+
+	aclDefault, err := service.GetBucketACL(bucket.Name)
+	if err != nil {
+		t.Fatalf("get default acl: %v", err)
+	}
+	if got, want := string(aclDefault), defaultBucketACLBody(bucket.Name); got != string(want) {
+		t.Fatalf("unexpected default ACL body: got %q want %q", got, string(want))
+	}
+
+	aclBody := []byte("<AccessControlPolicy><Owner><ID>owner</ID></Owner></AccessControlPolicy>")
+	storedACL, err := service.PutBucketACL(bucket.Name, aclBody)
+	if err != nil {
+		t.Fatalf("put acl: %v", err)
+	}
+	storedACL[0] = 'X'
+	againACL, err := service.GetBucketACL(bucket.Name)
+	if err != nil {
+		t.Fatalf("get stored acl: %v", err)
+	}
+	if got, want := string(againACL), string(aclBody); got != want {
+		t.Fatalf("unexpected stored ACL body: got %q want %q", got, want)
+	}
+
+	if err := service.DeleteBucket(bucket.Name); err != nil {
+		t.Fatalf("delete governed bucket: %v", err)
+	}
+
+	recreated, err := service.CreateBucket(bucket.Name, "us-east-1")
+	if err != nil {
+		t.Fatalf("recreate governed bucket: %v", err)
+	}
+	if recreated.Name != bucket.Name {
+		t.Fatalf("unexpected recreated bucket name: got %q want %q", recreated.Name, bucket.Name)
+	}
+	if _, err := service.GetBucketPolicy(bucket.Name); err == nil {
+		t.Fatal("expected cleared policy lookup to fail after bucket deletion")
+	}
+
+	rebuiltACL, err := service.GetBucketACL(bucket.Name)
+	if err != nil {
+		t.Fatalf("get recreated bucket acl: %v", err)
+	}
+	if got, want := string(rebuiltACL), string(defaultBucketACLBody(bucket.Name)); got != want {
+		t.Fatalf("expected ACL cleanup to restore default body: got %q want %q", got, want)
+	}
+}
+
+func TestServiceVersioningTracksHistoryAndDeleteMarkers(t *testing.T) {
+	t.Helper()
+
+	service := New()
+
+	versioned, err := service.CreateBucket("mildstack-versioned", "us-east-1")
+	if err != nil {
+		t.Fatalf("create versioned bucket: %v", err)
+	}
+	if _, err := service.PutBucketVersioning(versioned.Name, domain.VersioningEnabled); err != nil {
+		t.Fatalf("enable bucket versioning: %v", err)
+	}
+
+	if _, err := service.PutObject(versioned.Name, "release.txt", []byte("v1"), "text/plain"); err != nil {
+		t.Fatalf("put first version: %v", err)
+	}
+	if _, err := service.PutObject(versioned.Name, "release.txt", []byte("v2"), "text/plain"); err != nil {
+		t.Fatalf("put second version: %v", err)
+	}
+	if err := service.DeleteObject(versioned.Name, "release.txt"); err != nil {
+		t.Fatalf("delete versioned object: %v", err)
+	}
+
+	if _, err := service.GetObject(versioned.Name, "release.txt"); err == nil {
+		t.Fatal("expected deleted versioned object lookup to fail")
+	}
+
+	versions, err := service.ListObjectVersions(versioned.Name)
+	if err != nil {
+		t.Fatalf("list object versions: %v", err)
+	}
+	if got, want := len(versions.Versions), 3; got != want {
+		t.Fatalf("unexpected version count: got %d want %d", got, want)
+	}
+	if !versions.Versions[0].IsDeleteMarker {
+		t.Fatal("expected latest entry to be a delete marker")
+	}
+	if got, want := versions.Versions[1].ContentType, "text/plain"; got != want {
+		t.Fatalf("unexpected second version content type: got %q want %q", got, want)
+	}
+	if got, want := string(versions.Versions[1].Body), "v2"; got != want {
+		t.Fatalf("unexpected second version body: got %q want %q", got, want)
+	}
+	if got, want := string(versions.Versions[2].Body), "v1"; got != want {
+		t.Fatalf("unexpected first version body: got %q want %q", got, want)
+	}
+
+	plain, err := service.CreateBucket("mildstack-plain", "us-east-1")
+	if err != nil {
+		t.Fatalf("create plain bucket: %v", err)
+	}
+	if _, err := service.PutObject(plain.Name, "plain.txt", []byte("plain"), "text/plain"); err != nil {
+		t.Fatalf("put plain object: %v", err)
+	}
+	plainVersions, err := service.ListObjectVersions(plain.Name)
+	if err != nil {
+		t.Fatalf("list plain versions: %v", err)
+	}
+	if got, want := len(plainVersions.Versions), 1; got != want {
+		t.Fatalf("unexpected plain version count: got %d want %d", got, want)
+	}
+	if got, want := plainVersions.Versions[0].VersionID, domain.VersioningNull; got != want {
+		t.Fatalf("unexpected plain version id: got %q want %q", got, want)
+	}
+
+	if err := service.DeleteBucket(versioned.Name); err == nil {
+		t.Fatal("expected versioned bucket delete to fail while history exists")
+	} else if !strings.Contains(err.Error(), "BucketNotEmpty") {
+		t.Fatalf("expected BucketNotEmpty for versioned bucket delete, got %v", err)
+	}
+}
+
+func TestServiceMultipartLifecycleAssemblesAndAbortsCopySafely(t *testing.T) {
+	t.Helper()
+
+	service := New()
+
+	bucket, err := service.CreateBucket("mildstack-multipart", "us-east-1")
+	if err != nil {
+		t.Fatalf("create multipart bucket: %v", err)
+	}
+
+	upload, err := service.CreateMultipartUpload(bucket.Name, "archive.bin", "application/octet-stream", map[string]string{"owner": "ops"}, map[string]string{"cache-control": "no-cache"})
+	if err != nil {
+		t.Fatalf("create multipart upload: %v", err)
+	}
+	if got, want := len(service.multipartUploads), 1; got != want {
+		t.Fatalf("unexpected multipart registry size: got %d want %d", got, want)
+	}
+
+	firstBody := []byte("one")
+	secondBody := []byte("two")
+	partTwo, err := service.UploadPart(upload.UploadID, 2, secondBody)
+	if err != nil {
+		t.Fatalf("upload second part: %v", err)
+	}
+	if got, want := partTwo.PartNumber, 2; got != want {
+		t.Fatalf("unexpected second part number: got %d want %d", got, want)
+	}
+	secondBody[0] = 'X'
+	partOne, err := service.UploadPart(upload.UploadID, 1, firstBody)
+	if err != nil {
+		t.Fatalf("upload first part: %v", err)
+	}
+	if got, want := partOne.PartNumber, 1; got != want {
+		t.Fatalf("unexpected first part number: got %d want %d", got, want)
+	}
+	firstBody[0] = 'Y'
+
+	storedUpload := service.multipartUploads[upload.UploadID]
+	if got, want := string(storedUpload.Parts[0].Body), "two"; got != want {
+		t.Fatalf("stored second part body was aliased: got %q want %q", got, want)
+	}
+	if got, want := string(storedUpload.Parts[1].Body), "one"; got != want {
+		t.Fatalf("stored first part body was aliased: got %q want %q", got, want)
+	}
+
+	completed, err := service.CompleteMultipartUpload(upload.UploadID)
+	if err != nil {
+		t.Fatalf("complete multipart upload: %v", err)
+	}
+	if got, want := string(completed.Body), "onetwo"; got != want {
+		t.Fatalf("unexpected assembled body: got %q want %q", got, want)
+	}
+	if got, want := completed.Size, int64(len("onetwo")); got != want {
+		t.Fatalf("unexpected assembled size: got %d want %d", got, want)
+	}
+	if got, want := completed.ETag, expectedMultipartETag("one", "two"); got != want {
+		t.Fatalf("unexpected assembled etag: got %q want %q", got, want)
+	}
+	if got, want := completed.ContentType, "application/octet-stream"; got != want {
+		t.Fatalf("unexpected assembled content type: got %q want %q", got, want)
+	}
+	if got, want := len(service.multipartUploads), 0; got != want {
+		t.Fatalf("expected multipart registry to be cleared after completion, got %d entries", got)
+	}
+
+	completed.Body[0] = 'O'
+	fetched, err := service.GetObject(bucket.Name, "archive.bin")
+	if err != nil {
+		t.Fatalf("get completed object: %v", err)
+	}
+	if got, want := string(fetched.Body), "onetwo"; got != want {
+		t.Fatalf("completed object body was aliased: got %q want %q", got, want)
+	}
+
+	abortedUpload, err := service.CreateMultipartUpload(bucket.Name, "aborted.bin", "text/plain", nil, nil)
+	if err != nil {
+		t.Fatalf("create aborted upload: %v", err)
+	}
+	if _, err := service.UploadPart(abortedUpload.UploadID, 1, []byte("abort")); err != nil {
+		t.Fatalf("upload aborted part: %v", err)
+	}
+	if err := service.AbortMultipartUpload(abortedUpload.UploadID); err != nil {
+		t.Fatalf("abort multipart upload: %v", err)
+	}
+	if got, want := len(service.multipartUploads), 0; got != want {
+		t.Fatalf("expected multipart registry to be empty after abort, got %d entries", got)
+	}
+	if _, err := service.CompleteMultipartUpload(abortedUpload.UploadID); err == nil {
+		t.Fatal("expected completing an aborted upload to fail")
+	}
+}
+
 func TestServiceBucketCatalogFollowsAWSSemantics(t *testing.T) {
 	t.Helper()
 
@@ -267,6 +566,16 @@ func TestServiceBucketCatalogFollowsAWSSemantics(t *testing.T) {
 	if _, err := service.HeadBucket("mildstack-logs"); err == nil {
 		t.Fatal("expected deleted bucket head to fail")
 	}
+}
+
+func expectedMultipartETag(parts ...string) string {
+	digests := make([]byte, 0, len(parts)*md5.Size)
+	for _, part := range parts {
+		sum := md5.Sum([]byte(part))
+		digests = append(digests, sum[:]...)
+	}
+	final := md5.Sum(digests)
+	return `"` + hex.EncodeToString(final[:]) + `-` + fmt.Sprint(len(parts)) + `"`
 }
 
 func TestServiceRejectsInvalidAndMissingRequests(t *testing.T) {

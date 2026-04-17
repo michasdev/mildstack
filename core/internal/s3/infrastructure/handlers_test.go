@@ -172,6 +172,12 @@ func TestHandlersSurfaceServiceErrors(t *testing.T) {
 	if _, err := handlers.DeleteBucket(infrastructure.DeleteBucketRequest{Name: "missing"}); err == nil {
 		t.Fatal("expected missing bucket delete to fail")
 	}
+	if _, err := handlers.GetBucketVersioning(infrastructure.GetBucketVersioningRequest{Bucket: "missing"}); err == nil {
+		t.Fatal("expected missing bucket versioning lookup to fail")
+	}
+	if _, err := handlers.PutBucketVersioning(infrastructure.PutBucketVersioningRequest{Bucket: "missing", Status: "Enabled"}); err == nil {
+		t.Fatal("expected missing bucket versioning update to fail")
+	}
 	if _, err := handlers.ListObjects(infrastructure.ListObjectsRequest{Bucket: "missing"}); err == nil {
 		t.Fatal("expected missing bucket listing to fail")
 	}
@@ -191,6 +197,18 @@ func TestHandlersSurfaceServiceErrors(t *testing.T) {
 	}
 	if _, err := handlers.DeleteObject(infrastructure.DeleteObjectRequest{Bucket: "mildstack-assets", Key: "missing"}); err != nil {
 		t.Fatalf("expected delete on missing key to succeed: %v", err)
+	}
+	if _, err := handlers.CreateMultipartUpload(infrastructure.CreateMultipartUploadRequest{Bucket: "missing", Key: "key"}); err == nil {
+		t.Fatal("expected multipart create on missing bucket to fail")
+	}
+	if _, err := handlers.UploadPart(infrastructure.UploadPartRequest{UploadID: "missing", PartNumber: 1, Body: []byte("x")}); err == nil {
+		t.Fatal("expected upload part on missing upload to fail")
+	}
+	if _, err := handlers.CompleteMultipartUpload(infrastructure.CompleteMultipartUploadRequest{UploadID: "missing"}); err == nil {
+		t.Fatal("expected multipart complete on missing upload to fail")
+	}
+	if _, err := handlers.AbortMultipartUpload(infrastructure.AbortMultipartUploadRequest{UploadID: "missing"}); err == nil {
+		t.Fatal("expected multipart abort on missing upload to fail")
 	}
 }
 
@@ -335,5 +353,366 @@ func TestHandlersExposeListVariantsAndBatchDeleteDeterministically(t *testing.T)
 	}
 	if got, want := remaining.Objects[0].Key, "charlie.txt"; got != want {
 		t.Fatalf("unexpected remaining key: got %q want %q", got, want)
+	}
+}
+
+func TestHandlersVersioningLifecycleIsCopySafe(t *testing.T) {
+	t.Helper()
+
+	service := application.New()
+	handlers := infrastructure.NewHandlers(service)
+
+	createResp, err := handlers.CreateBucket(infrastructure.CreateBucketRequest{
+		Name:   "mildstack-versioned",
+		Region: "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+
+	if _, err := handlers.PutBucketVersioning(infrastructure.PutBucketVersioningRequest{
+		Bucket: createResp.Bucket.Name,
+		Status: "Enabled",
+	}); err != nil {
+		t.Fatalf("enable versioning: %v", err)
+	}
+
+	versioningResp, err := handlers.GetBucketVersioning(infrastructure.GetBucketVersioningRequest{
+		Bucket: createResp.Bucket.Name,
+	})
+	if err != nil {
+		t.Fatalf("get versioning: %v", err)
+	}
+	if got, want := versioningResp.Versioning.Status, "Enabled"; got != want {
+		t.Fatalf("unexpected versioning status: got %q want %q", got, want)
+	}
+
+	if _, err := handlers.PutObject(infrastructure.PutObjectRequest{
+		Bucket:      createResp.Bucket.Name,
+		Key:         "release.txt",
+		Body:        []byte("v1"),
+		ContentType: "text/plain",
+	}); err != nil {
+		t.Fatalf("put first version: %v", err)
+	}
+	if _, err := handlers.PutObject(infrastructure.PutObjectRequest{
+		Bucket:      createResp.Bucket.Name,
+		Key:         "release.txt",
+		Body:        []byte("v2"),
+		ContentType: "text/plain",
+	}); err != nil {
+		t.Fatalf("put second version: %v", err)
+	}
+	if _, err := handlers.DeleteObject(infrastructure.DeleteObjectRequest{
+		Bucket: createResp.Bucket.Name,
+		Key:    "release.txt",
+	}); err != nil {
+		t.Fatalf("delete versioned object: %v", err)
+	}
+
+	versions, err := handlers.ListObjectVersions(infrastructure.ListObjectVersionsRequest{
+		Bucket: createResp.Bucket.Name,
+	})
+	if err != nil {
+		t.Fatalf("list object versions: %v", err)
+	}
+	if got, want := len(versions.Versions), 3; got != want {
+		t.Fatalf("unexpected version count: got %d want %d", got, want)
+	}
+	if !versions.Versions[0].IsDeleteMarker || !versions.Versions[0].IsLatest {
+		t.Fatal("expected latest version entry to be a delete marker")
+	}
+	if got, want := versions.Versions[1].ContentType, "text/plain"; got != want {
+		t.Fatalf("unexpected second version content type: got %q want %q", got, want)
+	}
+	versions.Versions[1].ContentType = "mutated"
+	again, err := handlers.ListObjectVersions(infrastructure.ListObjectVersionsRequest{
+		Bucket: createResp.Bucket.Name,
+	})
+	if err != nil {
+		t.Fatalf("list object versions again: %v", err)
+	}
+	if got, want := again.Versions[1].ContentType, "text/plain"; got != want {
+		t.Fatalf("version payload was not copied: got %q want %q", got, want)
+	}
+}
+
+func TestHandlersMultipartLifecycleIsCopySafe(t *testing.T) {
+	t.Helper()
+
+	service := application.New()
+	handlers := infrastructure.NewHandlers(service)
+
+	createResp, err := handlers.CreateBucket(infrastructure.CreateBucketRequest{
+		Name:   "mildstack-multipart",
+		Region: "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+
+	uploadResp, err := handlers.CreateMultipartUpload(infrastructure.CreateMultipartUploadRequest{
+		Bucket:      createResp.Bucket.Name,
+		Key:         "archive.bin",
+		ContentType: "application/octet-stream",
+	})
+	if err != nil {
+		t.Fatalf("create multipart upload: %v", err)
+	}
+	if got, want := uploadResp.Upload.ContentType, "application/octet-stream"; got != want {
+		t.Fatalf("unexpected multipart content type: got %q want %q", got, want)
+	}
+
+	secondPart, err := handlers.UploadPart(infrastructure.UploadPartRequest{
+		UploadID:   uploadResp.Upload.UploadID,
+		PartNumber: 2,
+		Body:       []byte("two"),
+	})
+	if err != nil {
+		t.Fatalf("upload second part: %v", err)
+	}
+	if got, want := secondPart.Part.PartNumber, 2; got != want {
+		t.Fatalf("unexpected second part number: got %d want %d", got, want)
+	}
+
+	firstPartBody := []byte("one")
+	if _, err := handlers.UploadPart(infrastructure.UploadPartRequest{
+		UploadID:   uploadResp.Upload.UploadID,
+		PartNumber: 1,
+		Body:       firstPartBody,
+	}); err != nil {
+		t.Fatalf("upload first part: %v", err)
+	}
+	firstPartBody[0] = 'X'
+
+	completeResp, err := handlers.CompleteMultipartUpload(infrastructure.CompleteMultipartUploadRequest{
+		UploadID: uploadResp.Upload.UploadID,
+	})
+	if err != nil {
+		t.Fatalf("complete multipart upload: %v", err)
+	}
+	if got, want := string(completeResp.Object.Body), "onetwo"; got != want {
+		t.Fatalf("unexpected assembled multipart body: got %q want %q", got, want)
+	}
+	if got, want := completeResp.Object.Size, int64(len("onetwo")); got != want {
+		t.Fatalf("unexpected assembled multipart size: got %d want %d", got, want)
+	}
+	completeResp.Object.Body[0] = 'O'
+	againObject, err := handlers.GetObject(infrastructure.GetObjectRequest{
+		Bucket: createResp.Bucket.Name,
+		Key:    "archive.bin",
+	})
+	if err != nil {
+		t.Fatalf("get completed object: %v", err)
+	}
+	if got, want := string(againObject.Object.Body), "onetwo"; got != want {
+		t.Fatalf("multipart completion response was aliased: got %q want %q", got, want)
+	}
+
+	abortedResp, err := handlers.CreateMultipartUpload(infrastructure.CreateMultipartUploadRequest{
+		Bucket: createResp.Bucket.Name,
+		Key:    "aborted.bin",
+	})
+	if err != nil {
+		t.Fatalf("create multipart upload for abort: %v", err)
+	}
+	if _, err := handlers.UploadPart(infrastructure.UploadPartRequest{
+		UploadID:   abortedResp.Upload.UploadID,
+		PartNumber: 1,
+		Body:       []byte("abort"),
+	}); err != nil {
+		t.Fatalf("upload aborted part: %v", err)
+	}
+	if _, err := handlers.AbortMultipartUpload(infrastructure.AbortMultipartUploadRequest{
+		UploadID: abortedResp.Upload.UploadID,
+	}); err != nil {
+		t.Fatalf("abort multipart upload: %v", err)
+	}
+	if _, err := handlers.CompleteMultipartUpload(infrastructure.CompleteMultipartUploadRequest{
+		UploadID: abortedResp.Upload.UploadID,
+	}); err == nil {
+		t.Fatal("expected completing an aborted upload to fail")
+	}
+}
+
+func TestHandlersBucketGovernanceLifecycleIsCopySafe(t *testing.T) {
+	t.Helper()
+
+	service := application.New()
+	handlers := infrastructure.NewHandlers(service)
+
+	createResp, err := handlers.CreateBucket(infrastructure.CreateBucketRequest{
+		Name:   "mildstack-governed",
+		Region: "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+
+	assertRoundTrip := func(name string, put func([]byte) ([]byte, error), get func() ([]byte, error), want string) {
+		t.Helper()
+
+		stored, err := put([]byte(want))
+		if err != nil {
+			t.Fatalf("put %s: %v", name, err)
+		}
+		if len(stored) > 0 {
+			stored[0] = 'X'
+		}
+
+		fetched, err := get()
+		if err != nil {
+			t.Fatalf("get %s: %v", name, err)
+		}
+		if got, want := string(fetched), want; got != want {
+			t.Fatalf("unexpected %s body: got %q want %q", name, got, want)
+		}
+	}
+
+	assertRoundTrip("policy",
+		func(body []byte) ([]byte, error) {
+			resp, err := handlers.PutBucketPolicy(infrastructure.PutBucketPolicyRequest{Bucket: createResp.Bucket.Name, Body: body})
+			if err != nil {
+				return nil, err
+			}
+			return resp.Policy.Body, nil
+		},
+		func() ([]byte, error) {
+			resp, err := handlers.GetBucketPolicy(infrastructure.GetBucketPolicyRequest{Bucket: createResp.Bucket.Name})
+			if err != nil {
+				return nil, err
+			}
+			return resp.Policy.Body, nil
+		},
+		`{"Version":"2012-10-17"}`,
+	)
+	assertRoundTrip("encryption",
+		func(body []byte) ([]byte, error) {
+			resp, err := handlers.PutBucketEncryption(infrastructure.PutBucketEncryptionRequest{Bucket: createResp.Bucket.Name, Body: body})
+			if err != nil {
+				return nil, err
+			}
+			return resp.Encryption.Body, nil
+		},
+		func() ([]byte, error) {
+			resp, err := handlers.GetBucketEncryption(infrastructure.GetBucketEncryptionRequest{Bucket: createResp.Bucket.Name})
+			if err != nil {
+				return nil, err
+			}
+			return resp.Encryption.Body, nil
+		},
+		"<ServerSideEncryptionConfiguration/>",
+	)
+	assertRoundTrip("lifecycle",
+		func(body []byte) ([]byte, error) {
+			resp, err := handlers.PutBucketLifecycle(infrastructure.PutBucketLifecycleRequest{Bucket: createResp.Bucket.Name, Body: body})
+			if err != nil {
+				return nil, err
+			}
+			return resp.Lifecycle.Body, nil
+		},
+		func() ([]byte, error) {
+			resp, err := handlers.GetBucketLifecycle(infrastructure.GetBucketLifecycleRequest{Bucket: createResp.Bucket.Name})
+			if err != nil {
+				return nil, err
+			}
+			return resp.Lifecycle.Body, nil
+		},
+		"<LifecycleConfiguration/>",
+	)
+	assertRoundTrip("cors",
+		func(body []byte) ([]byte, error) {
+			resp, err := handlers.PutBucketCORS(infrastructure.PutBucketCORSRequest{Bucket: createResp.Bucket.Name, Body: body})
+			if err != nil {
+				return nil, err
+			}
+			return resp.CORS.Body, nil
+		},
+		func() ([]byte, error) {
+			resp, err := handlers.GetBucketCORS(infrastructure.GetBucketCORSRequest{Bucket: createResp.Bucket.Name})
+			if err != nil {
+				return nil, err
+			}
+			return resp.CORS.Body, nil
+		},
+		"<CORSConfiguration/>",
+	)
+	assertRoundTrip("tagging",
+		func(body []byte) ([]byte, error) {
+			resp, err := handlers.PutBucketTagging(infrastructure.PutBucketTaggingRequest{Bucket: createResp.Bucket.Name, Body: body})
+			if err != nil {
+				return nil, err
+			}
+			return resp.Tagging.Body, nil
+		},
+		func() ([]byte, error) {
+			resp, err := handlers.GetBucketTagging(infrastructure.GetBucketTaggingRequest{Bucket: createResp.Bucket.Name})
+			if err != nil {
+				return nil, err
+			}
+			return resp.Tagging.Body, nil
+		},
+		"<Tagging><TagSet><Tag><Key>env</Key><Value>dev</Value></Tag></TagSet></Tagging>",
+	)
+
+	aclDefault, err := handlers.GetBucketACL(infrastructure.GetBucketACLRequest{Bucket: createResp.Bucket.Name})
+	if err != nil {
+		t.Fatalf("get default acl: %v", err)
+	}
+	const expectedDefaultACL = `<?xml version="1.0" encoding="UTF-8"?>
+<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Owner>
+    <ID>owner-id</ID>
+    <DisplayName>mildstack</DisplayName>
+  </Owner>
+  <AccessControlList>
+    <Grant>
+      <Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser">
+        <ID>owner-id</ID>
+        <DisplayName>mildstack</DisplayName>
+      </Grantee>
+      <Permission>FULL_CONTROL</Permission>
+    </Grant>
+  </AccessControlList>
+</AccessControlPolicy>`
+	if got, want := string(aclDefault.ACL.Body), expectedDefaultACL; got != want {
+		t.Fatalf("unexpected default ACL body: got %q want %q", got, want)
+	}
+
+	aclResp, err := handlers.PutBucketACL(infrastructure.PutBucketACLRequest{
+		Bucket: createResp.Bucket.Name,
+		Body:   []byte("<AccessControlPolicy><Owner><ID>owner</ID></Owner></AccessControlPolicy>"),
+	})
+	if err != nil {
+		t.Fatalf("put acl: %v", err)
+	}
+	aclResp.ACL.Body[0] = 'X'
+
+	againACL, err := handlers.GetBucketACL(infrastructure.GetBucketACLRequest{Bucket: createResp.Bucket.Name})
+	if err != nil {
+		t.Fatalf("get stored acl: %v", err)
+	}
+	if got, want := string(againACL.ACL.Body), "<AccessControlPolicy><Owner><ID>owner</ID></Owner></AccessControlPolicy>"; got != want {
+		t.Fatalf("unexpected stored ACL body: got %q want %q", got, want)
+	}
+
+	if _, err := handlers.DeleteBucketPolicy(infrastructure.DeleteBucketPolicyRequest{Bucket: createResp.Bucket.Name}); err != nil {
+		t.Fatalf("delete policy: %v", err)
+	}
+	if _, err := handlers.DeleteBucketEncryption(infrastructure.DeleteBucketEncryptionRequest{Bucket: createResp.Bucket.Name}); err != nil {
+		t.Fatalf("delete encryption: %v", err)
+	}
+	if _, err := handlers.DeleteBucketLifecycle(infrastructure.DeleteBucketLifecycleRequest{Bucket: createResp.Bucket.Name}); err != nil {
+		t.Fatalf("delete lifecycle: %v", err)
+	}
+	if _, err := handlers.DeleteBucketCORS(infrastructure.DeleteBucketCORSRequest{Bucket: createResp.Bucket.Name}); err != nil {
+		t.Fatalf("delete cors: %v", err)
+	}
+	if _, err := handlers.DeleteBucketTagging(infrastructure.DeleteBucketTaggingRequest{Bucket: createResp.Bucket.Name}); err != nil {
+		t.Fatalf("delete tagging: %v", err)
+	}
+
+	if _, err := handlers.DeleteBucket(infrastructure.DeleteBucketRequest{Name: createResp.Bucket.Name}); err != nil {
+		t.Fatalf("delete governed bucket: %v", err)
 	}
 }

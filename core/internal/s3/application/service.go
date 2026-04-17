@@ -8,9 +8,10 @@ import (
 var _ orchestrator.Service = (*Service)(nil)
 
 type Service struct {
-	state  domain.State
-	policy orchestrator.EmulationPolicy
-	repo   Repository
+	state            domain.State
+	policy           orchestrator.EmulationPolicy
+	repo             Repository
+	multipartUploads map[string]domain.MultipartUpload
 }
 
 const defaultRegion = "us-east-1"
@@ -21,8 +22,9 @@ func New() *Service {
 
 func newService(state domain.State, repo Repository) *Service {
 	return &Service{
-		state: state,
-		repo:  repo,
+		state:            state,
+		repo:             repo,
+		multipartUploads: make(map[string]domain.MultipartUpload),
 		policy: orchestrator.NewEmulationPolicy(
 			orchestrator.FidelityExemplar,
 			[]string{
@@ -30,6 +32,12 @@ func newService(state domain.State, repo Repository) *Service {
 				"create bucket",
 				"head bucket",
 				"delete bucket",
+				"bucket policy",
+				"bucket encryption",
+				"bucket lifecycle",
+				"bucket CORS",
+				"bucket ACL",
+				"bucket tagging",
 				"list objects v1",
 				"list objects v2",
 				"get object",
@@ -38,9 +46,10 @@ func newService(state domain.State, repo Repository) *Service {
 				"copy object",
 				"delete object",
 				"delete objects",
+				"bucket versioning",
+				"multipart upload",
 			},
 			[]string{
-				"bucket versioning",
 				"object locking",
 			},
 			"s3",

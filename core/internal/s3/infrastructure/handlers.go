@@ -11,6 +11,26 @@ type Service interface {
 	CreateBucket(name, region string) (domain.Bucket, error)
 	HeadBucket(name string) (domain.Bucket, error)
 	DeleteBucket(name string) error
+	GetBucketVersioning(bucket string) (domain.BucketVersioning, error)
+	PutBucketVersioning(bucket, status string) (domain.BucketVersioning, error)
+	ListObjectVersions(bucket string) (domain.ListObjectVersionsResult, error)
+	GetBucketPolicy(bucket string) ([]byte, error)
+	PutBucketPolicy(bucket string, body []byte) ([]byte, error)
+	DeleteBucketPolicy(bucket string) error
+	GetBucketEncryption(bucket string) ([]byte, error)
+	PutBucketEncryption(bucket string, body []byte) ([]byte, error)
+	DeleteBucketEncryption(bucket string) error
+	GetBucketLifecycle(bucket string) ([]byte, error)
+	PutBucketLifecycle(bucket string, body []byte) ([]byte, error)
+	DeleteBucketLifecycle(bucket string) error
+	GetBucketCORS(bucket string) ([]byte, error)
+	PutBucketCORS(bucket string, body []byte) ([]byte, error)
+	DeleteBucketCORS(bucket string) error
+	GetBucketACL(bucket string) ([]byte, error)
+	PutBucketACL(bucket string, body []byte) ([]byte, error)
+	GetBucketTagging(bucket string) ([]byte, error)
+	PutBucketTagging(bucket string, body []byte) ([]byte, error)
+	DeleteBucketTagging(bucket string) error
 	ListObjects(bucket string) ([]domain.Object, error)
 	ListObjectsV1(request domain.ListObjectsV1Request) (domain.ListObjectsV1Result, error)
 	ListObjectsV2(request domain.ListObjectsV2Request) (domain.ListObjectsV2Result, error)
@@ -20,6 +40,10 @@ type Service interface {
 	CopyObject(bucket, key, sourceBucket, sourceKey string) (domain.Object, error)
 	DeleteObject(bucket, key string) error
 	DeleteObjects(request domain.DeleteObjectsRequest) (domain.DeleteObjectsResult, error)
+	CreateMultipartUpload(bucket, key, contentType string, metadata, preservedHeaders map[string]string) (domain.MultipartUpload, error)
+	UploadPart(uploadID string, partNumber int, body []byte) (domain.MultipartPart, error)
+	CompleteMultipartUpload(uploadID string) (domain.Object, error)
+	AbortMultipartUpload(uploadID string) error
 }
 
 type Handlers struct {
@@ -69,6 +93,248 @@ type DeleteBucketRequest struct {
 
 type DeleteBucketResponse struct {
 	Deleted bool `json:"deleted"`
+}
+
+type BucketVersioningPayload struct {
+	Bucket string `json:"bucket"`
+	Status string `json:"status"`
+}
+
+type VersionPayload struct {
+	Bucket         string    `json:"bucket"`
+	Key            string    `json:"key"`
+	VersionID      string    `json:"version_id"`
+	Sequence       int64     `json:"sequence"`
+	IsDeleteMarker bool      `json:"is_delete_marker,omitempty"`
+	IsLatest       bool      `json:"is_latest,omitempty"`
+	Size           int64     `json:"size"`
+	ContentType    string    `json:"content_type,omitempty"`
+	ETag           string    `json:"etag,omitempty"`
+	LastModified   time.Time `json:"last_modified,omitempty"`
+}
+
+type BucketBodyPayload struct {
+	Bucket string `json:"bucket"`
+	Body   []byte `json:"body,omitempty"`
+}
+
+type GetBucketVersioningRequest struct {
+	Bucket string
+}
+
+type GetBucketVersioningResponse struct {
+	Versioning BucketVersioningPayload `json:"versioning"`
+}
+
+type PutBucketVersioningRequest struct {
+	Bucket string
+	Status string
+}
+
+type PutBucketVersioningResponse struct {
+	Versioning BucketVersioningPayload `json:"versioning"`
+}
+
+type GetBucketPolicyRequest struct {
+	Bucket string
+}
+
+type GetBucketPolicyResponse struct {
+	Policy BucketBodyPayload `json:"policy"`
+}
+
+type PutBucketPolicyRequest struct {
+	Bucket string
+	Body   []byte
+}
+
+type PutBucketPolicyResponse struct {
+	Policy BucketBodyPayload `json:"policy"`
+}
+
+type DeleteBucketPolicyRequest struct {
+	Bucket string
+}
+
+type DeleteBucketPolicyResponse struct {
+	Deleted bool `json:"deleted"`
+}
+
+type GetBucketEncryptionRequest struct {
+	Bucket string
+}
+
+type GetBucketEncryptionResponse struct {
+	Encryption BucketBodyPayload `json:"encryption"`
+}
+
+type PutBucketEncryptionRequest struct {
+	Bucket string
+	Body   []byte
+}
+
+type PutBucketEncryptionResponse struct {
+	Encryption BucketBodyPayload `json:"encryption"`
+}
+
+type DeleteBucketEncryptionRequest struct {
+	Bucket string
+}
+
+type DeleteBucketEncryptionResponse struct {
+	Deleted bool `json:"deleted"`
+}
+
+type GetBucketLifecycleRequest struct {
+	Bucket string
+}
+
+type GetBucketLifecycleResponse struct {
+	Lifecycle BucketBodyPayload `json:"lifecycle"`
+}
+
+type PutBucketLifecycleRequest struct {
+	Bucket string
+	Body   []byte
+}
+
+type PutBucketLifecycleResponse struct {
+	Lifecycle BucketBodyPayload `json:"lifecycle"`
+}
+
+type DeleteBucketLifecycleRequest struct {
+	Bucket string
+}
+
+type DeleteBucketLifecycleResponse struct {
+	Deleted bool `json:"deleted"`
+}
+
+type GetBucketCORSRequest struct {
+	Bucket string
+}
+
+type GetBucketCORSResponse struct {
+	CORS BucketBodyPayload `json:"cors"`
+}
+
+type PutBucketCORSRequest struct {
+	Bucket string
+	Body   []byte
+}
+
+type PutBucketCORSResponse struct {
+	CORS BucketBodyPayload `json:"cors"`
+}
+
+type DeleteBucketCORSRequest struct {
+	Bucket string
+}
+
+type DeleteBucketCORSResponse struct {
+	Deleted bool `json:"deleted"`
+}
+
+type GetBucketACLRequest struct {
+	Bucket string
+}
+
+type GetBucketACLResponse struct {
+	ACL BucketBodyPayload `json:"acl"`
+}
+
+type PutBucketACLRequest struct {
+	Bucket string
+	Body   []byte
+}
+
+type PutBucketACLResponse struct {
+	ACL BucketBodyPayload `json:"acl"`
+}
+
+type GetBucketTaggingRequest struct {
+	Bucket string
+}
+
+type GetBucketTaggingResponse struct {
+	Tagging BucketBodyPayload `json:"tagging"`
+}
+
+type PutBucketTaggingRequest struct {
+	Bucket string
+	Body   []byte
+}
+
+type PutBucketTaggingResponse struct {
+	Tagging BucketBodyPayload `json:"tagging"`
+}
+
+type DeleteBucketTaggingRequest struct {
+	Bucket string
+}
+
+type DeleteBucketTaggingResponse struct {
+	Deleted bool `json:"deleted"`
+}
+
+type ListObjectVersionsRequest struct {
+	Bucket string
+}
+
+type ListObjectVersionsResponse struct {
+	Bucket   string           `json:"bucket"`
+	Versions []VersionPayload `json:"versions"`
+}
+
+type MultipartUploadPayload struct {
+	UploadID    string `json:"upload_id"`
+	Bucket      string `json:"bucket"`
+	Key         string `json:"key"`
+	ContentType string `json:"content_type"`
+}
+
+type MultipartPartPayload struct {
+	PartNumber int    `json:"part_number"`
+	ETag       string `json:"etag,omitempty"`
+	Size       int64  `json:"size"`
+}
+
+type CreateMultipartUploadRequest struct {
+	Bucket           string
+	Key              string
+	ContentType      string
+	Metadata         map[string]string
+	PreservedHeaders map[string]string
+}
+
+type CreateMultipartUploadResponse struct {
+	Upload MultipartUploadPayload `json:"upload"`
+}
+
+type UploadPartRequest struct {
+	UploadID   string
+	PartNumber int
+	Body       []byte
+}
+
+type UploadPartResponse struct {
+	Part MultipartPartPayload `json:"part"`
+}
+
+type CompleteMultipartUploadRequest struct {
+	UploadID string
+}
+
+type CompleteMultipartUploadResponse struct {
+	Object ObjectPayload `json:"object"`
+}
+
+type AbortMultipartUploadRequest struct {
+	UploadID string
+}
+
+type AbortMultipartUploadResponse struct {
+	Aborted bool `json:"aborted"`
 }
 
 type ListObjectsRequest struct {

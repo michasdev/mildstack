@@ -42,11 +42,12 @@ func (r *FSRepository) Load() (domain.State, error) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return domain.State{}, fmt.Errorf("decode %s: %w", stateFileName, err)
 	}
-	if err := validateState(state); err != nil {
+	normalized := normalizeState(state)
+	if err := validateState(normalized); err != nil {
 		return domain.State{}, err
 	}
 
-	return normalizeState(state), nil
+	return normalized, nil
 }
 
 func (r *FSRepository) Save(state domain.State) error {
@@ -115,16 +116,78 @@ func validateState(state domain.State) error {
 		}
 	}
 
+	for _, setting := range state.BucketVersioning {
+		if setting.Bucket == "" {
+			return fmt.Errorf("invalid bucket versioning entry: empty bucket")
+		}
+		if _, ok := buckets[setting.Bucket]; !ok {
+			return fmt.Errorf("invalid bucket versioning %q: bucket not found", setting.Bucket)
+		}
+		switch setting.Status {
+		case "", domain.VersioningEnabled, domain.VersioningSuspended:
+		default:
+			return fmt.Errorf("invalid bucket versioning %q: unsupported status %q", setting.Bucket, setting.Status)
+		}
+	}
+
+	for _, record := range state.VersionHistory {
+		if record.Bucket == "" || record.Key == "" {
+			return fmt.Errorf("invalid version record key %q for bucket %q", record.Key, record.Bucket)
+		}
+		if _, ok := buckets[record.Bucket]; !ok {
+			return fmt.Errorf("invalid version record %s/%s: bucket not found", record.Bucket, record.Key)
+		}
+		if record.VersionID == "" {
+			return fmt.Errorf("invalid version record %s/%s: empty version id", record.Bucket, record.Key)
+		}
+		if record.Sequence < 0 {
+			return fmt.Errorf("invalid version record %s/%s: negative sequence", record.Bucket, record.Key)
+		}
+		if !record.IsDeleteMarker && record.ContentType == "" {
+			return fmt.Errorf("invalid version record %s/%s: empty content type", record.Bucket, record.Key)
+		}
+	}
+
+	for _, entry := range []struct {
+		name  string
+		value map[string][]byte
+	}{
+		{name: "bucket policies", value: state.BucketPolicies},
+		{name: "bucket encryption", value: state.BucketEncryption},
+		{name: "bucket lifecycle", value: state.BucketLifecycle},
+		{name: "bucket cors", value: state.BucketCORS},
+		{name: "bucket acl", value: state.BucketACL},
+		{name: "bucket tagging", value: state.BucketTagging},
+	} {
+		for bucket := range entry.value {
+			if bucket == "" {
+				return fmt.Errorf("invalid %s entry: empty bucket", entry.name)
+			}
+			if _, ok := buckets[bucket]; !ok {
+				return fmt.Errorf("invalid %s %q: bucket not found", entry.name, bucket)
+			}
+		}
+	}
+
 	return nil
 }
 
 func normalizeState(state domain.State) domain.State {
 	normalized := domain.State{
-		Service: state.Service,
-		Buckets: make([]domain.Bucket, len(state.Buckets)),
-		Objects: make([]domain.Object, len(state.Objects)),
+		Service:          state.Service,
+		Buckets:          make([]domain.Bucket, len(state.Buckets)),
+		Objects:          make([]domain.Object, len(state.Objects)),
+		BucketVersioning: make([]domain.BucketVersioning, len(state.BucketVersioning)),
+		VersionHistory:   make(domain.VersionHistory, len(state.VersionHistory)),
+		BucketPolicies:   cloneBucketBodies(state.BucketPolicies),
+		BucketEncryption: cloneBucketBodies(state.BucketEncryption),
+		BucketLifecycle:  cloneBucketBodies(state.BucketLifecycle),
+		BucketCORS:       cloneBucketBodies(state.BucketCORS),
+		BucketACL:        cloneBucketBodies(state.BucketACL),
+		BucketTagging:    cloneBucketBodies(state.BucketTagging),
 	}
 	copy(normalized.Buckets, state.Buckets)
+	copy(normalized.BucketVersioning, state.BucketVersioning)
 	for i := range state.Objects {
 		normalized.Objects[i] = state.Objects[i]
 		normalized.Objects[i].Body = append([]byte(nil), state.Objects[i].Body...)
@@ -138,6 +201,22 @@ func normalizeState(state domain.State) domain.State {
 			normalized.Objects[i].PreservedHeaders = make(map[string]string, len(state.Objects[i].PreservedHeaders))
 			for key, value := range state.Objects[i].PreservedHeaders {
 				normalized.Objects[i].PreservedHeaders[key] = value
+			}
+		}
+	}
+	for i := range state.VersionHistory {
+		normalized.VersionHistory[i] = state.VersionHistory[i]
+		normalized.VersionHistory[i].Body = append([]byte(nil), state.VersionHistory[i].Body...)
+		if len(state.VersionHistory[i].Metadata) > 0 {
+			normalized.VersionHistory[i].Metadata = make(map[string]string, len(state.VersionHistory[i].Metadata))
+			for key, value := range state.VersionHistory[i].Metadata {
+				normalized.VersionHistory[i].Metadata[key] = value
+			}
+		}
+		if len(state.VersionHistory[i].PreservedHeaders) > 0 {
+			normalized.VersionHistory[i].PreservedHeaders = make(map[string]string, len(state.VersionHistory[i].PreservedHeaders))
+			for key, value := range state.VersionHistory[i].PreservedHeaders {
+				normalized.VersionHistory[i].PreservedHeaders[key] = value
 			}
 		}
 	}
@@ -160,6 +239,21 @@ func normalizeState(state domain.State) domain.State {
 		}
 		return normalized.Objects[i].Bucket < normalized.Objects[j].Bucket
 	})
+	sort.SliceStable(normalized.BucketVersioning, func(i, j int) bool {
+		return normalized.BucketVersioning[i].Bucket < normalized.BucketVersioning[j].Bucket
+	})
+	sort.SliceStable(normalized.VersionHistory, func(i, j int) bool {
+		if normalized.VersionHistory[i].Bucket == normalized.VersionHistory[j].Bucket {
+			if normalized.VersionHistory[i].Key == normalized.VersionHistory[j].Key {
+				if normalized.VersionHistory[i].Sequence == normalized.VersionHistory[j].Sequence {
+					return normalized.VersionHistory[i].VersionID < normalized.VersionHistory[j].VersionID
+				}
+				return normalized.VersionHistory[i].Sequence < normalized.VersionHistory[j].Sequence
+			}
+			return normalized.VersionHistory[i].Key < normalized.VersionHistory[j].Key
+		}
+		return normalized.VersionHistory[i].Bucket < normalized.VersionHistory[j].Bucket
+	})
 
 	for i := range normalized.Objects {
 		if len(normalized.Objects[i].Body) == 0 && normalized.Objects[i].Bucket == "mildstack-assets" && normalized.Objects[i].Key == "bootstrap.txt" {
@@ -178,6 +272,39 @@ func normalizeState(state domain.State) domain.State {
 			normalized.Objects[i].LastModified = fallbackBucketCreatedAt(normalized.Objects[i].Bucket)
 		}
 	}
+	for i := range normalized.VersionHistory {
+		sequence := normalized.VersionHistory[i].Sequence
+		if sequence == 0 {
+			sequence = int64(i) + 1
+			normalized.VersionHistory[i].Sequence = sequence
+		}
+		if normalized.VersionHistory[i].VersionID == "" {
+			normalized.VersionHistory[i].VersionID = fmt.Sprintf("v%020d", sequence)
+		}
+		if normalized.VersionHistory[i].LastModified.IsZero() {
+			normalized.VersionHistory[i].LastModified = fallbackBucketCreatedAt(normalized.VersionHistory[i].Bucket)
+		}
+		if !normalized.VersionHistory[i].IsDeleteMarker && normalized.VersionHistory[i].ContentType == "" {
+			normalized.VersionHistory[i].ContentType = "application/octet-stream"
+		}
+		if normalized.VersionHistory[i].IsDeleteMarker {
+			normalized.VersionHistory[i].ContentType = ""
+			normalized.VersionHistory[i].Size = 0
+			normalized.VersionHistory[i].Body = nil
+		} else if normalized.VersionHistory[i].Size == 0 {
+			normalized.VersionHistory[i].Size = int64(len(normalized.VersionHistory[i].Body))
+		}
+		if normalized.VersionHistory[i].ETag == "" && !normalized.VersionHistory[i].IsDeleteMarker {
+			normalized.VersionHistory[i].ETag = computeETag(normalized.VersionHistory[i].Body)
+		}
+	}
+
+	normalized.BucketPolicies = pruneOrphanedBucketBodies(normalized.BucketPolicies, normalized.Buckets)
+	normalized.BucketEncryption = pruneOrphanedBucketBodies(normalized.BucketEncryption, normalized.Buckets)
+	normalized.BucketLifecycle = pruneOrphanedBucketBodies(normalized.BucketLifecycle, normalized.Buckets)
+	normalized.BucketCORS = pruneOrphanedBucketBodies(normalized.BucketCORS, normalized.Buckets)
+	normalized.BucketACL = pruneOrphanedBucketBodies(normalized.BucketACL, normalized.Buckets)
+	normalized.BucketTagging = pruneOrphanedBucketBodies(normalized.BucketTagging, normalized.Buckets)
 
 	return normalized
 }
@@ -193,4 +320,39 @@ func fallbackBucketCreatedAt(name string) time.Time {
 	}
 
 	return time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+}
+
+func cloneBucketBodies(values map[string][]byte) map[string][]byte {
+	if len(values) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string][]byte, len(values))
+	for bucket, body := range values {
+		cloned[bucket] = append([]byte(nil), body...)
+	}
+	return cloned
+}
+
+func pruneOrphanedBucketBodies(values map[string][]byte, buckets []domain.Bucket) map[string][]byte {
+	if len(values) == 0 {
+		return nil
+	}
+
+	known := make(map[string]struct{}, len(buckets))
+	for _, bucket := range buckets {
+		known[bucket.Name] = struct{}{}
+	}
+
+	pruned := make(map[string][]byte, len(values))
+	for bucket, body := range values {
+		if _, ok := known[bucket]; !ok {
+			continue
+		}
+		pruned[bucket] = append([]byte(nil), body...)
+	}
+	if len(pruned) == 0 {
+		return nil
+	}
+	return pruned
 }

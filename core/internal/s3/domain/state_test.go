@@ -262,3 +262,110 @@ func TestStateListObjectPageUsesDeterministicDelimiterPagination(t *testing.T) {
 		t.Fatalf("common prefixes aliased live state: got %q want %q", got, want)
 	}
 }
+
+func TestStateVersionHistoryIsCopySafeAndDeterministic(t *testing.T) {
+	t.Helper()
+
+	state := NewState()
+	bucket := state.UpsertBucket(Bucket{Name: "versioned-bucket", Region: "us-west-2"})
+	state.SetBucketVersioning(bucket.Name, VersioningEnabled)
+
+	first := state.UpsertObject(Object{
+		Bucket:      bucket.Name,
+		Key:         "release.txt",
+		Body:        []byte("v1"),
+		Size:        2,
+		ContentType: "text/plain",
+	})
+	state.RecordObjectVersion(first)
+	second := state.UpsertObject(Object{
+		Bucket:      bucket.Name,
+		Key:         "release.txt",
+		Body:        []byte("v2"),
+		Size:        2,
+		ContentType: "text/plain",
+	})
+	state.RecordObjectVersion(second)
+	state.DeleteObject(bucket.Name, "release.txt")
+	state.RecordDeleteMarker(bucket.Name, "release.txt")
+
+	versions := state.ListObjectVersions(bucket.Name)
+	if got, want := len(versions), 3; got != want {
+		t.Fatalf("unexpected version count: got %d want %d", got, want)
+	}
+	if !versions[0].IsDeleteMarker {
+		t.Fatal("expected latest version entry to be a delete marker")
+	}
+	if got, want := string(versions[1].Body), "v2"; got != want {
+		t.Fatalf("unexpected second version body: got %q want %q", got, want)
+	}
+	if got, want := string(versions[2].Body), "v1"; got != want {
+		t.Fatalf("unexpected first version body: got %q want %q", got, want)
+	}
+
+	versions[1].Body[0] = 'X'
+	again := state.ListObjectVersions(bucket.Name)
+	if got, want := string(again[1].Body), "v2"; got != want {
+		t.Fatalf("version history was aliased: got %q want %q", got, want)
+	}
+
+	if deleted := state.DeleteBucket(bucket.Name); deleted {
+		t.Fatal("expected versioned bucket delete to fail while version history exists")
+	}
+}
+
+func TestStateBucketDeleteClearsGovernanceState(t *testing.T) {
+	t.Helper()
+
+	state := NewState()
+	bucket := state.UpsertBucket(Bucket{Name: "governed-bucket", Region: "us-west-2"})
+	state.SetBucketPolicy(bucket.Name, []byte(`{"statement":"allow"}`))
+	state.SetBucketEncryptionConfig(bucket.Name, []byte("<EncryptionConfiguration/>"))
+	state.SetBucketLifecycleConfig(bucket.Name, []byte("<LifecycleConfiguration/>"))
+	state.SetBucketCORSConfig(bucket.Name, []byte("<CORSConfiguration/>"))
+	state.SetBucketACLConfig(bucket.Name, []byte("<AccessControlPolicy/>"))
+	state.SetBucketTaggingConfig(bucket.Name, []byte("<Tagging/>"))
+
+	if deleted := state.DeleteBucket(bucket.Name); !deleted {
+		t.Fatal("expected governed bucket delete to succeed")
+	}
+	if _, ok := state.BucketPolicy(bucket.Name); ok {
+		t.Fatal("expected bucket policy to be cleared on delete")
+	}
+	if _, ok := state.BucketEncryptionConfig(bucket.Name); ok {
+		t.Fatal("expected bucket encryption to be cleared on delete")
+	}
+	if _, ok := state.BucketLifecycleConfig(bucket.Name); ok {
+		t.Fatal("expected bucket lifecycle to be cleared on delete")
+	}
+	if _, ok := state.BucketCORSConfig(bucket.Name); ok {
+		t.Fatal("expected bucket CORS to be cleared on delete")
+	}
+	if _, ok := state.BucketACLConfig(bucket.Name); ok {
+		t.Fatal("expected bucket ACL to be cleared on delete")
+	}
+	if _, ok := state.BucketTaggingConfig(bucket.Name); ok {
+		t.Fatal("expected bucket tagging to be cleared on delete")
+	}
+}
+
+func TestStateSnapshotCopiesGovernanceData(t *testing.T) {
+	t.Helper()
+
+	state := NewState()
+	bucket := state.UpsertBucket(Bucket{Name: "snapshot-governance", Region: "us-east-1"})
+	state.SetBucketPolicy(bucket.Name, []byte(`{"statement":"allow"}`))
+	state.SetBucketACLConfig(bucket.Name, []byte("<AccessControlPolicy/>"))
+
+	snapshot := state.Snapshot()
+	policies := snapshot["bucket_policies"].([]any)
+	policies[0].(map[string]any)["body"] = "mutated"
+
+	again, ok := state.BucketPolicy(bucket.Name)
+	if !ok {
+		t.Fatal("expected bucket policy to remain present")
+	}
+	if got, want := string(again), `{"statement":"allow"}`; got != want {
+		t.Fatalf("snapshot mutated live policy state: got %q want %q", got, want)
+	}
+}

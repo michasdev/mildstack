@@ -60,6 +60,130 @@ func TestFSRepositorySaveAndLoadAreDeterministic(t *testing.T) {
 	}
 }
 
+func TestFSRepositoryPersistsVersionHistoryRoundTrip(t *testing.T) {
+	t.Helper()
+
+	repo := NewFSRepository(t.TempDir())
+	state := domain.NewState()
+	bucket := state.UpsertBucket(domain.Bucket{Name: "history-bucket", Region: "us-west-2", CreatedAt: time.Date(2026, time.April, 17, 13, 0, 0, 0, time.UTC)})
+	state.SetBucketVersioning(bucket.Name, domain.VersioningEnabled)
+
+	first := state.UpsertObject(domain.Object{
+		Bucket:      bucket.Name,
+		Key:         "artifact.txt",
+		Body:        []byte("v1"),
+		Size:        2,
+		ContentType: "text/plain",
+	})
+	state.RecordObjectVersion(first)
+	second := state.UpsertObject(domain.Object{
+		Bucket:      bucket.Name,
+		Key:         "artifact.txt",
+		Body:        []byte("v2"),
+		Size:        2,
+		ContentType: "text/plain",
+	})
+	state.RecordObjectVersion(second)
+	state.DeleteObject(bucket.Name, "artifact.txt")
+	state.RecordDeleteMarker(bucket.Name, "artifact.txt")
+
+	if err := repo.Save(state); err != nil {
+		t.Fatalf("save versioned state: %v", err)
+	}
+	firstBytes, err := os.ReadFile(filepath.Join(repo.storagePath, stateFileName))
+	if err != nil {
+		t.Fatalf("read versioned state file: %v", err)
+	}
+
+	loaded, err := repo.Load()
+	if err != nil {
+		t.Fatalf("load versioned state: %v", err)
+	}
+	if got, want := loaded.BucketVersioningStatus(bucket.Name), domain.VersioningEnabled; got != want {
+		t.Fatalf("unexpected loaded versioning status: got %q want %q", got, want)
+	}
+	versions := loaded.ListObjectVersions(bucket.Name)
+	if got, want := len(versions), 3; got != want {
+		t.Fatalf("unexpected loaded version count: got %d want %d", got, want)
+	}
+	if !versions[0].IsDeleteMarker {
+		t.Fatal("expected loaded delete marker to remain latest")
+	}
+	if got, want := string(versions[1].Body), "v2"; got != want {
+		t.Fatalf("unexpected loaded second version body: got %q want %q", got, want)
+	}
+	if got, want := string(versions[2].Body), "v1"; got != want {
+		t.Fatalf("unexpected loaded first version body: got %q want %q", got, want)
+	}
+
+	if err := repo.Save(loaded); err != nil {
+		t.Fatalf("resave loaded versioned state: %v", err)
+	}
+	secondBytes, err := os.ReadFile(filepath.Join(repo.storagePath, stateFileName))
+	if err != nil {
+		t.Fatalf("read resaved versioned state file: %v", err)
+	}
+	if string(firstBytes) != string(secondBytes) {
+		t.Fatal("expected versioned state round-trip to stay deterministic")
+	}
+}
+
+func TestFSRepositoryPersistsGovernanceRoundTrip(t *testing.T) {
+	t.Helper()
+
+	repo := NewFSRepository(t.TempDir())
+	state := domain.NewState()
+	bucket := state.UpsertBucket(domain.Bucket{Name: "governed-bucket", Region: "us-west-2", CreatedAt: time.Date(2026, time.April, 17, 14, 0, 0, 0, time.UTC)})
+	state.SetBucketPolicy(bucket.Name, []byte(`{"statement":"allow"}`))
+	state.SetBucketEncryptionConfig(bucket.Name, []byte("<EncryptionConfiguration/>"))
+	state.SetBucketLifecycleConfig(bucket.Name, []byte("<LifecycleConfiguration/>"))
+	state.SetBucketCORSConfig(bucket.Name, []byte("<CORSConfiguration/>"))
+	state.SetBucketACLConfig(bucket.Name, []byte("<AccessControlPolicy/>"))
+	state.SetBucketTaggingConfig(bucket.Name, []byte("<Tagging/>"))
+
+	if err := repo.Save(state); err != nil {
+		t.Fatalf("save governed state: %v", err)
+	}
+	firstBytes, err := os.ReadFile(filepath.Join(repo.storagePath, stateFileName))
+	if err != nil {
+		t.Fatalf("read governed state file: %v", err)
+	}
+
+	loaded, err := repo.Load()
+	if err != nil {
+		t.Fatalf("load governed state: %v", err)
+	}
+	if got, ok := loaded.BucketPolicy(bucket.Name); !ok || string(got) != `{"statement":"allow"}` {
+		t.Fatalf("unexpected loaded policy: ok=%v body=%q", ok, string(got))
+	}
+	if got, ok := loaded.BucketEncryptionConfig(bucket.Name); !ok || string(got) != "<EncryptionConfiguration/>" {
+		t.Fatalf("unexpected loaded encryption: ok=%v body=%q", ok, string(got))
+	}
+	if got, ok := loaded.BucketLifecycleConfig(bucket.Name); !ok || string(got) != "<LifecycleConfiguration/>" {
+		t.Fatalf("unexpected loaded lifecycle: ok=%v body=%q", ok, string(got))
+	}
+	if got, ok := loaded.BucketCORSConfig(bucket.Name); !ok || string(got) != "<CORSConfiguration/>" {
+		t.Fatalf("unexpected loaded cors: ok=%v body=%q", ok, string(got))
+	}
+	if got, ok := loaded.BucketACLConfig(bucket.Name); !ok || string(got) != "<AccessControlPolicy/>" {
+		t.Fatalf("unexpected loaded acl: ok=%v body=%q", ok, string(got))
+	}
+	if got, ok := loaded.BucketTaggingConfig(bucket.Name); !ok || string(got) != "<Tagging/>" {
+		t.Fatalf("unexpected loaded tagging: ok=%v body=%q", ok, string(got))
+	}
+
+	if err := repo.Save(loaded); err != nil {
+		t.Fatalf("resave governed state: %v", err)
+	}
+	secondBytes, err := os.ReadFile(filepath.Join(repo.storagePath, stateFileName))
+	if err != nil {
+		t.Fatalf("read resaved governed state file: %v", err)
+	}
+	if string(firstBytes) != string(secondBytes) {
+		t.Fatal("expected governed state round-trip to stay deterministic")
+	}
+}
+
 func TestFSRepositoryLoadTreatsMissingFileAsNewState(t *testing.T) {
 	t.Helper()
 
