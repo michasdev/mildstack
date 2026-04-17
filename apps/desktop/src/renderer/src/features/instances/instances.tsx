@@ -40,7 +40,10 @@ const badgesVariants = {
     errored: "error",
 }
 
+import { useNavigate } from "react-router";
+
 const InstancesPage = () => {
+    const navigate = useNavigate();
     return (
         <>
             <Frame className="w-full">
@@ -49,11 +52,15 @@ const InstancesPage = () => {
                     <FrameDescription>Manage your MildStack instances</FrameDescription>
                 </FrameHeader>
                 {instances.map((instance) => (
-                    <FramePanel className={cn("cursor-pointer", {
-                        "border-success": instance.status === "running",
-                        "border-border": instance.status === "paused",
-                        "border-destructive": instance.status === "errored",
-                    })} key={instance.id}>
+                    <FramePanel 
+                        className={cn("cursor-pointer", {
+                            "border-success": instance.status === "running",
+                            "border-border": instance.status === "paused",
+                            "border-destructive": instance.status === "errored",
+                        })} 
+                        key={instance.id}
+                        onClick={() => navigate(`/instances/${instance.id}/resources`)}
+                    >
                         <div className="flex flex-row gap-2 w-full">
                             <div className="flex flex-col gap-1 w-full">
                                 <div className="flex flex-row justify-between w-full gap-2 items-center">
@@ -63,8 +70,8 @@ const InstancesPage = () => {
                                         <Badge variant="info">Port {instance.port}</Badge>
                                     </div>
                                     <div className="flex flex-row gap-2 items-center">
-                                        <Button variant="ghost" size="icon"><PlayIcon /></Button>
-                                        <Button variant="ghost" size="icon"><PauseIcon /></Button>
+                                        <Button variant="ghost" size="icon" onClick={(e) => e.stopPropagation()}><PlayIcon /></Button>
+                                        <Button variant="ghost" size="icon" onClick={(e) => e.stopPropagation()}><PauseIcon /></Button>
                                     </div>
                                 </div>
                                 <div className="flex flex-col">

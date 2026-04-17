@@ -11,6 +11,7 @@ export const router = createHashRouter([
     children: [
       { index: true, element: <InstancesPage /> },
       { path: '/resources', element: <ResourcesPage /> },
+      { path: '/instances/:instanceid/resources', element: <ResourcesPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },
