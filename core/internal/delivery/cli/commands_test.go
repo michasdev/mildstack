@@ -22,6 +22,10 @@ func (s *commandServiceStub) Stop(context.Context) error { return nil }
 
 func (s *commandServiceStub) Metadata() orchestrator.Metadata { return s.metadata }
 
+func (s *commandServiceStub) Policy() orchestrator.EmulationPolicy {
+	return orchestrator.NewEmulationPolicy(orchestrator.FidelityExemplar, nil, nil, "cli-test")
+}
+
 func (s *commandServiceStub) RegisterRoutes(orchestrator.RouteRegistrar) error { return nil }
 
 func (s *commandServiceStub) AttachState(orchestrator.StateHook) error { return nil }

@@ -22,6 +22,10 @@ func (s *stubService) Metadata() orchestrator.Metadata {
 	return orchestrator.Metadata{Name: s.name}
 }
 
+func (s *stubService) Policy() orchestrator.EmulationPolicy {
+	return orchestrator.NewEmulationPolicy(orchestrator.FidelityExemplar, nil, nil, "composition-test")
+}
+
 func (s *stubService) RegisterRoutes(orchestrator.RouteRegistrar) error { return nil }
 
 func (s *stubService) AttachState(orchestrator.StateHook) error { return nil }
