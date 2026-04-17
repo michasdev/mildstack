@@ -1,5 +1,7 @@
 package domain
 
+import "sort"
+
 const StateKey = "services/s3"
 
 type State struct {
@@ -37,9 +39,95 @@ func NewState() State {
 	}
 }
 
+func (s State) ListBuckets() []Bucket {
+	buckets := make([]Bucket, len(s.Buckets))
+	copy(buckets, s.Buckets)
+	sort.SliceStable(buckets, func(i, j int) bool {
+		return buckets[i].Name < buckets[j].Name
+	})
+	return buckets
+}
+
+func (s State) ListObjects(bucket string) []Object {
+	objects := make([]Object, 0, len(s.Objects))
+	for _, object := range s.Objects {
+		if object.Bucket == bucket {
+			objects = append(objects, object)
+		}
+	}
+
+	sort.SliceStable(objects, func(i, j int) bool {
+		return objects[i].Key < objects[j].Key
+	})
+	return objects
+}
+
+func (s State) Bucket(name string) (Bucket, bool) {
+	for _, bucket := range s.Buckets {
+		if bucket.Name == name {
+			return bucket, true
+		}
+	}
+	return Bucket{}, false
+}
+
+func (s State) Object(bucket, key string) (Object, bool) {
+	for _, object := range s.Objects {
+		if object.Bucket == bucket && object.Key == key {
+			return object, true
+		}
+	}
+	return Object{}, false
+}
+
+func (s State) HasBucket(name string) bool {
+	_, ok := s.Bucket(name)
+	return ok
+}
+
+func (s State) HasObject(bucket, key string) bool {
+	_, ok := s.Object(bucket, key)
+	return ok
+}
+
+func (s *State) UpsertBucket(name, region string) Bucket {
+	for i := range s.Buckets {
+		if s.Buckets[i].Name == name {
+			s.Buckets[i].Region = region
+			return s.Buckets[i]
+		}
+	}
+
+	bucket := Bucket{Name: name, Region: region}
+	s.Buckets = append(s.Buckets, bucket)
+	return bucket
+}
+
+func (s *State) UpsertObject(object Object) Object {
+	for i := range s.Objects {
+		if s.Objects[i].Bucket == object.Bucket && s.Objects[i].Key == object.Key {
+			s.Objects[i] = object
+			return s.Objects[i]
+		}
+	}
+
+	s.Objects = append(s.Objects, object)
+	return object
+}
+
+func (s *State) DeleteObject(bucket, key string) bool {
+	for i := range s.Objects {
+		if s.Objects[i].Bucket == bucket && s.Objects[i].Key == key {
+			s.Objects = append(s.Objects[:i], s.Objects[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
 func (s State) Snapshot() map[string]any {
 	buckets := make([]any, 0, len(s.Buckets))
-	for _, bucket := range s.Buckets {
+	for _, bucket := range s.ListBuckets() {
 		buckets = append(buckets, map[string]any{
 			"name":   bucket.Name,
 			"region": bucket.Region,
@@ -47,7 +135,7 @@ func (s State) Snapshot() map[string]any {
 	}
 
 	objects := make([]any, 0, len(s.Objects))
-	for _, object := range s.Objects {
+	for _, object := range s.sortedObjects() {
 		objects = append(objects, map[string]any{
 			"bucket":       object.Bucket,
 			"key":          object.Key,
@@ -61,4 +149,16 @@ func (s State) Snapshot() map[string]any {
 		"buckets": buckets,
 		"objects": objects,
 	}
+}
+
+func (s State) sortedObjects() []Object {
+	objects := make([]Object, len(s.Objects))
+	copy(objects, s.Objects)
+	sort.SliceStable(objects, func(i, j int) bool {
+		if objects[i].Bucket == objects[j].Bucket {
+			return objects[i].Key < objects[j].Key
+		}
+		return objects[i].Bucket < objects[j].Bucket
+	})
+	return objects
 }

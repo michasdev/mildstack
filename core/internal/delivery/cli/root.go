@@ -26,6 +26,7 @@ func NewRootCommand(out, err io.Writer, commands Commands) *cobra.Command {
 	}
 	cmd.SetOut(out)
 	cmd.SetErr(err)
+	cmd.PersistentFlags().Bool("json", false, "Render machine-readable JSON output")
 
 	for _, subcommand := range []*cobra.Command{commands.Serve, commands.Status, commands.Ports, commands.UI} {
 		if subcommand != nil {

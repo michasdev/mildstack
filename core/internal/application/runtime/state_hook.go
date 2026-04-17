@@ -1,6 +1,9 @@
 package runtime
 
-import "sync"
+import (
+	"reflect"
+	"sync"
+)
 
 // MemoryStateHook is a mutex-backed in-memory implementation of the shared
 // service state hook contract.
@@ -40,19 +43,66 @@ func (h *MemoryStateHook) Get(key string) (any, bool) {
 }
 
 func cloneStateValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		copied := make(map[string]any, len(typed))
-		for key, item := range typed {
-			copied[key] = cloneStateValue(item)
+	if value == nil {
+		return nil
+	}
+
+	cloned := cloneReflectValue(reflect.ValueOf(value))
+	if !cloned.IsValid() {
+		return nil
+	}
+
+	return cloned.Interface()
+}
+
+func cloneReflectValue(value reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return reflect.Value{}
+	}
+
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
 		}
-		return copied
-	case []any:
-		copied := make([]any, len(typed))
-		for i, item := range typed {
-			copied[i] = cloneStateValue(item)
+		cloned := cloneReflectValue(value.Elem())
+		if !cloned.IsValid() {
+			return reflect.Zero(value.Type())
 		}
-		return copied
+		out := reflect.New(value.Type()).Elem()
+		out.Set(cloned)
+		return out
+	case reflect.Map:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		out := reflect.MakeMapWithSize(value.Type(), value.Len())
+		for _, key := range value.MapKeys() {
+			out.SetMapIndex(key, cloneReflectValue(value.MapIndex(key)))
+		}
+		return out
+	case reflect.Slice:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		out := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for i := 0; i < value.Len(); i++ {
+			out.Index(i).Set(cloneReflectValue(value.Index(i)))
+		}
+		return out
+	case reflect.Array:
+		out := reflect.New(value.Type()).Elem()
+		for i := 0; i < value.Len(); i++ {
+			out.Index(i).Set(cloneReflectValue(value.Index(i)))
+		}
+		return out
+	case reflect.Ptr:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		out := reflect.New(value.Elem().Type())
+		out.Elem().Set(cloneReflectValue(value.Elem()))
+		return out
 	default:
 		return value
 	}

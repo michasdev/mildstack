@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	"github.com/michasdev/mildstack/core/internal/composition"
+	"github.com/michasdev/mildstack/core/internal/delivery/cli"
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
 )
 
@@ -23,10 +27,54 @@ func TestRegisterServiceRoutesRegistersS3BeforeServing(t *testing.T) {
 	if !ok {
 		t.Fatal("expected s3 service to be registered")
 	}
-	if got, want := len(entry.Routes), 4; got != want {
+	if got, want := len(entry.Routes), 6; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 	if got, want := entry.Routes[2].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects"; got != want {
 		t.Fatalf("unexpected object route path: got %q want %q", got, want)
+	}
+}
+
+func TestInstanceRegistrarPersistsAndReleasesActiveInstance(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	configDir := t.TempDir()
+	paths := runtime.ResolvePathsFrom(homeDir, configDir)
+	storage := cli.NewStorage(paths, runtime.LegacyBaseDirFrom(homeDir, configDir))
+	manager := runtime.NewWithPorts(nil, nil)
+	registrar := instanceRegistrar{manager: manager, storage: storage}
+
+	if err := registrar.Serve(context.Background(), 9090); err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+
+	ports, err := storage.LoadActivePorts()
+	if err != nil {
+		t.Fatalf("load active ports: %v", err)
+	}
+	if len(ports) != 1 || ports[0] != 9090 {
+		t.Fatalf("unexpected active ports: %#v", ports)
+	}
+
+	savedPath := filepath.Join(paths.InstancesDir, "saved", "9090.json")
+	if _, err := os.Stat(savedPath); err != nil {
+		t.Fatalf("expected saved instance file: %v", err)
+	}
+
+	if err := registrar.Release(context.Background(), 9090); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	ports, err = storage.LoadActivePorts()
+	if err != nil {
+		t.Fatalf("load active ports after release: %v", err)
+	}
+	if len(ports) != 0 {
+		t.Fatalf("expected no active ports after release, got %#v", ports)
+	}
+
+	if _, err := os.Stat(savedPath); err != nil {
+		t.Fatalf("saved instance should remain available: %v", err)
 	}
 }

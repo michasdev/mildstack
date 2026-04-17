@@ -117,3 +117,20 @@ func TestManagerRejectsDuplicatePorts(t *testing.T) {
 		t.Fatal("expected duplicate port error")
 	}
 }
+
+func TestNewWithPortsSeedsSnapshot(t *testing.T) {
+	t.Helper()
+
+	manager := NewWithPorts(nil, []int{9090, 8080})
+	snapshot := manager.Snapshot(context.Background())
+
+	if got, want := snapshot.Ports, []int{8080, 9090}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("unexpected seeded ports: %v", got)
+	}
+
+	snapshot.Ports[0] = 7777
+	again := manager.Snapshot(context.Background())
+	if got, want := again.Ports, []int{8080, 9090}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("unexpected restored seeded ports: %v", got)
+	}
+}

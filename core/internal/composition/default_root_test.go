@@ -64,13 +64,22 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	if !ok {
 		t.Fatal("expected s3 service to be registered")
 	}
-	if got, want := len(s3Entry.Routes), 4; got != want {
+	if got, want := len(s3Entry.Routes), 6; got != want {
 		t.Fatalf("unexpected s3 route count: got %d want %d", got, want)
 	}
-	if got, want := s3Entry.Routes[0].Path, "/api/v1/runtime/services/s3/buckets"; got != want {
+	if got, want := s3Entry.Routes[0].Method, "DELETE"; got != want {
+		t.Fatalf("unexpected s3 first route method: got %q want %q", got, want)
+	}
+	if got, want := s3Entry.Routes[0].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
 		t.Fatalf("unexpected s3 first route path: got %q want %q", got, want)
 	}
-	if got, want := s3Entry.Routes[3].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
+	if got, want := s3Entry.Routes[1].Path, "/api/v1/runtime/services/s3/buckets"; got != want {
+		t.Fatalf("unexpected s3 second route path: got %q want %q", got, want)
+	}
+	if got, want := s3Entry.Routes[5].Method, "PUT"; got != want {
+		t.Fatalf("unexpected s3 last route method: got %q want %q", got, want)
+	}
+	if got, want := s3Entry.Routes[5].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
 		t.Fatalf("unexpected s3 last route path: got %q want %q", got, want)
 	}
 
@@ -78,13 +87,22 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	if !ok {
 		t.Fatal("expected dynamodb service to be registered")
 	}
-	if got, want := len(dynamoEntry.Routes), 4; got != want {
+	if got, want := len(dynamoEntry.Routes), 5; got != want {
 		t.Fatalf("unexpected dynamodb route count: got %d want %d", got, want)
 	}
-	if got, want := dynamoEntry.Routes[0].Path, "/api/v1/runtime/services/dynamodb/tables"; got != want {
+	if got, want := dynamoEntry.Routes[0].Method, "DELETE"; got != want {
+		t.Fatalf("unexpected dynamodb first route method: got %q want %q", got, want)
+	}
+	if got, want := dynamoEntry.Routes[0].Path, "/api/v1/runtime/services/dynamodb/tables/:table/items/:item"; got != want {
 		t.Fatalf("unexpected dynamodb first route path: got %q want %q", got, want)
 	}
-	if got, want := dynamoEntry.Routes[3].Path, "/api/v1/runtime/services/dynamodb/tables/:table/items/:item"; got != want {
+	if got, want := dynamoEntry.Routes[1].Path, "/api/v1/runtime/services/dynamodb/tables"; got != want {
+		t.Fatalf("unexpected dynamodb second route path: got %q want %q", got, want)
+	}
+	if got, want := dynamoEntry.Routes[4].Method, "PUT"; got != want {
+		t.Fatalf("unexpected dynamodb last route method: got %q want %q", got, want)
+	}
+	if got, want := dynamoEntry.Routes[4].Path, "/api/v1/runtime/services/dynamodb/tables/:table/items/:item"; got != want {
 		t.Fatalf("unexpected dynamodb last route path: got %q want %q", got, want)
 	}
 

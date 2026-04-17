@@ -71,7 +71,7 @@ func (p Presenter) Ports() []int {
 
 func (p Presenter) PresentPorts() string {
 	if len(p.ports) == 0 {
-		return ""
+		return "No ports registered\n"
 	}
 
 	var buf bytes.Buffer
@@ -88,10 +88,37 @@ func (p Presenter) PresentReadiness() string {
 	return "not_ready"
 }
 
+func (p Presenter) StatusPayload() statusPayload {
+	return statusPayload{
+		State:    p.PresentReadiness(),
+		Services: cloneServices(p.services),
+		Ports:    append([]int(nil), p.ports...),
+	}
+}
+
+func (p Presenter) PortsPayload() portsPayload {
+	return portsPayload{
+		Ports: append([]int(nil), p.ports...),
+	}
+}
+
 func cloneMetadata(metadata []orchestrator.Metadata) []orchestrator.Metadata {
 	copied := make([]orchestrator.Metadata, len(metadata))
 	for i, item := range metadata {
 		copied[i] = orchestrator.Metadata{
+			Name:        item.Name,
+			Description: item.Description,
+			Version:     item.Version,
+			Tags:        append([]string(nil), item.Tags...),
+		}
+	}
+	return copied
+}
+
+func cloneServices(services []orchestrator.Metadata) []servicePayload {
+	copied := make([]servicePayload, len(services))
+	for i, item := range services {
+		copied[i] = servicePayload{
 			Name:        item.Name,
 			Description: item.Description,
 			Version:     item.Version,

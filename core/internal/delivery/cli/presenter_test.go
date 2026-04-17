@@ -42,7 +42,7 @@ func TestPresenterRendersEmptyAndErrorStates(t *testing.T) {
 	if got, want := PresentStatus(runtime.Snapshot{}), "Services:\n  (none)\nPorts:\n  (none)\n"; got != want {
 		t.Fatalf("unexpected empty status output:\n got %q\nwant %q", got, want)
 	}
-	if got, want := PresentPorts(nil), ""; got != want {
+	if got, want := PresentPorts(nil), "No ports registered\n"; got != want {
 		t.Fatalf("unexpected empty ports output:\n got %q\nwant %q", got, want)
 	}
 	if got, want := PresentReadiness(runtime.Snapshot{}), "not_ready"; got != want {

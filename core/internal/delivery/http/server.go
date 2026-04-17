@@ -13,6 +13,10 @@ type PortRegistrar interface {
 	Serve(context.Context, int) error
 }
 
+type PortReleaser interface {
+	Release(context.Context, int) error
+}
+
 type Server struct {
 	registrar PortRegistrar
 	router    *Router
@@ -49,6 +53,11 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.registrar.Serve(ctx, actualPort); err != nil {
 		_ = listener.Close()
 		return err
+	}
+	if releaser, ok := s.registrar.(PortReleaser); ok {
+		defer func() {
+			_ = releaser.Release(ctx, actualPort)
+		}()
 	}
 
 	s.server = &stdhttp.Server{

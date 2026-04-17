@@ -6,7 +6,7 @@ func TestRoutesUseDynamoDBServiceSegment(t *testing.T) {
 	t.Helper()
 
 	routes := Routes()
-	if got, want := len(routes), 4; got != want {
+	if got, want := len(routes), 5; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 
@@ -16,9 +16,10 @@ func TestRoutesUseDynamoDBServiceSegment(t *testing.T) {
 		name   string
 	}{
 		{method: "GET", path: "/dynamodb/tables", name: "dynamodb.tables.index"},
-		{method: "GET", path: "/dynamodb/tables/:table", name: "dynamodb.tables.show"},
-		{method: "GET", path: "/dynamodb/tables/:table/items", name: "dynamodb.items.index"},
+		{method: "POST", path: "/dynamodb/tables", name: "dynamodb.tables.create"},
 		{method: "GET", path: "/dynamodb/tables/:table/items/:item", name: "dynamodb.items.show"},
+		{method: "PUT", path: "/dynamodb/tables/:table/items/:item", name: "dynamodb.items.update"},
+		{method: "DELETE", path: "/dynamodb/tables/:table/items/:item", name: "dynamodb.items.delete"},
 	}
 
 	for i, route := range routes {

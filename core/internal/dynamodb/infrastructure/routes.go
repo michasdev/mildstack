@@ -10,19 +10,24 @@ func Routes() []orchestrator.Route {
 			Name:   "dynamodb.tables.index",
 		},
 		{
-			Method: "GET",
-			Path:   "/dynamodb/tables/:table",
-			Name:   "dynamodb.tables.show",
-		},
-		{
-			Method: "GET",
-			Path:   "/dynamodb/tables/:table/items",
-			Name:   "dynamodb.items.index",
+			Method: "POST",
+			Path:   "/dynamodb/tables",
+			Name:   "dynamodb.tables.create",
 		},
 		{
 			Method: "GET",
 			Path:   "/dynamodb/tables/:table/items/:item",
 			Name:   "dynamodb.items.show",
+		},
+		{
+			Method: "PUT",
+			Path:   "/dynamodb/tables/:table/items/:item",
+			Name:   "dynamodb.items.update",
+		},
+		{
+			Method: "DELETE",
+			Path:   "/dynamodb/tables/:table/items/:item",
+			Name:   "dynamodb.items.delete",
 		},
 	}
 }

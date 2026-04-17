@@ -10,9 +10,9 @@ func Routes() []orchestrator.Route {
 			Name:   "s3.buckets.index",
 		},
 		{
-			Method: "GET",
-			Path:   "/s3/buckets/:bucket",
-			Name:   "s3.buckets.show",
+			Method: "POST",
+			Path:   "/s3/buckets",
+			Name:   "s3.buckets.create",
 		},
 		{
 			Method: "GET",
@@ -23,6 +23,16 @@ func Routes() []orchestrator.Route {
 			Method: "GET",
 			Path:   "/s3/buckets/:bucket/objects/:object",
 			Name:   "s3.objects.show",
+		},
+		{
+			Method: "PUT",
+			Path:   "/s3/buckets/:bucket/objects/:object",
+			Name:   "s3.objects.update",
+		},
+		{
+			Method: "DELETE",
+			Path:   "/s3/buckets/:bucket/objects/:object",
+			Name:   "s3.objects.delete",
 		},
 	}
 }

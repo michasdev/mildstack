@@ -14,7 +14,12 @@ func NewStatusCommand(manager *runtime.Manager) *cobra.Command {
 		Short: "Show the runtime snapshot",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			snapshot := manager.Snapshot(context.Background())
-			fmt.Fprint(cmd.OutOrStdout(), RenderStatus(DefaultTheme(), NewPresenter(snapshot)))
+			presenter := NewPresenter(snapshot)
+			if resolveOutputMode(cmd) == OutputModeJSON {
+				fmt.Fprint(cmd.OutOrStdout(), RenderStatusJSON(presenter))
+				return nil
+			}
+			fmt.Fprint(cmd.OutOrStdout(), RenderStatus(DefaultTheme(), presenter))
 			return nil
 		},
 	}

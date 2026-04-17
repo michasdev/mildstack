@@ -14,13 +14,21 @@ import (
 
 func main() {
 	root := composition.DefaultRoot()
-	manager := runtime.New(root.Services)
+	paths := runtime.ResolvePaths()
+	homeDir, _ := os.UserHomeDir()
+	configDir, _ := os.UserConfigDir()
+	storage := cli.NewStorage(paths, runtime.LegacyBaseDirFrom(homeDir, configDir))
+	activePorts, err := storage.LoadActivePorts()
+	if err != nil {
+		panic(err)
+	}
+	manager := runtime.NewWithPorts(root.Services, activePorts)
 	httpServerFactory := func(port int) cli.HTTPServer {
 		router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
 		if err := registerServiceRoutes(router.Registrar(), root.Services); err != nil {
 			return failedHTTPServer{err: err}
 		}
-		return deliveryhttp.NewServer(manager, router, port)
+		return deliveryhttp.NewServer(instanceRegistrar{manager: manager, storage: storage}, router, port)
 	}
 	commands := cli.Commands{
 		Serve:  cli.NewServeCommand(manager, httpServerFactory),
@@ -32,6 +40,28 @@ func main() {
 	if err := cli.Execute(context.Background(), os.Stdout, os.Stderr, commands); err != nil {
 		os.Exit(1)
 	}
+}
+
+type instanceRegistrar struct {
+	manager *runtime.Manager
+	storage cli.Storage
+}
+
+func (r instanceRegistrar) Serve(ctx context.Context, port int) error {
+	if err := r.manager.Serve(ctx, port); err != nil {
+		return err
+	}
+	if err := r.storage.SaveSavedInstance(port); err != nil {
+		return err
+	}
+	if err := r.storage.SaveActiveInstance(port); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r instanceRegistrar) Release(_ context.Context, port int) error {
+	return r.storage.DeleteActiveInstance(port)
 }
 
 type failedHTTPServer struct {

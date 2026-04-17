@@ -98,6 +98,31 @@ func TestRuntimeInfoResponseCopiesSourceSlices(t *testing.T) {
 	}
 }
 
+func TestRuntimeInfoEndpointReturnsEmptySnapshotShape(t *testing.T) {
+	t.Helper()
+
+	router := NewRouter(DefaultConfig(), snapshotStub{})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/runtime/info", nil)
+	router.Engine().ServeHTTP(recorder, request)
+
+	if got, want := recorder.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected status code: got %d want %d", got, want)
+	}
+
+	var response runtimeResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal runtime response: %v", err)
+	}
+	if got, want := len(response.Services), 0; got != want {
+		t.Fatalf("unexpected service count: got %d want %d", got, want)
+	}
+	if got, want := len(response.Ports), 0; got != want {
+		t.Fatalf("unexpected port count: got %d want %d", got, want)
+	}
+}
+
 func TestCopyRuntimeServicesUsesIndependentTagSlices(t *testing.T) {
 	t.Helper()
 

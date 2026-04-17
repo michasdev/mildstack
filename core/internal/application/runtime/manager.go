@@ -21,6 +21,10 @@ type Manager struct {
 }
 
 func New(services []orchestrator.Service) *Manager {
+	return NewWithPorts(services, nil)
+}
+
+func NewWithPorts(services []orchestrator.Service, ports []int) *Manager {
 	copied := make([]orchestrator.Service, len(services))
 	copy(copied, services)
 
@@ -32,7 +36,10 @@ func New(services []orchestrator.Service) *Manager {
 		metadata = append(metadata, cloneMetadata(service.Metadata()))
 	}
 
-	return &Manager{services: metadata}
+	return &Manager{
+		services: metadata,
+		ports:    sortedPorts(ports),
+	}
 }
 
 func (m *Manager) Serve(ctx context.Context, port int) error {
