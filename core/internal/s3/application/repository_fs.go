@@ -127,11 +127,7 @@ func normalizeState(state domain.State) domain.State {
 			normalized.Buckets[i].Region = defaultRegion
 		}
 		if normalized.Buckets[i].CreatedAt.IsZero() {
-			if normalized.Buckets[i].Name == "mildstack-assets" {
-				normalized.Buckets[i].CreatedAt = time.Date(2026, time.April, 16, 0, 0, 0, 0, time.UTC)
-			} else {
-				normalized.Buckets[i].CreatedAt = time.Now().UTC()
-			}
+			normalized.Buckets[i].CreatedAt = fallbackBucketCreatedAt(normalized.Buckets[i].Name)
 		}
 	}
 
@@ -145,4 +141,12 @@ func normalizeState(state domain.State) domain.State {
 		return normalized.Objects[i].Bucket < normalized.Objects[j].Bucket
 	})
 	return normalized
+}
+
+func fallbackBucketCreatedAt(name string) time.Time {
+	if name == "mildstack-assets" {
+		return time.Date(2026, time.April, 16, 0, 0, 0, 0, time.UTC)
+	}
+
+	return time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
 }

@@ -38,7 +38,7 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := policy.ErrorPrefix, "s3"; got != want {
 		t.Fatalf("unexpected policy error prefix: got %q want %q", got, want)
 	}
-	if got, want := len(policy.Supported), 6; got != want {
+	if got, want := len(policy.Supported), 8; got != want {
 		t.Fatalf("unexpected supported count: got %d want %d", got, want)
 	}
 	if got, want := len(policy.Unsupported), 2; got != want {
@@ -63,22 +63,28 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if !ok {
 		t.Fatal("expected s3 service to be registered")
 	}
-	if got, want := len(entry.Routes), 6; got != want {
+	if got, want := len(entry.Routes), 8; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 	if got, want := entry.Routes[0].Method, "DELETE"; got != want {
 		t.Fatalf("unexpected first route method: got %q want %q", got, want)
 	}
-	if got, want := entry.Routes[0].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
+	if got, want := entry.Routes[0].Path, "/api/v1/runtime/services/s3/buckets/:bucket"; got != want {
 		t.Fatalf("unexpected first route path: got %q want %q", got, want)
 	}
-	if got, want := entry.Routes[1].Path, "/api/v1/runtime/services/s3/buckets"; got != want {
+	if got, want := entry.Routes[1].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
 		t.Fatalf("unexpected second route path: got %q want %q", got, want)
 	}
-	if got, want := entry.Routes[5].Method, "PUT"; got != want {
+	if got, want := entry.Routes[5].Method, "HEAD"; got != want {
+		t.Fatalf("unexpected sixth route method: got %q want %q", got, want)
+	}
+	if got, want := entry.Routes[5].Path, "/api/v1/runtime/services/s3/buckets/:bucket"; got != want {
+		t.Fatalf("unexpected sixth route path: got %q want %q", got, want)
+	}
+	if got, want := entry.Routes[7].Method, "PUT"; got != want {
 		t.Fatalf("unexpected last route method: got %q want %q", got, want)
 	}
-	if got, want := entry.Routes[5].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
+	if got, want := entry.Routes[7].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
 		t.Fatalf("unexpected last route path: got %q want %q", got, want)
 	}
 

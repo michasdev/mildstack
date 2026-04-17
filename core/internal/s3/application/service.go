@@ -28,6 +28,8 @@ func newService(state domain.State, repo Repository) *Service {
 			[]string{
 				"list buckets",
 				"create bucket",
+				"head bucket",
+				"delete bucket",
 				"list objects",
 				"get object",
 				"put object",

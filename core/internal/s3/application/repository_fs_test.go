@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/michasdev/mildstack/core/internal/s3/domain"
 )
@@ -16,8 +17,8 @@ func TestFSRepositorySaveAndLoadAreDeterministic(t *testing.T) {
 	state := domain.State{
 		Service: "s3",
 		Buckets: []domain.Bucket{
-			{Name: "zeta", Region: "us-east-1"},
-			{Name: "alpha", Region: "us-west-2"},
+			{Name: "zeta", Region: "us-east-1", CreatedAt: time.Date(2026, time.April, 17, 12, 0, 0, 0, time.UTC)},
+			{Name: "alpha", Region: "us-west-2", CreatedAt: time.Date(2026, time.April, 17, 11, 0, 0, 0, time.UTC)},
 		},
 		Objects: []domain.Object{
 			{Bucket: "zeta", Key: "b.txt", Size: 2, ContentType: "text/plain"},
@@ -50,6 +51,9 @@ func TestFSRepositorySaveAndLoadAreDeterministic(t *testing.T) {
 	}
 	if got, want := loaded.Buckets[0].Name, "alpha"; got != want {
 		t.Fatalf("expected sorted bucket order after round-trip: got %q want %q", got, want)
+	}
+	if loaded.Buckets[0].CreatedAt.IsZero() || loaded.Buckets[1].CreatedAt.IsZero() {
+		t.Fatal("expected bucket creation timestamps after round-trip")
 	}
 	if got, want := loaded.Objects[0].Bucket, "alpha"; got != want {
 		t.Fatalf("expected sorted object order after round-trip: got %q want %q", got, want)
