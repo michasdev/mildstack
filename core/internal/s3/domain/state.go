@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"sort"
 	"time"
 )
@@ -20,10 +22,15 @@ type Bucket struct {
 }
 
 type Object struct {
-	Bucket      string
-	Key         string
-	Size        int64
-	ContentType string
+	Bucket           string            `json:"bucket"`
+	Key              string            `json:"key"`
+	Body             []byte            `json:"body,omitempty"`
+	Size             int64             `json:"size"`
+	ContentType      string            `json:"content_type"`
+	ETag             string            `json:"etag,omitempty"`
+	LastModified     time.Time         `json:"last_modified,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
+	PreservedHeaders map[string]string `json:"preserved_headers,omitempty"`
 }
 
 func NewState() State {
@@ -38,10 +45,13 @@ func NewState() State {
 		},
 		Objects: []Object{
 			{
-				Bucket:      "mildstack-assets",
-				Key:         "bootstrap.txt",
-				Size:        18,
-				ContentType: "text/plain",
+				Bucket:       "mildstack-assets",
+				Key:          "bootstrap.txt",
+				Body:         bootstrapObjectBody(),
+				Size:         int64(len(bootstrapObjectBody())),
+				ContentType:  "text/plain",
+				ETag:         etagForBody(bootstrapObjectBody()),
+				LastModified: time.Date(2026, time.April, 16, 0, 0, 0, 0, time.UTC),
 			},
 		},
 	}
@@ -60,7 +70,7 @@ func (s State) ListObjects(bucket string) []Object {
 	objects := make([]Object, 0, len(s.Objects))
 	for _, object := range s.Objects {
 		if object.Bucket == bucket {
-			objects = append(objects, object)
+			objects = append(objects, cloneObject(object))
 		}
 	}
 
@@ -82,7 +92,7 @@ func (s State) Bucket(name string) (Bucket, bool) {
 func (s State) Object(bucket, key string) (Object, bool) {
 	for _, object := range s.Objects {
 		if object.Bucket == bucket && object.Key == key {
-			return object, true
+			return cloneObject(object), true
 		}
 	}
 	return Object{}, false
@@ -120,15 +130,26 @@ func (s *State) UpsertBucket(bucket Bucket) Bucket {
 }
 
 func (s *State) UpsertObject(object Object) Object {
+	object = cloneObject(object)
+	if object.Size == 0 {
+		object.Size = int64(len(object.Body))
+	}
+	if object.ETag == "" {
+		object.ETag = etagForBody(object.Body)
+	}
+	if object.LastModified.IsZero() {
+		object.LastModified = time.Now().UTC()
+	}
+
 	for i := range s.Objects {
 		if s.Objects[i].Bucket == object.Bucket && s.Objects[i].Key == object.Key {
-			s.Objects[i] = object
-			return s.Objects[i]
+			s.Objects[i] = cloneObject(object)
+			return cloneObject(s.Objects[i])
 		}
 	}
 
-	s.Objects = append(s.Objects, object)
-	return object
+	s.Objects = append(s.Objects, cloneObject(object))
+	return cloneObject(object)
 }
 
 func (s *State) DeleteObject(bucket, key string) bool {
@@ -171,10 +192,12 @@ func (s State) Snapshot() map[string]any {
 	objects := make([]any, 0, len(s.Objects))
 	for _, object := range s.sortedObjects() {
 		objects = append(objects, map[string]any{
-			"bucket":       object.Bucket,
-			"key":          object.Key,
-			"size":         object.Size,
-			"content_type": object.ContentType,
+			"bucket":        object.Bucket,
+			"key":           object.Key,
+			"size":          object.Size,
+			"content_type":  object.ContentType,
+			"etag":          object.ETag,
+			"last_modified": object.LastModified,
 		})
 	}
 
@@ -187,7 +210,9 @@ func (s State) Snapshot() map[string]any {
 
 func (s State) sortedObjects() []Object {
 	objects := make([]Object, len(s.Objects))
-	copy(objects, s.Objects)
+	for i := range s.Objects {
+		objects[i] = cloneObject(s.Objects[i])
+	}
 	sort.SliceStable(objects, func(i, j int) bool {
 		if objects[i].Bucket == objects[j].Bucket {
 			return objects[i].Key < objects[j].Key
@@ -195,4 +220,32 @@ func (s State) sortedObjects() []Object {
 		return objects[i].Bucket < objects[j].Bucket
 	})
 	return objects
+}
+
+func bootstrapObjectBody() []byte {
+	return []byte("MildStack asset v1")
+}
+
+func cloneObject(object Object) Object {
+	object.Body = append([]byte(nil), object.Body...)
+	object.Metadata = cloneStringMap(object.Metadata)
+	object.PreservedHeaders = cloneStringMap(object.PreservedHeaders)
+	return object
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func etagForBody(body []byte) string {
+	sum := md5.Sum(body)
+	return `"` + hex.EncodeToString(sum[:]) + `"`
 }

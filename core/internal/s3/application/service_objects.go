@@ -36,7 +36,7 @@ func (s *Service) GetObject(bucket, key string) (domain.Object, error) {
 	return object, nil
 }
 
-func (s *Service) PutObject(bucket, key string, size int64, contentType string) (domain.Object, error) {
+func (s *Service) PutObject(bucket, key string, body []byte, contentType string) (domain.Object, error) {
 	bucket = strings.TrimSpace(bucket)
 	key = strings.TrimSpace(key)
 	contentType = strings.TrimSpace(contentType)
@@ -56,7 +56,8 @@ func (s *Service) PutObject(bucket, key string, size int64, contentType string) 
 	object := s.state.UpsertObject(domain.Object{
 		Bucket:      bucket,
 		Key:         key,
-		Size:        size,
+		Body:        append([]byte(nil), body...),
+		Size:        int64(len(body)),
 		ContentType: contentType,
 	})
 	if err := s.persist(); err != nil {

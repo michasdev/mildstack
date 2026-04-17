@@ -1,6 +1,8 @@
 package application
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -108,6 +110,9 @@ func validateState(state domain.State) error {
 		if _, ok := buckets[object.Bucket]; !ok {
 			return fmt.Errorf("invalid object %s/%s: bucket not found", object.Bucket, object.Key)
 		}
+		if object.ContentType == "" {
+			return fmt.Errorf("invalid object %s/%s: empty content type", object.Bucket, object.Key)
+		}
 	}
 
 	return nil
@@ -120,7 +125,22 @@ func normalizeState(state domain.State) domain.State {
 		Objects: make([]domain.Object, len(state.Objects)),
 	}
 	copy(normalized.Buckets, state.Buckets)
-	copy(normalized.Objects, state.Objects)
+	for i := range state.Objects {
+		normalized.Objects[i] = state.Objects[i]
+		normalized.Objects[i].Body = append([]byte(nil), state.Objects[i].Body...)
+		if len(state.Objects[i].Metadata) > 0 {
+			normalized.Objects[i].Metadata = make(map[string]string, len(state.Objects[i].Metadata))
+			for key, value := range state.Objects[i].Metadata {
+				normalized.Objects[i].Metadata[key] = value
+			}
+		}
+		if len(state.Objects[i].PreservedHeaders) > 0 {
+			normalized.Objects[i].PreservedHeaders = make(map[string]string, len(state.Objects[i].PreservedHeaders))
+			for key, value := range state.Objects[i].PreservedHeaders {
+				normalized.Objects[i].PreservedHeaders[key] = value
+			}
+		}
+	}
 
 	for i := range normalized.Buckets {
 		if normalized.Buckets[i].Region == "" {
@@ -140,7 +160,31 @@ func normalizeState(state domain.State) domain.State {
 		}
 		return normalized.Objects[i].Bucket < normalized.Objects[j].Bucket
 	})
+
+	for i := range normalized.Objects {
+		if len(normalized.Objects[i].Body) == 0 && normalized.Objects[i].Bucket == "mildstack-assets" && normalized.Objects[i].Key == "bootstrap.txt" {
+			normalized.Objects[i].Body = []byte("MildStack asset v1")
+		}
+		if normalized.Objects[i].ContentType == "" {
+			normalized.Objects[i].ContentType = "application/octet-stream"
+		}
+		if normalized.Objects[i].Size == 0 {
+			normalized.Objects[i].Size = int64(len(normalized.Objects[i].Body))
+		}
+		if normalized.Objects[i].ETag == "" {
+			normalized.Objects[i].ETag = computeETag(normalized.Objects[i].Body)
+		}
+		if normalized.Objects[i].LastModified.IsZero() {
+			normalized.Objects[i].LastModified = fallbackBucketCreatedAt(normalized.Objects[i].Bucket)
+		}
+	}
+
 	return normalized
+}
+
+func computeETag(body []byte) string {
+	sum := md5.Sum(body)
+	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 
 func fallbackBucketCreatedAt(name string) time.Time {

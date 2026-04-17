@@ -127,7 +127,7 @@ func TestServiceRealOperationsMutateState(t *testing.T) {
 		t.Fatal("expected listed buckets to include creation timestamps")
 	}
 
-	object, err := service.PutObject(bucket.Name, "archive.txt", 42, "text/plain")
+	object, err := service.PutObject(bucket.Name, "archive.txt", []byte("archive payload"), "text/plain")
 	if err != nil {
 		t.Fatalf("put object: %v", err)
 	}
@@ -149,6 +149,9 @@ func TestServiceRealOperationsMutateState(t *testing.T) {
 	}
 	if got, want := fetched.ContentType, "text/plain"; got != want {
 		t.Fatalf("unexpected object content type: got %q want %q", got, want)
+	}
+	if got, want := string(fetched.Body), "archive payload"; got != want {
+		t.Fatalf("unexpected object body: got %q want %q", got, want)
 	}
 
 	if err := service.DeleteObject(bucket.Name, object.Key); err != nil {
@@ -228,7 +231,7 @@ func TestServiceRejectsInvalidAndMissingRequests(t *testing.T) {
 	if _, err := service.GetObject("mildstack-assets", "missing"); err == nil {
 		t.Fatal("expected missing object lookup to fail")
 	}
-	if _, err := service.PutObject("missing", "archive.txt", 1, "text/plain"); err == nil {
+	if _, err := service.PutObject("missing", "archive.txt", []byte("x"), "text/plain"); err == nil {
 		t.Fatal("expected put on missing bucket to fail")
 	}
 	if err := service.DeleteObject("mildstack-assets", "missing"); err == nil {
