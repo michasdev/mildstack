@@ -142,14 +142,23 @@ func (s *Service) PutObject(bucket, key string, body []byte, contentType string)
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
+	if s.state.HasObject(bucket, key) {
+		if err := s.objectMutationBlocked(bucket, key); err != nil {
+			return domain.Object{}, err
+		}
+	}
 
-	object := s.state.UpsertObject(domain.Object{
+	object, err := s.storeObject(domain.Object{
 		Bucket:      bucket,
 		Key:         key,
 		Body:        append([]byte(nil), body...),
 		Size:        int64(len(body)),
 		ContentType: contentType,
 	})
+	if err != nil {
+		return domain.Object{}, err
+	}
+	s.clearObjectProtection(bucket, key)
 	if err := s.persist(); err != nil {
 		return domain.Object{}, err
 	}
@@ -177,12 +186,17 @@ func (s *Service) CopyObject(bucket, key, sourceBucket, sourceKey string) (domai
 		return domain.Object{}, fmt.Errorf("s3: NoSuchBucket: bucket %q not found", bucket)
 	}
 
+	if s.state.HasObject(bucket, key) {
+		if err := s.objectMutationBlocked(bucket, key); err != nil {
+			return domain.Object{}, err
+		}
+	}
 	source, err := s.GetObject(sourceBucket, sourceKey)
 	if err != nil {
 		return domain.Object{}, err
 	}
 
-	object := s.state.UpsertObject(domain.Object{
+	object, err := s.storeObject(domain.Object{
 		Bucket:           bucket,
 		Key:              key,
 		Body:             append([]byte(nil), source.Body...),
@@ -192,6 +206,10 @@ func (s *Service) CopyObject(bucket, key, sourceBucket, sourceKey string) (domai
 		Metadata:         source.Metadata,
 		PreservedHeaders: source.PreservedHeaders,
 	})
+	if err != nil {
+		return domain.Object{}, err
+	}
+	s.copyObjectProtection(bucket, key, sourceBucket, sourceKey)
 	if err := s.persist(); err != nil {
 		return domain.Object{}, err
 	}
@@ -210,8 +228,7 @@ func (s *Service) DeleteObject(bucket, key string) error {
 	if !s.state.HasBucket(bucket) {
 		return fmt.Errorf("s3: NoSuchBucket: bucket %q not found", bucket)
 	}
-	s.state.DeleteObject(bucket, key)
-	return s.persist()
+	return s.removeObject(bucket, key)
 }
 
 func (s *Service) DeleteObjects(request DeleteObjectsRequest) (DeleteObjectsResult, error) {
@@ -229,14 +246,19 @@ func (s *Service) DeleteObjects(request DeleteObjectsRequest) (DeleteObjectsResu
 		if trimmed == "" {
 			continue
 		}
-		s.state.DeleteObject(bucket, trimmed)
 		if !request.Quiet {
 			result.Deleted = append(result.Deleted, DeletedObject{Key: trimmed})
 		}
 	}
 
-	if err := s.persist(); err != nil {
-		return DeleteObjectsResult{}, err
+	for _, key := range request.Keys {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			continue
+		}
+		if err := s.removeObject(bucket, trimmed); err != nil {
+			return DeleteObjectsResult{}, err
+		}
 	}
 	return result, nil
 }

@@ -51,10 +51,9 @@ func newService(state domain.State, repo Repository) *Service {
 				"bucket notification",
 				"bucket logging",
 				"bucket replication",
-			},
-			[]string{
 				"object locking",
 			},
+			nil,
 			"s3",
 		),
 	}

@@ -24,6 +24,9 @@ type State struct {
 	BucketNotifications map[string][]byte
 	BucketLogging       map[string][]byte
 	BucketReplication   map[string]BucketReplicationConfig
+	BucketObjectLock    map[string]ObjectLockConfiguration
+	ObjectRetention     map[string]map[string]ObjectRetention
+	ObjectLegalHold     map[string]map[string]ObjectLegalHold
 }
 
 type Bucket struct {
@@ -47,6 +50,26 @@ type Object struct {
 type BucketReplicationConfig struct {
 	Role  string                  `json:"role"`
 	Rules []BucketReplicationRule `json:"rules,omitempty"`
+}
+
+type ObjectLockConfiguration struct {
+	Enabled          bool                 `json:"enabled"`
+	DefaultRetention *ObjectLockRetention `json:"default_retention,omitempty"`
+}
+
+type ObjectLockRetention struct {
+	Mode  string `json:"mode"`
+	Days  int    `json:"days,omitempty"`
+	Years int    `json:"years,omitempty"`
+}
+
+type ObjectRetention struct {
+	Mode            string    `json:"mode"`
+	RetainUntilDate time.Time `json:"retain_until_date"`
+}
+
+type ObjectLegalHold struct {
+	Status string `json:"status"`
 }
 
 type BucketReplicationRule struct {
@@ -332,9 +355,13 @@ func (s *State) DeleteObject(bucket, key string) bool {
 	for i := range s.Objects {
 		if s.Objects[i].Bucket == bucket && s.Objects[i].Key == key {
 			s.Objects = append(s.Objects[:i], s.Objects[i+1:]...)
+			s.DeleteObjectRetention(bucket, key)
+			s.DeleteObjectLegalHold(bucket, key)
 			return true
 		}
 	}
+	s.DeleteObjectRetention(bucket, key)
+	s.DeleteObjectLegalHold(bucket, key)
 	return false
 }
 
@@ -414,6 +441,9 @@ func (s State) Snapshot() map[string]any {
 	notifications := bucketBodySnapshot(s.BucketNotifications)
 	logging := bucketBodySnapshot(s.BucketLogging)
 	replication := bucketReplicationSnapshot(s.BucketReplication)
+	objectLock := bucketObjectLockSnapshot(s.BucketObjectLock)
+	objectRetention := objectRetentionSnapshot(s.ObjectRetention)
+	objectLegalHold := objectLegalHoldSnapshot(s.ObjectLegalHold)
 
 	return map[string]any{
 		"service":              s.Service,
@@ -430,6 +460,9 @@ func (s State) Snapshot() map[string]any {
 		"bucket_notifications": notifications,
 		"bucket_logging":       logging,
 		"bucket_replication":   replication,
+		"bucket_object_lock":   objectLock,
+		"object_retention":     objectRetention,
+		"object_legal_hold":    objectLegalHold,
 	}
 }
 
@@ -525,6 +558,38 @@ func (s State) BucketTaggingConfig(bucket string) ([]byte, bool) {
 	return bucketBodyValue(s.BucketTagging, bucket)
 }
 
+func (s State) BucketObjectLockConfig(bucket string) (ObjectLockConfiguration, bool) {
+	config, ok := s.BucketObjectLock[bucket]
+	if !ok {
+		return ObjectLockConfiguration{}, false
+	}
+	return cloneObjectLockConfiguration(config), true
+}
+
+func (s State) ObjectRetentionConfig(bucket, key string) (ObjectRetention, bool) {
+	objects, ok := s.ObjectRetention[bucket]
+	if !ok {
+		return ObjectRetention{}, false
+	}
+	retention, ok := objects[key]
+	if !ok {
+		return ObjectRetention{}, false
+	}
+	return retention, true
+}
+
+func (s State) ObjectLegalHoldConfig(bucket, key string) (ObjectLegalHold, bool) {
+	objects, ok := s.ObjectLegalHold[bucket]
+	if !ok {
+		return ObjectLegalHold{}, false
+	}
+	hold, ok := objects[key]
+	if !ok {
+		return ObjectLegalHold{}, false
+	}
+	return hold, true
+}
+
 func (s *State) SetBucketPolicy(bucket string, body []byte) []byte {
 	s.BucketPolicies = upsertBucketBodyMap(s.BucketPolicies, bucket, body)
 	return cloneBytes(body)
@@ -553,6 +618,18 @@ func (s *State) SetBucketACLConfig(bucket string, body []byte) []byte {
 func (s *State) SetBucketTaggingConfig(bucket string, body []byte) []byte {
 	s.BucketTagging = upsertBucketBodyMap(s.BucketTagging, bucket, body)
 	return cloneBytes(body)
+}
+
+func (s *State) SetBucketObjectLockConfig(bucket string, config ObjectLockConfiguration) ObjectLockConfiguration {
+	config = cloneObjectLockConfiguration(config)
+	if !config.Enabled {
+		config.Enabled = true
+	}
+	if s.BucketObjectLock == nil {
+		s.BucketObjectLock = make(map[string]ObjectLockConfiguration)
+	}
+	s.BucketObjectLock[bucket] = config
+	return cloneObjectLockConfiguration(config)
 }
 
 func (s State) BucketNotification(bucket string) ([]byte, bool) {
@@ -587,6 +664,28 @@ func (s *State) SetBucketReplicationConfig(bucket string, config BucketReplicati
 	}
 	s.BucketReplication = upsertBucketReplicationMap(s.BucketReplication, bucket, config)
 	return cloneBucketReplicationConfig(config)
+}
+
+func (s *State) SetObjectRetention(bucket, key string, retention ObjectRetention) ObjectRetention {
+	if s.ObjectRetention == nil {
+		s.ObjectRetention = make(map[string]map[string]ObjectRetention)
+	}
+	if s.ObjectRetention[bucket] == nil {
+		s.ObjectRetention[bucket] = make(map[string]ObjectRetention)
+	}
+	s.ObjectRetention[bucket][key] = retention
+	return retention
+}
+
+func (s *State) SetObjectLegalHold(bucket, key string, hold ObjectLegalHold) ObjectLegalHold {
+	if s.ObjectLegalHold == nil {
+		s.ObjectLegalHold = make(map[string]map[string]ObjectLegalHold)
+	}
+	if s.ObjectLegalHold[bucket] == nil {
+		s.ObjectLegalHold[bucket] = make(map[string]ObjectLegalHold)
+	}
+	s.ObjectLegalHold[bucket][key] = hold
+	return hold
 }
 
 func (s *State) DeleteBucketPolicy(bucket string) bool {
@@ -625,6 +724,18 @@ func (s *State) DeleteBucketReplicationConfig(bucket string) bool {
 	return deleteBucketReplicationMap(&s.BucketReplication, bucket)
 }
 
+func (s *State) DeleteBucketObjectLockConfig(bucket string) bool {
+	return deleteBucketObjectLockMap(&s.BucketObjectLock, bucket)
+}
+
+func (s *State) DeleteObjectRetention(bucket, key string) bool {
+	return deleteNestedObjectMap(&s.ObjectRetention, bucket, key)
+}
+
+func (s *State) DeleteObjectLegalHold(bucket, key string) bool {
+	return deleteNestedObjectMapHold(&s.ObjectLegalHold, bucket, key)
+}
+
 func (s *State) removeBucketGovernance(bucket string) {
 	s.DeleteBucketPolicy(bucket)
 	s.DeleteBucketEncryptionConfig(bucket)
@@ -635,6 +746,9 @@ func (s *State) removeBucketGovernance(bucket string) {
 	s.DeleteBucketNotification(bucket)
 	s.DeleteBucketLoggingConfig(bucket)
 	s.DeleteBucketReplicationConfig(bucket)
+	s.DeleteBucketObjectLockConfig(bucket)
+	deleteBucketNestedObjectMap(&s.ObjectRetention, bucket)
+	deleteBucketNestedObjectMapHold(&s.ObjectLegalHold, bucket)
 }
 
 func bucketBodySnapshot(values map[string][]byte) []any {
@@ -677,6 +791,102 @@ func bucketReplicationSnapshot(values map[string]BucketReplicationConfig) []any 
 			"role":   config.Role,
 			"rules":  bucketReplicationRulesSnapshot(config.Rules),
 		})
+	}
+	return snapshot
+}
+
+func bucketObjectLockSnapshot(values map[string]ObjectLockConfiguration) []any {
+	if len(values) == 0 {
+		return nil
+	}
+
+	buckets := make([]string, 0, len(values))
+	for bucket := range values {
+		buckets = append(buckets, bucket)
+	}
+	sort.Strings(buckets)
+
+	snapshot := make([]any, 0, len(buckets))
+	for _, bucket := range buckets {
+		config := values[bucket]
+		entry := map[string]any{
+			"bucket":  bucket,
+			"enabled": config.Enabled,
+		}
+		if config.DefaultRetention != nil {
+			retention := map[string]any{
+				"mode": config.DefaultRetention.Mode,
+			}
+			if config.DefaultRetention.Days > 0 {
+				retention["days"] = config.DefaultRetention.Days
+			}
+			if config.DefaultRetention.Years > 0 {
+				retention["years"] = config.DefaultRetention.Years
+			}
+			entry["default_retention"] = retention
+		}
+		snapshot = append(snapshot, entry)
+	}
+	return snapshot
+}
+
+func objectRetentionSnapshot(values map[string]map[string]ObjectRetention) []any {
+	if len(values) == 0 {
+		return nil
+	}
+
+	buckets := make([]string, 0, len(values))
+	for bucket := range values {
+		buckets = append(buckets, bucket)
+	}
+	sort.Strings(buckets)
+
+	snapshot := make([]any, 0)
+	for _, bucket := range buckets {
+		keys := make([]string, 0, len(values[bucket]))
+		for key := range values[bucket] {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			retention := values[bucket][key]
+			snapshot = append(snapshot, map[string]any{
+				"bucket":             bucket,
+				"key":                key,
+				"mode":               retention.Mode,
+				"retain_until_date": retention.RetainUntilDate,
+			})
+		}
+	}
+	return snapshot
+}
+
+func objectLegalHoldSnapshot(values map[string]map[string]ObjectLegalHold) []any {
+	if len(values) == 0 {
+		return nil
+	}
+
+	buckets := make([]string, 0, len(values))
+	for bucket := range values {
+		buckets = append(buckets, bucket)
+	}
+	sort.Strings(buckets)
+
+	snapshot := make([]any, 0)
+	for _, bucket := range buckets {
+		keys := make([]string, 0, len(values[bucket]))
+		for key := range values[bucket] {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			hold := values[bucket][key]
+			snapshot = append(snapshot, map[string]any{
+				"bucket": bucket,
+				"key":    key,
+				"status": hold.Status,
+			})
+		}
 	}
 	return snapshot
 }
@@ -756,6 +966,57 @@ func cloneBucketReplicationConfig(config BucketReplicationConfig) BucketReplicat
 	return cloned
 }
 
+func cloneObjectLockConfiguration(config ObjectLockConfiguration) ObjectLockConfiguration {
+	cloned := ObjectLockConfiguration{Enabled: config.Enabled}
+	if config.DefaultRetention != nil {
+		retention := *config.DefaultRetention
+		cloned.DefaultRetention = &retention
+	}
+	return cloned
+}
+
+func cloneObjectRetentionMap(values map[string]map[string]ObjectRetention) map[string]map[string]ObjectRetention {
+	if len(values) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]map[string]ObjectRetention, len(values))
+	for bucket, objects := range values {
+		if len(objects) == 0 {
+			continue
+		}
+		cloned[bucket] = make(map[string]ObjectRetention, len(objects))
+		for key, retention := range objects {
+			cloned[bucket][key] = retention
+		}
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
+}
+
+func cloneObjectLegalHoldMap(values map[string]map[string]ObjectLegalHold) map[string]map[string]ObjectLegalHold {
+	if len(values) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]map[string]ObjectLegalHold, len(values))
+	for bucket, objects := range values {
+		if len(objects) == 0 {
+			continue
+		}
+		cloned[bucket] = make(map[string]ObjectLegalHold, len(objects))
+		for key, hold := range objects {
+			cloned[bucket][key] = hold
+		}
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
+}
+
 func upsertBucketReplicationMap(values map[string]BucketReplicationConfig, bucket string, config BucketReplicationConfig) map[string]BucketReplicationConfig {
 	if values == nil {
 		values = make(map[string]BucketReplicationConfig)
@@ -765,6 +1026,99 @@ func upsertBucketReplicationMap(values map[string]BucketReplicationConfig, bucke
 }
 
 func deleteBucketReplicationMap(values *map[string]BucketReplicationConfig, bucket string) bool {
+	if values == nil || *values == nil {
+		return false
+	}
+	store := *values
+	if _, ok := store[bucket]; !ok {
+		return false
+	}
+	delete(store, bucket)
+	if len(store) == 0 {
+		*values = nil
+	}
+	return true
+}
+
+func deleteBucketObjectLockMap(values *map[string]ObjectLockConfiguration, bucket string) bool {
+	if values == nil || *values == nil {
+		return false
+	}
+	store := *values
+	if _, ok := store[bucket]; !ok {
+		return false
+	}
+	delete(store, bucket)
+	if len(store) == 0 {
+		*values = nil
+	}
+	return true
+}
+
+func deleteNestedObjectMap(values *map[string]map[string]ObjectRetention, bucket, key string) bool {
+	if values == nil || *values == nil {
+		return false
+	}
+	store := *values
+	objects, ok := store[bucket]
+	if !ok {
+		return false
+	}
+	if _, ok := objects[key]; !ok {
+		return false
+	}
+	delete(objects, key)
+	if len(objects) == 0 {
+		delete(store, bucket)
+	} else {
+		store[bucket] = objects
+	}
+	if len(store) == 0 {
+		*values = nil
+	}
+	return true
+}
+
+func deleteNestedObjectMapHold(values *map[string]map[string]ObjectLegalHold, bucket, key string) bool {
+	if values == nil || *values == nil {
+		return false
+	}
+	store := *values
+	objects, ok := store[bucket]
+	if !ok {
+		return false
+	}
+	if _, ok := objects[key]; !ok {
+		return false
+	}
+	delete(objects, key)
+	if len(objects) == 0 {
+		delete(store, bucket)
+	} else {
+		store[bucket] = objects
+	}
+	if len(store) == 0 {
+		*values = nil
+	}
+	return true
+}
+
+func deleteBucketNestedObjectMap(values *map[string]map[string]ObjectRetention, bucket string) bool {
+	if values == nil || *values == nil {
+		return false
+	}
+	store := *values
+	if _, ok := store[bucket]; !ok {
+		return false
+	}
+	delete(store, bucket)
+	if len(store) == 0 {
+		*values = nil
+	}
+	return true
+}
+
+func deleteBucketNestedObjectMapHold(values *map[string]map[string]ObjectLegalHold, bucket string) bool {
 	if values == nil || *values == nil {
 		return false
 	}

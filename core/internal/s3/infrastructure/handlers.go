@@ -38,6 +38,12 @@ type Service interface {
 	GetBucketReplication(bucket string) ([]byte, error)
 	PutBucketReplication(bucket string, body []byte) ([]byte, error)
 	DeleteBucketReplication(bucket string) error
+	GetObjectLockConfiguration(bucket string) ([]byte, error)
+	PutObjectLockConfiguration(bucket string, body []byte) ([]byte, error)
+	GetObjectRetention(bucket, key string) ([]byte, error)
+	PutObjectRetention(bucket, key string, body []byte) ([]byte, error)
+	GetObjectLegalHold(bucket, key string) ([]byte, error)
+	PutObjectLegalHold(bucket, key string, body []byte) ([]byte, error)
 	ListObjects(bucket string) ([]domain.Object, error)
 	ListObjectsV1(request domain.ListObjectsV1Request) (domain.ListObjectsV1Result, error)
 	ListObjectsV2(request domain.ListObjectsV2Request) (domain.ListObjectsV2Result, error)

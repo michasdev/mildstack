@@ -117,6 +117,14 @@ func validateState(state domain.State) error {
 		}
 	}
 
+	objectKeys := make(map[string]map[string]struct{}, len(state.Objects))
+	for _, object := range state.Objects {
+		if objectKeys[object.Bucket] == nil {
+			objectKeys[object.Bucket] = make(map[string]struct{})
+		}
+		objectKeys[object.Bucket][object.Key] = struct{}{}
+	}
+
 	for _, setting := range state.BucketVersioning {
 		if setting.Bucket == "" {
 			return fmt.Errorf("invalid bucket versioning entry: empty bucket")
@@ -172,6 +180,78 @@ func validateState(state domain.State) error {
 		}
 	}
 
+	for bucket, config := range state.BucketObjectLock {
+		if bucket == "" {
+			return fmt.Errorf("invalid bucket object lock entry: empty bucket")
+		}
+		if _, ok := buckets[bucket]; !ok {
+			return fmt.Errorf("invalid bucket object lock %q: bucket not found", bucket)
+		}
+		if !config.Enabled {
+			return fmt.Errorf("invalid bucket object lock %q: disabled config", bucket)
+		}
+		if config.DefaultRetention != nil {
+			switch config.DefaultRetention.Mode {
+			case "GOVERNANCE", "COMPLIANCE":
+			default:
+				return fmt.Errorf("invalid bucket object lock %q: unsupported retention mode %q", bucket, config.DefaultRetention.Mode)
+			}
+			if config.DefaultRetention.Days > 0 && config.DefaultRetention.Years > 0 {
+				return fmt.Errorf("invalid bucket object lock %q: retention cannot set days and years", bucket)
+			}
+			if config.DefaultRetention.Days <= 0 && config.DefaultRetention.Years <= 0 {
+				return fmt.Errorf("invalid bucket object lock %q: retention requires days or years", bucket)
+			}
+		}
+	}
+
+	for bucket, objects := range state.ObjectRetention {
+		if bucket == "" {
+			return fmt.Errorf("invalid object retention entry: empty bucket")
+		}
+		if _, ok := buckets[bucket]; !ok {
+			return fmt.Errorf("invalid object retention %q: bucket not found", bucket)
+		}
+		for key, retention := range objects {
+			if key == "" {
+				return fmt.Errorf("invalid object retention %q: empty key", bucket)
+			}
+			if _, ok := objectKeys[bucket][key]; !ok {
+				return fmt.Errorf("invalid object retention %s/%s: object not found", bucket, key)
+			}
+			switch retention.Mode {
+			case "GOVERNANCE", "COMPLIANCE":
+			default:
+				return fmt.Errorf("invalid object retention %s/%s: unsupported mode %q", bucket, key, retention.Mode)
+			}
+			if retention.RetainUntilDate.IsZero() {
+				return fmt.Errorf("invalid object retention %s/%s: empty retain-until date", bucket, key)
+			}
+		}
+	}
+
+	for bucket, objects := range state.ObjectLegalHold {
+		if bucket == "" {
+			return fmt.Errorf("invalid object legal hold entry: empty bucket")
+		}
+		if _, ok := buckets[bucket]; !ok {
+			return fmt.Errorf("invalid object legal hold %q: bucket not found", bucket)
+		}
+		for key, hold := range objects {
+			if key == "" {
+				return fmt.Errorf("invalid object legal hold %q: empty key", bucket)
+			}
+			if _, ok := objectKeys[bucket][key]; !ok {
+				return fmt.Errorf("invalid object legal hold %s/%s: object not found", bucket, key)
+			}
+			switch hold.Status {
+			case "ON", "OFF":
+			default:
+				return fmt.Errorf("invalid object legal hold %s/%s: unsupported status %q", bucket, key, hold.Status)
+			}
+		}
+	}
+
 	for bucket, config := range state.BucketReplication {
 		if bucket == "" {
 			return fmt.Errorf("invalid bucket replication entry: empty bucket")
@@ -206,6 +286,9 @@ func normalizeState(state domain.State) domain.State {
 		BucketNotifications: cloneBucketBodies(state.BucketNotifications),
 		BucketLogging:       cloneBucketBodies(state.BucketLogging),
 		BucketReplication:   cloneBucketReplicationConfigs(state.BucketReplication),
+		BucketObjectLock:    cloneObjectLockConfigs(state.BucketObjectLock),
+		ObjectRetention:     cloneObjectRetentionMap(state.ObjectRetention),
+		ObjectLegalHold:     cloneObjectLegalHoldMap(state.ObjectLegalHold),
 	}
 	copy(normalized.Buckets, state.Buckets)
 	copy(normalized.BucketVersioning, state.BucketVersioning)
@@ -329,6 +412,9 @@ func normalizeState(state domain.State) domain.State {
 	normalized.BucketNotifications = pruneOrphanedBucketBodies(normalized.BucketNotifications, normalized.Buckets)
 	normalized.BucketLogging = pruneOrphanedBucketBodies(normalized.BucketLogging, normalized.Buckets)
 	normalized.BucketReplication = pruneOrphanedBucketReplication(normalized.BucketReplication, normalized.Buckets)
+	normalized.BucketObjectLock = pruneOrphanedBucketObjectLock(normalized.BucketObjectLock, normalized.Buckets)
+	normalized.ObjectRetention = pruneOrphanedObjectRetention(normalized.ObjectRetention, normalized.Buckets, normalized.Objects)
+	normalized.ObjectLegalHold = pruneOrphanedObjectLegalHold(normalized.ObjectLegalHold, normalized.Buckets, normalized.Objects)
 
 	return normalized
 }
@@ -393,6 +479,69 @@ func cloneBucketReplicationConfigs(values map[string]domain.BucketReplicationCon
 	return cloned
 }
 
+func cloneObjectLockConfigs(values map[string]domain.ObjectLockConfiguration) map[string]domain.ObjectLockConfiguration {
+	if len(values) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]domain.ObjectLockConfiguration, len(values))
+	for bucket, config := range values {
+		cloned[bucket] = cloneObjectLockConfiguration(config)
+	}
+	return cloned
+}
+
+func cloneObjectRetentionMap(values map[string]map[string]domain.ObjectRetention) map[string]map[string]domain.ObjectRetention {
+	if len(values) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]map[string]domain.ObjectRetention, len(values))
+	for bucket, objects := range values {
+		if len(objects) == 0 {
+			continue
+		}
+		cloned[bucket] = make(map[string]domain.ObjectRetention, len(objects))
+		for key, retention := range objects {
+			cloned[bucket][key] = retention
+		}
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
+}
+
+func cloneObjectLegalHoldMap(values map[string]map[string]domain.ObjectLegalHold) map[string]map[string]domain.ObjectLegalHold {
+	if len(values) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]map[string]domain.ObjectLegalHold, len(values))
+	for bucket, objects := range values {
+		if len(objects) == 0 {
+			continue
+		}
+		cloned[bucket] = make(map[string]domain.ObjectLegalHold, len(objects))
+		for key, hold := range objects {
+			cloned[bucket][key] = hold
+		}
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
+}
+
+func cloneObjectLockConfiguration(config domain.ObjectLockConfiguration) domain.ObjectLockConfiguration {
+	cloned := domain.ObjectLockConfiguration{Enabled: config.Enabled}
+	if config.DefaultRetention != nil {
+		retention := *config.DefaultRetention
+		cloned.DefaultRetention = &retention
+	}
+	return cloned
+}
+
 func pruneOrphanedBucketReplication(values map[string]domain.BucketReplicationConfig, buckets []domain.Bucket) map[string]domain.BucketReplicationConfig {
 	if len(values) == 0 {
 		return nil
@@ -409,6 +558,105 @@ func pruneOrphanedBucketReplication(values map[string]domain.BucketReplicationCo
 			continue
 		}
 		pruned[bucket] = normalizeBucketReplicationConfig(config)
+	}
+	if len(pruned) == 0 {
+		return nil
+	}
+	return pruned
+}
+
+func pruneOrphanedBucketObjectLock(values map[string]domain.ObjectLockConfiguration, buckets []domain.Bucket) map[string]domain.ObjectLockConfiguration {
+	if len(values) == 0 {
+		return nil
+	}
+
+	known := make(map[string]struct{}, len(buckets))
+	for _, bucket := range buckets {
+		known[bucket.Name] = struct{}{}
+	}
+
+	pruned := make(map[string]domain.ObjectLockConfiguration, len(values))
+	for bucket, config := range values {
+		if _, ok := known[bucket]; !ok {
+			continue
+		}
+		pruned[bucket] = cloneObjectLockConfiguration(config)
+	}
+	if len(pruned) == 0 {
+		return nil
+	}
+	return pruned
+}
+
+func pruneOrphanedObjectRetention(values map[string]map[string]domain.ObjectRetention, buckets []domain.Bucket, objects []domain.Object) map[string]map[string]domain.ObjectRetention {
+	if len(values) == 0 {
+		return nil
+	}
+
+	knownBuckets := make(map[string]struct{}, len(buckets))
+	for _, bucket := range buckets {
+		knownBuckets[bucket.Name] = struct{}{}
+	}
+	knownObjects := make(map[string]map[string]struct{}, len(objects))
+	for _, object := range objects {
+		if knownObjects[object.Bucket] == nil {
+			knownObjects[object.Bucket] = make(map[string]struct{})
+		}
+		knownObjects[object.Bucket][object.Key] = struct{}{}
+	}
+
+	pruned := make(map[string]map[string]domain.ObjectRetention, len(values))
+	for bucket, objectsByKey := range values {
+		if _, ok := knownBuckets[bucket]; !ok {
+			continue
+		}
+		for key, retention := range objectsByKey {
+			if _, ok := knownObjects[bucket][key]; !ok {
+				continue
+			}
+			if pruned[bucket] == nil {
+				pruned[bucket] = make(map[string]domain.ObjectRetention)
+			}
+			pruned[bucket][key] = retention
+		}
+	}
+	if len(pruned) == 0 {
+		return nil
+	}
+	return pruned
+}
+
+func pruneOrphanedObjectLegalHold(values map[string]map[string]domain.ObjectLegalHold, buckets []domain.Bucket, objects []domain.Object) map[string]map[string]domain.ObjectLegalHold {
+	if len(values) == 0 {
+		return nil
+	}
+
+	knownBuckets := make(map[string]struct{}, len(buckets))
+	for _, bucket := range buckets {
+		knownBuckets[bucket.Name] = struct{}{}
+	}
+	knownObjects := make(map[string]map[string]struct{}, len(objects))
+	for _, object := range objects {
+		if knownObjects[object.Bucket] == nil {
+			knownObjects[object.Bucket] = make(map[string]struct{})
+		}
+		knownObjects[object.Bucket][object.Key] = struct{}{}
+	}
+
+	pruned := make(map[string]map[string]domain.ObjectLegalHold, len(values))
+	for bucket, objectsByKey := range values {
+		if _, ok := knownBuckets[bucket]; !ok {
+			continue
+		}
+		for key, hold := range objectsByKey {
+			if _, ok := knownObjects[bucket][key]; !ok {
+				continue
+			}
+			if pruned[bucket] == nil {
+				pruned[bucket] = make(map[string]domain.ObjectLegalHold)
+			}
+			pruned[bucket][key] = hold
+		}
 	}
 	if len(pruned) == 0 {
 		return nil
