@@ -6,7 +6,7 @@ func TestRoutesUseS3ServiceSegment(t *testing.T) {
 	t.Helper()
 
 	routes := Routes()
-	if got, want := len(routes), 8; got != want {
+	if got, want := len(routes), 9; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 
@@ -21,6 +21,7 @@ func TestRoutesUseS3ServiceSegment(t *testing.T) {
 		{method: "DELETE", path: "/s3/buckets/:bucket", name: "s3.buckets.delete"},
 		{method: "GET", path: "/s3/buckets/:bucket/objects", name: "s3.objects.index"},
 		{method: "GET", path: "/s3/buckets/:bucket/objects/:object", name: "s3.objects.show"},
+		{method: "HEAD", path: "/s3/buckets/:bucket/objects/:object", name: "s3.objects.head"},
 		{method: "PUT", path: "/s3/buckets/:bucket/objects/:object", name: "s3.objects.update"},
 		{method: "DELETE", path: "/s3/buckets/:bucket/objects/:object", name: "s3.objects.delete"},
 	}

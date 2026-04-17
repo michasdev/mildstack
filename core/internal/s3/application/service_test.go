@@ -38,7 +38,7 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := policy.ErrorPrefix, "s3"; got != want {
 		t.Fatalf("unexpected policy error prefix: got %q want %q", got, want)
 	}
-	if got, want := len(policy.Supported), 8; got != want {
+	if got, want := len(policy.Supported), 10; got != want {
 		t.Fatalf("unexpected supported count: got %d want %d", got, want)
 	}
 	if got, want := len(policy.Unsupported), 2; got != want {
@@ -63,7 +63,7 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if !ok {
 		t.Fatal("expected s3 service to be registered")
 	}
-	if got, want := len(entry.Routes), 8; got != want {
+	if got, want := len(entry.Routes), 9; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 	if got, want := entry.Routes[0].Method, "DELETE"; got != want {
@@ -81,10 +81,16 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := entry.Routes[5].Path, "/api/v1/runtime/services/s3/buckets/:bucket"; got != want {
 		t.Fatalf("unexpected sixth route path: got %q want %q", got, want)
 	}
-	if got, want := entry.Routes[7].Method, "PUT"; got != want {
+	if got, want := entry.Routes[6].Method, "HEAD"; got != want {
+		t.Fatalf("unexpected seventh route method: got %q want %q", got, want)
+	}
+	if got, want := entry.Routes[6].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
+		t.Fatalf("unexpected seventh route path: got %q want %q", got, want)
+	}
+	if got, want := entry.Routes[8].Method, "PUT"; got != want {
 		t.Fatalf("unexpected last route method: got %q want %q", got, want)
 	}
-	if got, want := entry.Routes[7].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
+	if got, want := entry.Routes[8].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
 		t.Fatalf("unexpected last route path: got %q want %q", got, want)
 	}
 
@@ -154,11 +160,47 @@ func TestServiceRealOperationsMutateState(t *testing.T) {
 		t.Fatalf("unexpected object body: got %q want %q", got, want)
 	}
 
+	head, err := service.HeadObject(bucket.Name, object.Key)
+	if err != nil {
+		t.Fatalf("head object: %v", err)
+	}
+	if got, want := head.ETag, object.ETag; got != want {
+		t.Fatalf("unexpected head etag: got %q want %q", got, want)
+	}
+	if len(head.Body) != 0 {
+		t.Fatalf("expected head object body to be empty, got %d bytes", len(head.Body))
+	}
+
+	copied, err := service.CopyObject(bucket.Name, "archive-copy.txt", bucket.Name, object.Key)
+	if err != nil {
+		t.Fatalf("copy object: %v", err)
+	}
+	if got, want := string(copied.Body), "archive payload"; got != want {
+		t.Fatalf("unexpected copied body: got %q want %q", got, want)
+	}
+	if got, want := copied.ETag, object.ETag; got != want {
+		t.Fatalf("unexpected copied etag: got %q want %q", got, want)
+	}
+
+	copied.Body[0] = 'A'
+	restoredCopy, err := service.GetObject(bucket.Name, "archive-copy.txt")
+	if err != nil {
+		t.Fatalf("get copied object: %v", err)
+	}
+	if got, want := string(restoredCopy.Body), "archive payload"; got != want {
+		t.Fatalf("copied object body was aliased: got %q want %q", got, want)
+	}
+
 	if err := service.DeleteObject(bucket.Name, object.Key); err != nil {
 		t.Fatalf("delete object: %v", err)
 	}
+	if err := service.DeleteObject(bucket.Name, object.Key); err != nil {
+		t.Fatalf("delete missing object should stay idempotent: %v", err)
+	}
 	if _, err := service.GetObject(bucket.Name, object.Key); err == nil {
 		t.Fatal("expected deleted object lookup to fail")
+	} else if !strings.Contains(err.Error(), "NoSuchKey") {
+		t.Fatalf("expected NoSuchKey error, got %v", err)
 	}
 }
 
@@ -230,12 +272,24 @@ func TestServiceRejectsInvalidAndMissingRequests(t *testing.T) {
 	}
 	if _, err := service.GetObject("mildstack-assets", "missing"); err == nil {
 		t.Fatal("expected missing object lookup to fail")
+	} else if !strings.Contains(err.Error(), "NoSuchKey") {
+		t.Fatalf("expected NoSuchKey lookup error, got %v", err)
 	}
 	if _, err := service.PutObject("missing", "archive.txt", []byte("x"), "text/plain"); err == nil {
 		t.Fatal("expected put on missing bucket to fail")
 	}
-	if err := service.DeleteObject("mildstack-assets", "missing"); err == nil {
-		t.Fatal("expected delete on missing object to fail")
+	if _, err := service.HeadObject("mildstack-assets", "missing"); err == nil {
+		t.Fatal("expected missing object head to fail")
+	} else if !strings.Contains(err.Error(), "NoSuchKey") {
+		t.Fatalf("expected NoSuchKey head error, got %v", err)
+	}
+	if _, err := service.CopyObject("mildstack-assets", "copy.txt", "mildstack-assets", "missing"); err == nil {
+		t.Fatal("expected copy from missing object to fail")
+	} else if !strings.Contains(err.Error(), "NoSuchKey") {
+		t.Fatalf("expected NoSuchKey copy error, got %v", err)
+	}
+	if err := service.DeleteObject("mildstack-assets", "missing"); err != nil {
+		t.Fatalf("expected delete on missing object to succeed: %v", err)
 	}
 }
 
