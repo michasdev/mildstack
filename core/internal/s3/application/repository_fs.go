@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/michasdev/mildstack/core/internal/s3/domain"
 )
@@ -94,6 +95,9 @@ func validateState(state domain.State) error {
 		if bucket.Name == "" {
 			return fmt.Errorf("invalid bucket: empty name")
 		}
+		if bucket.Region == "" {
+			return fmt.Errorf("invalid bucket %q: empty region", bucket.Name)
+		}
 		buckets[bucket.Name] = struct{}{}
 	}
 
@@ -117,6 +121,19 @@ func normalizeState(state domain.State) domain.State {
 	}
 	copy(normalized.Buckets, state.Buckets)
 	copy(normalized.Objects, state.Objects)
+
+	for i := range normalized.Buckets {
+		if normalized.Buckets[i].Region == "" {
+			normalized.Buckets[i].Region = defaultRegion
+		}
+		if normalized.Buckets[i].CreatedAt.IsZero() {
+			if normalized.Buckets[i].Name == "mildstack-assets" {
+				normalized.Buckets[i].CreatedAt = time.Date(2026, time.April, 16, 0, 0, 0, 0, time.UTC)
+			} else {
+				normalized.Buckets[i].CreatedAt = time.Now().UTC()
+			}
+		}
+	}
 
 	sort.SliceStable(normalized.Buckets, func(i, j int) bool {
 		return normalized.Buckets[i].Name < normalized.Buckets[j].Name

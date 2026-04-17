@@ -9,7 +9,7 @@ func TestStateSnapshotCopiesLiveData(t *testing.T) {
 	t.Helper()
 
 	state := NewState()
-	bucket := state.UpsertBucket("mildstack-archive", "us-west-2")
+	bucket := state.UpsertBucket(Bucket{Name: "mildstack-archive", Region: "us-west-2"})
 	state.UpsertObject(Object{
 		Bucket:      bucket.Name,
 		Key:         "manifest.txt",
@@ -57,7 +57,7 @@ func TestStateMutationHelpersReturnCopiesAndUpdateState(t *testing.T) {
 		t.Fatalf("object slice aliased live state: got %q want %q", got, want)
 	}
 
-	bucket := state.UpsertBucket("mildstack-logs", "us-west-2")
+	bucket := state.UpsertBucket(Bucket{Name: "mildstack-logs", Region: "us-west-2"})
 	if got, want := bucket.Region, "us-west-2"; got != want {
 		t.Fatalf("unexpected bucket region: got %q want %q", got, want)
 	}

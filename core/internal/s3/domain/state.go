@@ -1,6 +1,9 @@
 package domain
 
-import "sort"
+import (
+	"sort"
+	"time"
+)
 
 const StateKey = "services/s3"
 
@@ -11,8 +14,9 @@ type State struct {
 }
 
 type Bucket struct {
-	Name   string
-	Region string
+	Name      string    `json:"name"`
+	Region    string    `json:"region"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Object struct {
@@ -26,7 +30,11 @@ func NewState() State {
 	return State{
 		Service: "s3",
 		Buckets: []Bucket{
-			{Name: "mildstack-assets", Region: "us-east-1"},
+			{
+				Name:      "mildstack-assets",
+				Region:    "us-east-1",
+				CreatedAt: time.Date(2026, time.April, 16, 0, 0, 0, 0, time.UTC),
+			},
 		},
 		Objects: []Object{
 			{
@@ -90,15 +98,23 @@ func (s State) HasObject(bucket, key string) bool {
 	return ok
 }
 
-func (s *State) UpsertBucket(name, region string) Bucket {
+func (s *State) UpsertBucket(bucket Bucket) Bucket {
+	if bucket.CreatedAt.IsZero() {
+		bucket.CreatedAt = time.Now().UTC()
+	}
+
 	for i := range s.Buckets {
-		if s.Buckets[i].Name == name {
-			s.Buckets[i].Region = region
+		if s.Buckets[i].Name == bucket.Name {
+			if bucket.Region != "" {
+				s.Buckets[i].Region = bucket.Region
+			}
+			if s.Buckets[i].CreatedAt.IsZero() {
+				s.Buckets[i].CreatedAt = bucket.CreatedAt
+			}
 			return s.Buckets[i]
 		}
 	}
 
-	bucket := Bucket{Name: name, Region: region}
 	s.Buckets = append(s.Buckets, bucket)
 	return bucket
 }
@@ -125,12 +141,30 @@ func (s *State) DeleteObject(bucket, key string) bool {
 	return false
 }
 
+func (s *State) DeleteBucket(name string) bool {
+	for _, object := range s.Objects {
+		if object.Bucket == name {
+			return false
+		}
+	}
+
+	for i := range s.Buckets {
+		if s.Buckets[i].Name == name {
+			s.Buckets = append(s.Buckets[:i], s.Buckets[i+1:]...)
+			return true
+		}
+	}
+
+	return false
+}
+
 func (s State) Snapshot() map[string]any {
 	buckets := make([]any, 0, len(s.Buckets))
 	for _, bucket := range s.ListBuckets() {
 		buckets = append(buckets, map[string]any{
-			"name":   bucket.Name,
-			"region": bucket.Region,
+			"name":       bucket.Name,
+			"region":     bucket.Region,
+			"created_at": bucket.CreatedAt,
 		})
 	}
 
