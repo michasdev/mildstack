@@ -27,7 +27,7 @@ func TestRegisterServiceRoutesRegistersS3BeforeServing(t *testing.T) {
 	if !ok {
 		t.Fatal("expected s3 service to be registered")
 	}
-	if got, want := len(entry.Routes), 11; got != want {
+	if got, want := len(entry.Routes), 48; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 	found := false
@@ -39,6 +39,16 @@ func TestRegisterServiceRoutesRegistersS3BeforeServing(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected list objects route to be registered")
+	}
+	found = false
+	for _, route := range entry.Routes {
+		if route.Method == "GET" && route.Path == "/api/v1/runtime/services/s3/buckets/:bucket/object-lock" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected object lock route to be registered")
 	}
 }
 

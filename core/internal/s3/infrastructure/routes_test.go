@@ -9,7 +9,7 @@ func TestRoutesUseS3ServiceSegment(t *testing.T) {
 	t.Helper()
 
 	routes := Routes()
-	if got, want := len(routes), 42; got != want {
+	if got, want := len(routes), 48; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 
@@ -49,6 +49,12 @@ func TestRoutesUseS3ServiceSegment(t *testing.T) {
 		{method: "GET", path: "/s3/buckets/:bucket/versioning", name: "s3.buckets.versioning.show"},
 		{method: "PUT", path: "/s3/buckets/:bucket/versioning", name: "s3.buckets.versioning.update"},
 		{method: "GET", path: "/s3/buckets/:bucket/objects/versions", name: "s3.objects.versions"},
+		{method: "GET", path: "/s3/buckets/:bucket/object-lock", name: "s3.buckets.object-lock.show"},
+		{method: "PUT", path: "/s3/buckets/:bucket/object-lock", name: "s3.buckets.object-lock.update"},
+		{method: "GET", path: "/s3/buckets/:bucket/objects/:object/retention", name: "s3.objects.retention.show"},
+		{method: "PUT", path: "/s3/buckets/:bucket/objects/:object/retention", name: "s3.objects.retention.update"},
+		{method: "GET", path: "/s3/buckets/:bucket/objects/:object/legal-hold", name: "s3.objects.legal-hold.show"},
+		{method: "PUT", path: "/s3/buckets/:bucket/objects/:object/legal-hold", name: "s3.objects.legal-hold.update"},
 		{method: "GET", path: "/s3/buckets/:bucket/objects", name: "s3.objects.list-v1"},
 		{method: "GET", path: "/s3/buckets/:bucket/objects/v2", name: "s3.objects.list-v2"},
 		{method: "POST", path: "/s3/buckets/:bucket/objects/delete", name: "s3.objects.delete-batch"},

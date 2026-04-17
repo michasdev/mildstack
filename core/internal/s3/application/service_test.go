@@ -44,14 +44,13 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := policy.ErrorPrefix, "s3"; got != want {
 		t.Fatalf("unexpected policy error prefix: got %q want %q", got, want)
 	}
-	if got, want := len(policy.Supported), 23; got != want {
+	if got, want := len(policy.Supported), 24; got != want {
 		t.Fatalf("unexpected supported count: got %d want %d", got, want)
 	}
-	if got, want := len(policy.Unsupported), 1; got != want {
+	if got, want := len(policy.Unsupported), 0; got != want {
 		t.Fatalf("unexpected unsupported count: got %d want %d", got, want)
 	}
 	policy.Supported[0] = "changed"
-	policy.Unsupported[0] = "changed"
 	again := service.Policy()
 	if got, want := again.Supported[0], "list buckets"; got != want {
 		t.Fatalf("policy supported slice was not copied: got %q want %q", got, want)
@@ -68,8 +67,8 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := again.Supported[19], "multipart upload"; got != want {
 		t.Fatalf("expected multipart to move into supported capabilities: got %q want %q", got, want)
 	}
-	if got, want := again.Unsupported[0], "object locking"; got != want {
-		t.Fatalf("policy unsupported slice was not copied: got %q want %q", got, want)
+	if got, want := again.Supported[23], "object locking"; got != want {
+		t.Fatalf("expected object locking to move into supported capabilities: got %q want %q", got, want)
 	}
 
 	registrar := deliveryhttp.NewRegistrar()
@@ -81,7 +80,7 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if !ok {
 		t.Fatal("expected s3 service to be registered")
 	}
-	if got, want := len(entry.Routes), 42; got != want {
+	if got, want := len(entry.Routes), 48; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 	expectedRoutes := []struct {
@@ -119,6 +118,12 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/replication", "s3.buckets.replication.delete"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/versioning", "s3.buckets.versioning.show"},
 		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/versioning", "s3.buckets.versioning.update"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/object-lock", "s3.buckets.object-lock.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/object-lock", "s3.buckets.object-lock.update"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/retention", "s3.objects.retention.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/retention", "s3.objects.retention.update"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/legal-hold", "s3.objects.legal-hold.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/legal-hold", "s3.objects.legal-hold.update"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/versions", "s3.objects.versions"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects", "s3.objects.list-v1"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/v2", "s3.objects.list-v2"},

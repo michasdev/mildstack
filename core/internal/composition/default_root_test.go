@@ -67,13 +67,22 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	if !ok {
 		t.Fatal("expected s3 service to be registered")
 	}
-	if got, want := len(s3Entry.Routes), 11; got != want {
+	if got, want := len(s3Entry.Routes), 48; got != want {
 		t.Fatalf("unexpected s3 route count: got %d want %d", got, want)
 	}
 	assertRouteExists(t, s3Entry.Routes, "GET", "/api/v1/runtime/services/s3/buckets")
 	assertRouteExists(t, s3Entry.Routes, "POST", "/api/v1/runtime/services/s3/buckets")
 	assertRouteExists(t, s3Entry.Routes, "HEAD", "/api/v1/runtime/services/s3/buckets/:bucket")
 	assertRouteExists(t, s3Entry.Routes, "DELETE", "/api/v1/runtime/services/s3/buckets/:bucket")
+	assertRouteExists(t, s3Entry.Routes, "GET", "/api/v1/runtime/services/s3/buckets/:bucket/versioning")
+	assertRouteExists(t, s3Entry.Routes, "PUT", "/api/v1/runtime/services/s3/buckets/:bucket/versioning")
+	assertRouteExists(t, s3Entry.Routes, "GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/versions")
+	assertRouteExists(t, s3Entry.Routes, "GET", "/api/v1/runtime/services/s3/buckets/:bucket/object-lock")
+	assertRouteExists(t, s3Entry.Routes, "PUT", "/api/v1/runtime/services/s3/buckets/:bucket/object-lock")
+	assertRouteExists(t, s3Entry.Routes, "GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/retention")
+	assertRouteExists(t, s3Entry.Routes, "PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/retention")
+	assertRouteExists(t, s3Entry.Routes, "GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/legal-hold")
+	assertRouteExists(t, s3Entry.Routes, "PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/legal-hold")
 	assertRouteExists(t, s3Entry.Routes, "GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects")
 	assertRouteExists(t, s3Entry.Routes, "GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/v2")
 	assertRouteExists(t, s3Entry.Routes, "POST", "/api/v1/runtime/services/s3/buckets/:bucket/objects/delete")
@@ -81,6 +90,10 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	assertRouteExists(t, s3Entry.Routes, "HEAD", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object")
 	assertRouteExists(t, s3Entry.Routes, "PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object")
 	assertRouteExists(t, s3Entry.Routes, "DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object")
+	assertRouteExists(t, s3Entry.Routes, "POST", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads")
+	assertRouteExists(t, s3Entry.Routes, "PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads/:upload/parts/:part")
+	assertRouteExists(t, s3Entry.Routes, "POST", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads/:upload/complete")
+	assertRouteExists(t, s3Entry.Routes, "DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads/:upload")
 
 	dynamoEntry, ok := registrar.Service("dynamodb")
 	if !ok {
