@@ -33,6 +33,20 @@ type Object struct {
 	PreservedHeaders map[string]string `json:"preserved_headers,omitempty"`
 }
 
+type ListObjectsOptions struct {
+	Prefix     string
+	Delimiter  string
+	MaxKeys    int
+	StartAfter string
+}
+
+type ObjectListPage struct {
+	Objects        []Object
+	CommonPrefixes []string
+	IsTruncated    bool
+	NextMarker     string
+}
+
 func NewState() State {
 	return State{
 		Service: "s3",
@@ -78,6 +92,76 @@ func (s State) ListObjects(bucket string) []Object {
 		return objects[i].Key < objects[j].Key
 	})
 	return objects
+}
+
+func (s State) ListObjectPage(bucket string, options ListObjectsOptions) ObjectListPage {
+	objects := s.ListObjects(bucket)
+	if options.MaxKeys <= 0 {
+		options.MaxKeys = 1000
+	}
+
+	allKeys := make([]string, 0, len(objects))
+	objectsByKey := make(map[string]Object, len(objects))
+	for _, object := range objects {
+		if options.Prefix != "" && len(object.Key) >= len(options.Prefix) && object.Key[:len(options.Prefix)] != options.Prefix {
+			continue
+		}
+		if options.Prefix != "" && len(object.Key) < len(options.Prefix) {
+			continue
+		}
+		if object.Key <= options.StartAfter {
+			continue
+		}
+		allKeys = append(allKeys, object.Key)
+		objectsByKey[object.Key] = object
+	}
+
+	page := ObjectListPage{
+		Objects:        make([]Object, 0, min(len(allKeys), options.MaxKeys)),
+		CommonPrefixes: make([]string, 0),
+	}
+	commonPrefixes := make(map[string]struct{})
+	count := 0
+
+	for i := 0; i < len(allKeys); {
+		key := allKeys[i]
+
+		if options.Delimiter != "" {
+			suffix := key[len(options.Prefix):]
+			if index := indexOfDelimiter(suffix, options.Delimiter); index >= 0 {
+				prefix := options.Prefix + suffix[:index+len(options.Delimiter)]
+				if _, seen := commonPrefixes[prefix]; !seen {
+					if count >= options.MaxKeys {
+						page.IsTruncated = true
+						break
+					}
+					commonPrefixes[prefix] = struct{}{}
+					page.CommonPrefixes = append(page.CommonPrefixes, prefix)
+					count++
+				}
+				page.NextMarker = key
+				i++
+				for i < len(allKeys) && hasPrefix(allKeys[i], prefix) {
+					page.NextMarker = allKeys[i]
+					i++
+				}
+				continue
+			}
+		}
+
+		if count >= options.MaxKeys {
+			page.IsTruncated = true
+			break
+		}
+
+		page.Objects = append(page.Objects, cloneObject(objectsByKey[key]))
+		page.NextMarker = key
+		count++
+		i++
+	}
+
+	page.CommonPrefixes = append([]string(nil), page.CommonPrefixes...)
+	return page
 }
 
 func (s State) Bucket(name string) (Bucket, bool) {
@@ -248,4 +332,30 @@ func cloneStringMap(values map[string]string) map[string]string {
 func etagForBody(body []byte) string {
 	sum := md5.Sum(body)
 	return `"` + hex.EncodeToString(sum[:]) + `"`
+}
+
+func hasPrefix(value, prefix string) bool {
+	if len(prefix) > len(value) {
+		return false
+	}
+	return value[:len(prefix)] == prefix
+}
+
+func indexOfDelimiter(value, delimiter string) int {
+	if delimiter == "" || len(delimiter) > len(value) {
+		return -1
+	}
+	for i := 0; i <= len(value)-len(delimiter); i++ {
+		if value[i:i+len(delimiter)] == delimiter {
+			return i
+		}
+	}
+	return -1
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -213,3 +213,52 @@ func TestStateListObjectsReturnsCopySafeBodies(t *testing.T) {
 		t.Fatalf("listed object body was aliased: got %q want %q", got, want)
 	}
 }
+
+func TestStateListObjectPageUsesDeterministicDelimiterPagination(t *testing.T) {
+	t.Helper()
+
+	state := NewState()
+	state.UpsertBucket(Bucket{Name: "catalog-bucket", Region: "us-east-1"})
+	state.UpsertObject(Object{Bucket: "catalog-bucket", Key: "alpha.txt", Body: []byte("a"), ContentType: "text/plain"})
+	state.UpsertObject(Object{Bucket: "catalog-bucket", Key: "photos/2026/01.jpg", Body: []byte("b"), ContentType: "image/jpeg"})
+	state.UpsertObject(Object{Bucket: "catalog-bucket", Key: "photos/2027/02.jpg", Body: []byte("c"), ContentType: "image/jpeg"})
+	state.UpsertObject(Object{Bucket: "catalog-bucket", Key: "zeta.txt", Body: []byte("d"), ContentType: "text/plain"})
+
+	page := state.ListObjectPage("catalog-bucket", ListObjectsOptions{
+		Delimiter: "/",
+		MaxKeys:   2,
+	})
+
+	if got, want := len(page.Objects), 1; got != want {
+		t.Fatalf("unexpected object count: got %d want %d", got, want)
+	}
+	if got, want := page.Objects[0].Key, "alpha.txt"; got != want {
+		t.Fatalf("unexpected first object key: got %q want %q", got, want)
+	}
+	if got, want := len(page.CommonPrefixes), 1; got != want {
+		t.Fatalf("unexpected common prefix count: got %d want %d", got, want)
+	}
+	if got, want := page.CommonPrefixes[0], "photos/"; got != want {
+		t.Fatalf("unexpected common prefix: got %q want %q", got, want)
+	}
+	if !page.IsTruncated {
+		t.Fatal("expected page to be truncated")
+	}
+	if got, want := page.NextMarker, "photos/2027/02.jpg"; got != want {
+		t.Fatalf("unexpected next marker: got %q want %q", got, want)
+	}
+
+	page.Objects[0].Key = "mutated"
+	page.CommonPrefixes[0] = "mutated/"
+
+	again := state.ListObjectPage("catalog-bucket", ListObjectsOptions{
+		Delimiter: "/",
+		MaxKeys:   2,
+	})
+	if got, want := again.Objects[0].Key, "alpha.txt"; got != want {
+		t.Fatalf("object page aliased live state: got %q want %q", got, want)
+	}
+	if got, want := again.CommonPrefixes[0], "photos/"; got != want {
+		t.Fatalf("common prefixes aliased live state: got %q want %q", got, want)
+	}
+}

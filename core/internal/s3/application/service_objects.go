@@ -1,22 +1,133 @@
 package application
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 
 	"github.com/michasdev/mildstack/core/internal/s3/domain"
 )
 
+type ListObjectsV1Request struct {
+	Bucket    string
+	Prefix    string
+	Delimiter string
+	Marker    string
+	MaxKeys   int
+}
+
+type ListObjectsV1Result struct {
+	Bucket         string
+	Prefix         string
+	Marker         string
+	Delimiter      string
+	MaxKeys        int
+	IsTruncated    bool
+	NextMarker     string
+	Objects        []domain.Object
+	CommonPrefixes []string
+}
+
+type ListObjectsV2Request struct {
+	Bucket            string
+	Prefix            string
+	Delimiter         string
+	ContinuationToken string
+	StartAfter        string
+	MaxKeys           int
+}
+
+type ListObjectsV2Result struct {
+	Bucket                string
+	Prefix                string
+	Delimiter             string
+	ContinuationToken     string
+	StartAfter            string
+	MaxKeys               int
+	KeyCount              int
+	IsTruncated           bool
+	NextContinuationToken string
+	Objects               []domain.Object
+	CommonPrefixes        []string
+}
+
 func (s *Service) ListObjects(bucket string) ([]domain.Object, error) {
-	bucket = strings.TrimSpace(bucket)
-	if bucket == "" {
-		return nil, fmt.Errorf("s3: bucket name is required")
+	result, err := s.ListObjectsV1(ListObjectsV1Request{Bucket: bucket})
+	if err != nil {
+		return nil, err
 	}
-	if !s.state.HasBucket(bucket) {
-		return nil, fmt.Errorf("s3: bucket %q not found", bucket)
+	return result.Objects, nil
+}
+
+func (s *Service) ListObjectsV1(request ListObjectsV1Request) (ListObjectsV1Result, error) {
+	bucket, err := s.requireBucket(request.Bucket)
+	if err != nil {
+		return ListObjectsV1Result{}, err
 	}
 
-	return s.state.ListObjects(bucket), nil
+	page := s.state.ListObjectPage(bucket, domain.ListObjectsOptions{
+		Prefix:     strings.TrimSpace(request.Prefix),
+		Delimiter:  strings.TrimSpace(request.Delimiter),
+		MaxKeys:    request.MaxKeys,
+		StartAfter: strings.TrimSpace(request.Marker),
+	})
+
+	result := ListObjectsV1Result{
+		Bucket:         bucket,
+		Prefix:         strings.TrimSpace(request.Prefix),
+		Marker:         strings.TrimSpace(request.Marker),
+		Delimiter:      strings.TrimSpace(request.Delimiter),
+		MaxKeys:        normalizedMaxKeys(request.MaxKeys),
+		IsTruncated:    page.IsTruncated,
+		Objects:        cloneObjects(page.Objects),
+		CommonPrefixes: append([]string(nil), page.CommonPrefixes...),
+	}
+	if result.IsTruncated && result.Delimiter != "" && page.NextMarker != "" {
+		result.NextMarker = page.NextMarker
+	}
+	return result, nil
+}
+
+func (s *Service) ListObjectsV2(request ListObjectsV2Request) (ListObjectsV2Result, error) {
+	bucket, err := s.requireBucket(request.Bucket)
+	if err != nil {
+		return ListObjectsV2Result{}, err
+	}
+
+	startAfter := strings.TrimSpace(request.StartAfter)
+	continuationToken := strings.TrimSpace(request.ContinuationToken)
+	if continuationToken != "" {
+		decoded, decodeErr := base64.StdEncoding.DecodeString(continuationToken)
+		if decodeErr == nil {
+			startAfter = string(decoded)
+		} else {
+			startAfter = continuationToken
+		}
+	}
+
+	page := s.state.ListObjectPage(bucket, domain.ListObjectsOptions{
+		Prefix:     strings.TrimSpace(request.Prefix),
+		Delimiter:  strings.TrimSpace(request.Delimiter),
+		MaxKeys:    request.MaxKeys,
+		StartAfter: startAfter,
+	})
+
+	result := ListObjectsV2Result{
+		Bucket:            bucket,
+		Prefix:            strings.TrimSpace(request.Prefix),
+		Delimiter:         strings.TrimSpace(request.Delimiter),
+		ContinuationToken: continuationToken,
+		StartAfter:        strings.TrimSpace(request.StartAfter),
+		MaxKeys:           normalizedMaxKeys(request.MaxKeys),
+		KeyCount:          len(page.Objects) + len(page.CommonPrefixes),
+		IsTruncated:       page.IsTruncated,
+		Objects:           cloneObjects(page.Objects),
+		CommonPrefixes:    append([]string(nil), page.CommonPrefixes...),
+	}
+	if result.IsTruncated && page.NextMarker != "" {
+		result.NextContinuationToken = base64.StdEncoding.EncodeToString([]byte(page.NextMarker))
+	}
+	return result, nil
 }
 
 func (s *Service) GetObject(bucket, key string) (domain.Object, error) {
@@ -135,4 +246,45 @@ func (s *Service) DeleteObject(bucket, key string) error {
 	}
 	s.state.DeleteObject(bucket, key)
 	return s.persist()
+}
+
+func (s *Service) requireBucket(bucket string) (string, error) {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return "", fmt.Errorf("s3: bucket name is required")
+	}
+	if !s.state.HasBucket(bucket) {
+		return "", fmt.Errorf("s3: bucket %q not found", bucket)
+	}
+	return bucket, nil
+}
+
+func normalizedMaxKeys(maxKeys int) int {
+	if maxKeys <= 0 {
+		return 1000
+	}
+	return maxKeys
+}
+
+func cloneObjects(objects []domain.Object) []domain.Object {
+	cloned := make([]domain.Object, len(objects))
+	for i := range objects {
+		cloned[i] = objects[i]
+		cloned[i].Body = append([]byte(nil), objects[i].Body...)
+		cloned[i].Metadata = cloneObjectStringMap(objects[i].Metadata)
+		cloned[i].PreservedHeaders = cloneObjectStringMap(objects[i].PreservedHeaders)
+	}
+	return cloned
+}
+
+func cloneObjectStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }

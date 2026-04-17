@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -290,6 +291,127 @@ func TestServiceRejectsInvalidAndMissingRequests(t *testing.T) {
 	}
 	if err := service.DeleteObject("mildstack-assets", "missing"); err != nil {
 		t.Fatalf("expected delete on missing object to succeed: %v", err)
+	}
+}
+
+func TestServiceListObjectsV1UsesMarkerPaginationDeterministically(t *testing.T) {
+	t.Helper()
+
+	service := New()
+	bucket, err := service.CreateBucket("catalog-bucket", "us-east-1")
+	if err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+
+	for _, key := range []string{"charlie.txt", "alpha.txt", "bravo.txt"} {
+		if _, err := service.PutObject(bucket.Name, key, []byte(key), "text/plain"); err != nil {
+			t.Fatalf("put object %q: %v", key, err)
+		}
+	}
+
+	first, err := service.ListObjectsV1(ListObjectsV1Request{
+		Bucket:  bucket.Name,
+		MaxKeys: 2,
+	})
+	if err != nil {
+		t.Fatalf("list objects v1 first page: %v", err)
+	}
+
+	if got, want := len(first.Objects), 2; got != want {
+		t.Fatalf("unexpected first page object count: got %d want %d", got, want)
+	}
+	if got, want := first.Objects[0].Key, "alpha.txt"; got != want {
+		t.Fatalf("unexpected first object key: got %q want %q", got, want)
+	}
+	if got, want := first.Objects[1].Key, "bravo.txt"; got != want {
+		t.Fatalf("unexpected second object key: got %q want %q", got, want)
+	}
+	if !first.IsTruncated {
+		t.Fatal("expected first page to be truncated")
+	}
+	if got := first.NextMarker; got != "" {
+		t.Fatalf("expected v1 next marker to stay empty without delimiter, got %q", got)
+	}
+
+	second, err := service.ListObjectsV1(ListObjectsV1Request{
+		Bucket: bucket.Name,
+		Marker: first.Objects[len(first.Objects)-1].Key,
+	})
+	if err != nil {
+		t.Fatalf("list objects v1 second page: %v", err)
+	}
+	if got, want := len(second.Objects), 1; got != want {
+		t.Fatalf("unexpected second page object count: got %d want %d", got, want)
+	}
+	if got, want := second.Objects[0].Key, "charlie.txt"; got != want {
+		t.Fatalf("unexpected trailing object key: got %q want %q", got, want)
+	}
+}
+
+func TestServiceListObjectsV2UsesContinuationTokensAndStartAfter(t *testing.T) {
+	t.Helper()
+
+	service := New()
+	bucket, err := service.CreateBucket("catalog-v2-bucket", "us-east-1")
+	if err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+
+	for _, key := range []string{"charlie.txt", "alpha.txt", "bravo.txt"} {
+		if _, err := service.PutObject(bucket.Name, key, []byte(key), "text/plain"); err != nil {
+			t.Fatalf("put object %q: %v", key, err)
+		}
+	}
+
+	first, err := service.ListObjectsV2(ListObjectsV2Request{
+		Bucket:  bucket.Name,
+		MaxKeys: 2,
+	})
+	if err != nil {
+		t.Fatalf("list objects v2 first page: %v", err)
+	}
+	if got, want := len(first.Objects), 2; got != want {
+		t.Fatalf("unexpected first page object count: got %d want %d", got, want)
+	}
+	if got, want := first.KeyCount, 2; got != want {
+		t.Fatalf("unexpected key count: got %d want %d", got, want)
+	}
+	if !first.IsTruncated {
+		t.Fatal("expected first page to be truncated")
+	}
+	if got, want := first.NextContinuationToken, base64.StdEncoding.EncodeToString([]byte("bravo.txt")); got != want {
+		t.Fatalf("unexpected continuation token: got %q want %q", got, want)
+	}
+
+	second, err := service.ListObjectsV2(ListObjectsV2Request{
+		Bucket:            bucket.Name,
+		ContinuationToken: first.NextContinuationToken,
+	})
+	if err != nil {
+		t.Fatalf("list objects v2 second page: %v", err)
+	}
+	if got, want := len(second.Objects), 1; got != want {
+		t.Fatalf("unexpected second page object count: got %d want %d", got, want)
+	}
+	if got, want := second.Objects[0].Key, "charlie.txt"; got != want {
+		t.Fatalf("unexpected second page object key: got %q want %q", got, want)
+	}
+
+	startAfter, err := service.ListObjectsV2(ListObjectsV2Request{
+		Bucket:     bucket.Name,
+		StartAfter: "alpha.txt",
+	})
+	if err != nil {
+		t.Fatalf("list objects v2 with start-after: %v", err)
+	}
+	if got, want := len(startAfter.Objects), 2; got != want {
+		t.Fatalf("unexpected start-after object count: got %d want %d", got, want)
+	}
+	if got, want := startAfter.Objects[0].Key, "bravo.txt"; got != want {
+		t.Fatalf("unexpected start-after first key: got %q want %q", got, want)
+	}
+	if got, want := startAfter.Objects[1].Key, "charlie.txt"; got != want {
+		t.Fatalf("unexpected start-after second key: got %q want %q", got, want)
 	}
 }
 
