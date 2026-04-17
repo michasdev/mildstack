@@ -6,6 +6,7 @@ type Service interface {
 	Start(context.Context) error
 	Stop(context.Context) error
 	Metadata() Metadata
+	Policy() EmulationPolicy
 	RegisterRoutes(RouteRegistrar) error
 	AttachState(StateHook) error
 }
@@ -31,4 +32,3 @@ type StateHook interface {
 	Set(string, any)
 	Get(string) (any, bool)
 }
-

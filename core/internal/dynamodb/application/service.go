@@ -12,12 +12,25 @@ import (
 var _ orchestrator.Service = (*Service)(nil)
 
 type Service struct {
-	state domain.State
+	state  domain.State
+	policy orchestrator.EmulationPolicy
 }
 
 func New() *Service {
 	return &Service{
 		state: domain.NewState(),
+		policy: orchestrator.NewEmulationPolicy(
+			orchestrator.FidelityExemplar,
+			[]string{
+				"list tables",
+				"read items",
+			},
+			[]string{
+				"global tables",
+				"transactions",
+			},
+			"dynamodb",
+		),
 	}
 }
 
@@ -36,6 +49,10 @@ func (s *Service) Metadata() orchestrator.Metadata {
 		Version:     "v1",
 		Tags:        []string{"aws", "database", "nosql", "exemplar"},
 	}
+}
+
+func (s *Service) Policy() orchestrator.EmulationPolicy {
+	return s.policy.Clone()
 }
 
 func (s *Service) RegisterRoutes(registrar orchestrator.RouteRegistrar) error {

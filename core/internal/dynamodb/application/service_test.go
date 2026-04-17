@@ -26,6 +26,29 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 		t.Fatalf("unexpected service version: got %q want %q", got, want)
 	}
 
+	policy := service.Policy()
+	if got, want := policy.Fidelity, orchestrator.FidelityExemplar; got != want {
+		t.Fatalf("unexpected policy fidelity: got %q want %q", got, want)
+	}
+	if got, want := policy.ErrorPrefix, "dynamodb"; got != want {
+		t.Fatalf("unexpected policy error prefix: got %q want %q", got, want)
+	}
+	if got, want := len(policy.Supported), 2; got != want {
+		t.Fatalf("unexpected supported count: got %d want %d", got, want)
+	}
+	if got, want := len(policy.Unsupported), 2; got != want {
+		t.Fatalf("unexpected unsupported count: got %d want %d", got, want)
+	}
+	policy.Supported[0] = "changed"
+	policy.Unsupported[0] = "changed"
+	again := service.Policy()
+	if got, want := again.Supported[0], "list tables"; got != want {
+		t.Fatalf("policy supported slice was not copied: got %q want %q", got, want)
+	}
+	if got, want := again.Unsupported[0], "global tables"; got != want {
+		t.Fatalf("policy unsupported slice was not copied: got %q want %q", got, want)
+	}
+
 	expectedTags := []string{"aws", "database", "nosql", "exemplar"}
 	if got, want := len(metadata.Tags), len(expectedTags); got != want {
 		t.Fatalf("unexpected tag count: got %d want %d", got, want)

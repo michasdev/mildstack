@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -9,6 +10,7 @@ var _ Service = (*fakeService)(nil)
 
 type fakeService struct {
 	metadata Metadata
+	policy   EmulationPolicy
 }
 
 func (f *fakeService) Start(context.Context) error {
@@ -21,6 +23,10 @@ func (f *fakeService) Stop(context.Context) error {
 
 func (f *fakeService) Metadata() Metadata {
 	return f.metadata
+}
+
+func (f *fakeService) Policy() EmulationPolicy {
+	return f.policy.Clone()
 }
 
 func (f *fakeService) RegisterRoutes(reg RouteRegistrar) error {
@@ -67,6 +73,45 @@ func TestFakeServiceImplementsContract(t *testing.T) {
 			Version:     "v1",
 			Tags:        []string{"core"},
 		},
+		policy: NewEmulationPolicy(
+			FidelityExemplar,
+			[]string{"list health"},
+			[]string{"write health"},
+			"fake",
+		),
+	}
+
+	policy := service.Policy()
+	if got, want := policy.Fidelity, FidelityExemplar; got != want {
+		t.Fatalf("unexpected fidelity: got %q want %q", got, want)
+	}
+	if got, want := policy.ErrorPrefix, "fake"; got != want {
+		t.Fatalf("unexpected error prefix: got %q want %q", got, want)
+	}
+	if got, want := len(policy.Supported), 1; got != want {
+		t.Fatalf("unexpected supported count: got %d want %d", got, want)
+	}
+	if got, want := len(policy.Unsupported), 1; got != want {
+		t.Fatalf("unexpected unsupported count: got %d want %d", got, want)
+	}
+
+	policy.Supported[0] = "changed"
+	policy.Unsupported[0] = "changed"
+
+	again := service.Policy()
+	if got, want := again.Supported[0], "list health"; got != want {
+		t.Fatalf("policy supported slice was not copied: got %q want %q", got, want)
+	}
+	if got, want := again.Unsupported[0], "write health"; got != want {
+		t.Fatalf("policy unsupported slice was not copied: got %q want %q", got, want)
+	}
+
+	err := UnsupportedError(again, "DeleteHealth")
+	if err == nil {
+		t.Fatal("expected unsupported error")
+	}
+	if got, want := err.Error(), "fake: unsupported operation DeleteHealth"; got != want {
+		t.Fatalf("unexpected unsupported error: got %q want %q", got, want)
 	}
 
 	registrar := &fakeRegistrar{}
@@ -93,3 +138,32 @@ func TestFakeServiceImplementsContract(t *testing.T) {
 	}
 }
 
+func TestNewEmulationPolicyCopiesInputSlices(t *testing.T) {
+	t.Helper()
+
+	supported := []string{"read"}
+	unsupported := []string{"write"}
+
+	policy := NewEmulationPolicy(FidelityPartial, supported, unsupported, "fake")
+	supported[0] = "changed"
+	unsupported[0] = "changed"
+
+	if got, want := policy.Supported[0], "read"; got != want {
+		t.Fatalf("supported slice was not copied: got %q want %q", got, want)
+	}
+	if got, want := policy.Unsupported[0], "write"; got != want {
+		t.Fatalf("unsupported slice was not copied: got %q want %q", got, want)
+	}
+}
+
+func TestUnsupportedErrorUsesPolicyPrefix(t *testing.T) {
+	t.Helper()
+
+	err := UnsupportedError(EmulationPolicy{ErrorPrefix: "fake"}, "DeleteHealth")
+	if err == nil {
+		t.Fatal("expected unsupported error")
+	}
+	if !strings.HasPrefix(err.Error(), "fake:") {
+		t.Fatalf("unexpected unsupported error prefix: %q", err.Error())
+	}
+}
