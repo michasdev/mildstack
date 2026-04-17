@@ -39,7 +39,7 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := policy.ErrorPrefix, "s3"; got != want {
 		t.Fatalf("unexpected policy error prefix: got %q want %q", got, want)
 	}
-	if got, want := len(policy.Supported), 10; got != want {
+	if got, want := len(policy.Supported), 12; got != want {
 		t.Fatalf("unexpected supported count: got %d want %d", got, want)
 	}
 	if got, want := len(policy.Unsupported), 2; got != want {
@@ -64,7 +64,7 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if !ok {
 		t.Fatal("expected s3 service to be registered")
 	}
-	if got, want := len(entry.Routes), 9; got != want {
+	if got, want := len(entry.Routes), 11; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 	if got, want := entry.Routes[0].Method, "DELETE"; got != want {
@@ -76,22 +76,40 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := entry.Routes[1].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
 		t.Fatalf("unexpected second route path: got %q want %q", got, want)
 	}
-	if got, want := entry.Routes[5].Method, "HEAD"; got != want {
+	if got, want := entry.Routes[2].Method, "GET"; got != want {
+		t.Fatalf("unexpected third route method: got %q want %q", got, want)
+	}
+	if got, want := entry.Routes[2].Path, "/api/v1/runtime/services/s3/buckets"; got != want {
+		t.Fatalf("unexpected third route path: got %q want %q", got, want)
+	}
+	if got, want := entry.Routes[3].Method, "GET"; got != want {
+		t.Fatalf("unexpected fourth route method: got %q want %q", got, want)
+	}
+	if got, want := entry.Routes[3].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects"; got != want {
+		t.Fatalf("unexpected fourth route path: got %q want %q", got, want)
+	}
+	if got, want := entry.Routes[5].Method, "GET"; got != want {
 		t.Fatalf("unexpected sixth route method: got %q want %q", got, want)
 	}
-	if got, want := entry.Routes[5].Path, "/api/v1/runtime/services/s3/buckets/:bucket"; got != want {
+	if got, want := entry.Routes[5].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/v2"; got != want {
 		t.Fatalf("unexpected sixth route path: got %q want %q", got, want)
 	}
-	if got, want := entry.Routes[6].Method, "HEAD"; got != want {
-		t.Fatalf("unexpected seventh route method: got %q want %q", got, want)
+	if got, want := entry.Routes[8].Method, "POST"; got != want {
+		t.Fatalf("unexpected ninth route method: got %q want %q", got, want)
 	}
-	if got, want := entry.Routes[6].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
-		t.Fatalf("unexpected seventh route path: got %q want %q", got, want)
+	if got, want := entry.Routes[8].Path, "/api/v1/runtime/services/s3/buckets"; got != want {
+		t.Fatalf("unexpected ninth route path: got %q want %q", got, want)
 	}
-	if got, want := entry.Routes[8].Method, "PUT"; got != want {
+	if got, want := entry.Routes[9].Method, "POST"; got != want {
+		t.Fatalf("unexpected tenth route method: got %q want %q", got, want)
+	}
+	if got, want := entry.Routes[9].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/delete"; got != want {
+		t.Fatalf("unexpected tenth route path: got %q want %q", got, want)
+	}
+	if got, want := entry.Routes[10].Method, "PUT"; got != want {
 		t.Fatalf("unexpected last route method: got %q want %q", got, want)
 	}
-	if got, want := entry.Routes[8].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
+	if got, want := entry.Routes[10].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
 		t.Fatalf("unexpected last route path: got %q want %q", got, want)
 	}
 
@@ -412,6 +430,65 @@ func TestServiceListObjectsV2UsesContinuationTokensAndStartAfter(t *testing.T) {
 	}
 	if got, want := startAfter.Objects[1].Key, "charlie.txt"; got != want {
 		t.Fatalf("unexpected start-after second key: got %q want %q", got, want)
+	}
+}
+
+func TestServiceDeleteObjectsPreservesOrderAndTreatsMissingKeysAsDeleted(t *testing.T) {
+	t.Helper()
+
+	service := New()
+	bucket, err := service.CreateBucket("catalog-delete-bucket", "us-east-1")
+	if err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+
+	for _, key := range []string{"charlie.txt", "alpha.txt", "bravo.txt"} {
+		if _, err := service.PutObject(bucket.Name, key, []byte(key), "text/plain"); err != nil {
+			t.Fatalf("put object %q: %v", key, err)
+		}
+	}
+
+	result, err := service.DeleteObjects(DeleteObjectsRequest{
+		Bucket: bucket.Name,
+		Keys:   []string{"missing.txt", "bravo.txt", "alpha.txt"},
+	})
+	if err != nil {
+		t.Fatalf("delete objects: %v", err)
+	}
+	if got, want := len(result.Deleted), 3; got != want {
+		t.Fatalf("unexpected deleted count: got %d want %d", got, want)
+	}
+	if got, want := result.Deleted[0].Key, "missing.txt"; got != want {
+		t.Fatalf("unexpected first deleted key: got %q want %q", got, want)
+	}
+	if got, want := result.Deleted[1].Key, "bravo.txt"; got != want {
+		t.Fatalf("unexpected second deleted key: got %q want %q", got, want)
+	}
+	if got, want := result.Deleted[2].Key, "alpha.txt"; got != want {
+		t.Fatalf("unexpected third deleted key: got %q want %q", got, want)
+	}
+
+	remaining, err := service.ListObjectsV1(ListObjectsV1Request{Bucket: bucket.Name})
+	if err != nil {
+		t.Fatalf("list remaining objects: %v", err)
+	}
+	if got, want := len(remaining.Objects), 1; got != want {
+		t.Fatalf("unexpected remaining count: got %d want %d", got, want)
+	}
+	if got, want := remaining.Objects[0].Key, "charlie.txt"; got != want {
+		t.Fatalf("unexpected remaining key: got %q want %q", got, want)
+	}
+
+	quiet, err := service.DeleteObjects(DeleteObjectsRequest{
+		Bucket: bucket.Name,
+		Keys:   []string{"charlie.txt"},
+		Quiet:  true,
+	})
+	if err != nil {
+		t.Fatalf("quiet delete objects: %v", err)
+	}
+	if got := len(quiet.Deleted); got != 0 {
+		t.Fatalf("expected quiet delete to omit deleted payload, got %d entries", got)
 	}
 }
 
