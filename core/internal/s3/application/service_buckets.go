@@ -72,6 +72,7 @@ func (s *Service) DeleteBucket(name string) error {
 	if !s.state.DeleteBucket(name) {
 		return fmt.Errorf("s3: BucketNotEmpty: The bucket you tried to delete is not empty")
 	}
+	s.removeMultipartUploads(name)
 	return s.persist()
 }
 

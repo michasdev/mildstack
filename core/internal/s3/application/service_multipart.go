@@ -82,6 +82,9 @@ func (s *Service) CompleteMultipartUpload(uploadID string) (domain.Object, error
 	if len(parts) == 0 {
 		return domain.Object{}, fmt.Errorf("s3: multipart upload %q has no parts", uploadID)
 	}
+	if !s.state.HasBucket(upload.Bucket) {
+		return domain.Object{}, fmt.Errorf("s3: NoSuchBucket: bucket %q not found", upload.Bucket)
+	}
 	if s.state.HasObject(upload.Bucket, upload.Key) {
 		if err := s.objectMutationBlocked(upload.Bucket, upload.Key); err != nil {
 			return domain.Object{}, err
@@ -112,6 +115,7 @@ func (s *Service) CompleteMultipartUpload(uploadID string) (domain.Object, error
 		return domain.Object{}, err
 	}
 	s.clearObjectProtection(upload.Bucket, upload.Key)
+	s.applyDefaultRetention(upload.Bucket, upload.Key)
 	if err := s.persist(); err != nil {
 		return domain.Object{}, err
 	}
@@ -130,6 +134,14 @@ func (s *Service) AbortMultipartUpload(uploadID string) error {
 	}
 	delete(s.multipartUploads, uploadID)
 	return nil
+}
+
+func (s *Service) removeMultipartUploads(bucket string) {
+	for uploadID, upload := range s.multipartUploads {
+		if upload.Bucket == bucket {
+			delete(s.multipartUploads, uploadID)
+		}
+	}
 }
 
 func (s *Service) nextMultipartUploadID() string {

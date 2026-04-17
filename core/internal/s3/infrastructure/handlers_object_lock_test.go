@@ -19,6 +19,11 @@ func TestHandlersObjectLockRoundTripAndCopySafety(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
+
+	if _, err := service.PutObject(bucket.Name, "archive.txt", []byte("payload"), "text/plain"); err != nil {
+		t.Fatalf("put object: %v", err)
+	}
+
 	if _, err := service.PutBucketVersioning(bucket.Name, domain.VersioningEnabled); err != nil {
 		t.Fatalf("enable versioning: %v", err)
 	}
@@ -37,10 +42,6 @@ func TestHandlersObjectLockRoundTripAndCopySafety(t *testing.T) {
 </ObjectLockConfiguration>`),
 	}); err != nil {
 		t.Fatalf("put object lock config: %v", err)
-	}
-
-	if _, err := service.PutObject(bucket.Name, "archive.txt", []byte("payload"), "text/plain"); err != nil {
-		t.Fatalf("put object: %v", err)
 	}
 
 	if _, err := handlers.PutObjectRetention(infrastructure.PutObjectRetentionRequest{

@@ -12,9 +12,9 @@ import (
 const objectLockXMLNamespace = "http://s3.amazonaws.com/doc/2006-03-01/"
 
 type objectLockConfigurationXML struct {
-	XMLName           xml.Name                  `xml:"ObjectLockConfiguration"`
-	ObjectLockEnabled string                    `xml:"ObjectLockEnabled"`
-	Rule              *objectLockRuleXML        `xml:"Rule,omitempty"`
+	XMLName           xml.Name           `xml:"ObjectLockConfiguration"`
+	ObjectLockEnabled string             `xml:"ObjectLockEnabled"`
+	Rule              *objectLockRuleXML `xml:"Rule,omitempty"`
 }
 
 type objectLockRuleXML struct {
@@ -39,8 +39,8 @@ type objectLegalHoldXML struct {
 }
 
 type objectLockConfigurationEnvelope struct {
-	XMLName           xml.Name               `xml:"http://s3.amazonaws.com/doc/2006-03-01/ ObjectLockConfiguration"`
-	ObjectLockEnabled string                 `xml:"ObjectLockEnabled"`
+	XMLName           xml.Name                `xml:"http://s3.amazonaws.com/doc/2006-03-01/ ObjectLockConfiguration"`
+	ObjectLockEnabled string                  `xml:"ObjectLockEnabled"`
 	Rule              *objectLockEnvelopeRule `xml:"Rule,omitempty"`
 }
 
@@ -200,6 +200,22 @@ func (s *Service) PutObjectLegalHold(bucket, key string, body []byte) ([]byte, e
 		return nil, err
 	}
 	return marshalObjectLegalHold(stored)
+}
+
+func (s *Service) applyDefaultRetention(bucket, key string) {
+	lock, ok := s.state.BucketObjectLockConfig(bucket)
+	if !ok || lock.DefaultRetention == nil {
+		return
+	}
+	if _, ok := s.state.ObjectRetentionConfig(bucket, key); ok {
+		return
+	}
+
+	retainUntil := time.Now().UTC().AddDate(lock.DefaultRetention.Years, 0, lock.DefaultRetention.Days)
+	s.state.SetObjectRetention(bucket, key, domain.ObjectRetention{
+		Mode:            lock.DefaultRetention.Mode,
+		RetainUntilDate: retainUntil,
+	})
 }
 
 func (s *Service) objectMutationBlocked(bucket, key string) error {

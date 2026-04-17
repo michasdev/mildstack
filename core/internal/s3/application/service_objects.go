@@ -159,6 +159,7 @@ func (s *Service) PutObject(bucket, key string, body []byte, contentType string)
 		return domain.Object{}, err
 	}
 	s.clearObjectProtection(bucket, key)
+	s.applyDefaultRetention(bucket, key)
 	if err := s.persist(); err != nil {
 		return domain.Object{}, err
 	}
@@ -209,7 +210,9 @@ func (s *Service) CopyObject(bucket, key, sourceBucket, sourceKey string) (domai
 	if err != nil {
 		return domain.Object{}, err
 	}
+	s.clearObjectProtection(bucket, key)
 	s.copyObjectProtection(bucket, key, sourceBucket, sourceKey)
+	s.applyDefaultRetention(bucket, key)
 	if err := s.persist(); err != nil {
 		return domain.Object{}, err
 	}
@@ -241,15 +244,6 @@ func (s *Service) DeleteObjects(request DeleteObjectsRequest) (DeleteObjectsResu
 		Deleted: make([]DeletedObject, 0, len(request.Keys)),
 		Errors:  make([]DeleteObjectsError, 0),
 	}
-	for _, key := range request.Keys {
-		trimmed := strings.TrimSpace(key)
-		if trimmed == "" {
-			continue
-		}
-		if !request.Quiet {
-			result.Deleted = append(result.Deleted, DeletedObject{Key: trimmed})
-		}
-	}
 
 	for _, key := range request.Keys {
 		trimmed := strings.TrimSpace(key)
@@ -257,7 +251,15 @@ func (s *Service) DeleteObjects(request DeleteObjectsRequest) (DeleteObjectsResu
 			continue
 		}
 		if err := s.removeObject(bucket, trimmed); err != nil {
-			return DeleteObjectsResult{}, err
+			result.Errors = append(result.Errors, DeleteObjectsError{
+				Key:     trimmed,
+				Code:    "AccessDenied",
+				Message: err.Error(),
+			})
+			continue
+		}
+		if !request.Quiet {
+			result.Deleted = append(result.Deleted, DeletedObject{Key: trimmed})
 		}
 	}
 	return result, nil
