@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestStateSnapshotCopiesLiveData(t *testing.T) {
 	t.Helper()
@@ -80,5 +83,60 @@ func TestStateMutationHelpersReturnCopiesAndUpdateState(t *testing.T) {
 	}
 	if state.HasObject(bucket.Name, "audit.log") {
 		t.Fatal("expected deleted object to be removed")
+	}
+}
+
+func TestStateListBucketsReturnsSortedCopiesWithCreationTimestamps(t *testing.T) {
+	t.Helper()
+
+	state := NewState()
+	createdAt := time.Date(2026, time.April, 17, 10, 0, 0, 0, time.UTC)
+	state.UpsertBucket(Bucket{
+		Name:      "zeta-assets",
+		Region:    "us-west-2",
+		CreatedAt: createdAt,
+	})
+	state.UpsertBucket(Bucket{
+		Name:      "alpha-assets",
+		Region:    "sa-east-1",
+		CreatedAt: createdAt.Add(time.Minute),
+	})
+
+	buckets := state.ListBuckets()
+	if got, want := len(buckets), 3; got != want {
+		t.Fatalf("unexpected bucket count: got %d want %d", got, want)
+	}
+	if got, want := buckets[0].Name, "alpha-assets"; got != want {
+		t.Fatalf("unexpected first bucket: got %q want %q", got, want)
+	}
+	if got, want := buckets[2].Name, "zeta-assets"; got != want {
+		t.Fatalf("unexpected last bucket: got %q want %q", got, want)
+	}
+	if buckets[0].CreatedAt.IsZero() {
+		t.Fatal("expected listed buckets to include creation timestamp")
+	}
+
+	buckets[0].Name = "mutated"
+	buckets[0].Region = "mutated"
+	if got, want := state.Buckets[2].Name, "alpha-assets"; got != want {
+		t.Fatalf("bucket list aliased live state: got %q want %q", got, want)
+	}
+}
+
+func TestStateDeleteBucketRequiresEmptyBucket(t *testing.T) {
+	t.Helper()
+
+	state := NewState()
+
+	if deleted := state.DeleteBucket("mildstack-assets"); deleted {
+		t.Fatal("expected non-empty bootstrap bucket delete to fail")
+	}
+
+	state.UpsertBucket(Bucket{Name: "empty-bucket", Region: "us-east-1", CreatedAt: time.Now().UTC()})
+	if deleted := state.DeleteBucket("empty-bucket"); !deleted {
+		t.Fatal("expected empty bucket delete to succeed")
+	}
+	if state.HasBucket("empty-bucket") {
+		t.Fatal("expected deleted bucket to be removed")
 	}
 }

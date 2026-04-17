@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
@@ -116,6 +117,9 @@ func TestServiceRealOperationsMutateState(t *testing.T) {
 	if got, want := len(buckets), 2; got != want {
 		t.Fatalf("unexpected bucket count: got %d want %d", got, want)
 	}
+	if buckets[0].CreatedAt.IsZero() || buckets[1].CreatedAt.IsZero() {
+		t.Fatal("expected listed buckets to include creation timestamps")
+	}
 
 	object, err := service.PutObject(bucket.Name, "archive.txt", 42, "text/plain")
 	if err != nil {
@@ -149,6 +153,52 @@ func TestServiceRealOperationsMutateState(t *testing.T) {
 	}
 }
 
+func TestServiceBucketCatalogFollowsAWSSemantics(t *testing.T) {
+	t.Helper()
+
+	service := New()
+
+	owned, err := service.CreateBucket("mildstack-assets", "")
+	if err != nil {
+		t.Fatalf("idempotent create bucket: %v", err)
+	}
+	if got, want := owned.Region, "us-east-1"; got != want {
+		t.Fatalf("unexpected owned bucket region: got %q want %q", got, want)
+	}
+
+	created, err := service.CreateBucket("mildstack-logs", "")
+	if err != nil {
+		t.Fatalf("create bucket with default region: %v", err)
+	}
+	if got, want := created.Region, "us-east-1"; got != want {
+		t.Fatalf("unexpected default region: got %q want %q", got, want)
+	}
+	if created.CreatedAt.IsZero() {
+		t.Fatal("expected created bucket timestamp")
+	}
+
+	head, err := service.HeadBucket("mildstack-logs")
+	if err != nil {
+		t.Fatalf("head bucket: %v", err)
+	}
+	if got, want := head.Region, "us-east-1"; got != want {
+		t.Fatalf("unexpected head bucket region: got %q want %q", got, want)
+	}
+
+	if err := service.DeleteBucket("mildstack-assets"); err == nil {
+		t.Fatal("expected non-empty bootstrap bucket delete to fail")
+	} else if !strings.Contains(err.Error(), "BucketNotEmpty") {
+		t.Fatalf("expected BucketNotEmpty error, got %v", err)
+	}
+
+	if err := service.DeleteBucket("mildstack-logs"); err != nil {
+		t.Fatalf("delete empty bucket: %v", err)
+	}
+	if _, err := service.HeadBucket("mildstack-logs"); err == nil {
+		t.Fatal("expected deleted bucket head to fail")
+	}
+}
+
 func TestServiceRejectsInvalidAndMissingRequests(t *testing.T) {
 	t.Helper()
 
@@ -156,6 +206,15 @@ func TestServiceRejectsInvalidAndMissingRequests(t *testing.T) {
 
 	if _, err := service.CreateBucket("", ""); err == nil {
 		t.Fatal("expected empty bucket name to fail")
+	}
+	if _, err := service.CreateBucket("Invalid_Bucket", ""); err == nil {
+		t.Fatal("expected invalid bucket name to fail")
+	}
+	if _, err := service.HeadBucket("missing"); err == nil {
+		t.Fatal("expected missing bucket head to fail")
+	}
+	if err := service.DeleteBucket("missing"); err == nil {
+		t.Fatal("expected missing bucket delete to fail")
 	}
 	if _, err := service.ListObjects("missing"); err == nil {
 		t.Fatal("expected missing bucket listing to fail")
