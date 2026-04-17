@@ -267,7 +267,7 @@ func TestServicePersistenceRoundTripAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
-	if _, err := first.PutObject(bucket.Name, "archive.txt", 42, "text/plain"); err != nil {
+	if _, err := first.PutObject(bucket.Name, "archive.txt", []byte("persistent archive payload"), "text/plain"); err != nil {
 		t.Fatalf("put object: %v", err)
 	}
 
@@ -280,8 +280,12 @@ func TestServicePersistenceRoundTripAcrossRestart(t *testing.T) {
 	if got, want := len(buckets), 2; got != want {
 		t.Fatalf("unexpected bucket count after restart: got %d want %d", got, want)
 	}
-	if _, err := second.GetObject(bucket.Name, "archive.txt"); err != nil {
+	object, err := second.GetObject(bucket.Name, "archive.txt")
+	if err != nil {
 		t.Fatalf("expected restored object after restart: %v", err)
+	}
+	if got, want := string(object.Body), "persistent archive payload"; got != want {
+		t.Fatalf("unexpected restored object body: got %q want %q", got, want)
 	}
 
 	storagePath, err := ResolveStoragePath(config)

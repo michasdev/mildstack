@@ -68,14 +68,27 @@ func TestStateMutationHelpersReturnCopiesAndUpdateState(t *testing.T) {
 	object := state.UpsertObject(Object{
 		Bucket:      bucket.Name,
 		Key:         "audit.log",
+		Body:        []byte("payload"),
 		Size:        7,
 		ContentType: "text/plain",
 	})
 	if got, want := object.Key, "audit.log"; got != want {
 		t.Fatalf("unexpected object key: got %q want %q", got, want)
 	}
+	if got, want := string(object.Body), "payload"; got != want {
+		t.Fatalf("unexpected object body: got %q want %q", got, want)
+	}
 	if !state.HasObject(bucket.Name, "audit.log") {
 		t.Fatal("expected new object to be present")
+	}
+
+	object.Body[0] = 'P'
+	fetched, ok := state.Object(bucket.Name, "audit.log")
+	if !ok {
+		t.Fatal("expected object to remain present")
+	}
+	if got, want := string(fetched.Body), "payload"; got != want {
+		t.Fatalf("stored object body was aliased: got %q want %q", got, want)
 	}
 
 	if deleted := state.DeleteObject(bucket.Name, "audit.log"); !deleted {
@@ -138,5 +151,33 @@ func TestStateDeleteBucketRequiresEmptyBucket(t *testing.T) {
 	}
 	if state.HasBucket("empty-bucket") {
 		t.Fatal("expected deleted bucket to be removed")
+	}
+}
+
+func TestStateObjectReturnsCopyOfStoredBody(t *testing.T) {
+	t.Helper()
+
+	state := NewState()
+	state.UpsertObject(Object{
+		Bucket:      "mildstack-assets",
+		Key:         "copy-safe.txt",
+		Body:        []byte("copy-safe"),
+		Size:        int64(len("copy-safe")),
+		ContentType: "text/plain",
+	})
+
+	object, ok := state.Object("mildstack-assets", "copy-safe.txt")
+	if !ok {
+		t.Fatal("expected object to be present")
+	}
+
+	object.Body[0] = 'C'
+
+	again, ok := state.Object("mildstack-assets", "copy-safe.txt")
+	if !ok {
+		t.Fatal("expected object to remain present")
+	}
+	if got, want := string(again.Body), "copy-safe"; got != want {
+		t.Fatalf("returned object body was aliased: got %q want %q", got, want)
 	}
 }
