@@ -67,24 +67,20 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	if !ok {
 		t.Fatal("expected s3 service to be registered")
 	}
-	if got, want := len(s3Entry.Routes), 6; got != want {
+	if got, want := len(s3Entry.Routes), 11; got != want {
 		t.Fatalf("unexpected s3 route count: got %d want %d", got, want)
 	}
-	if got, want := s3Entry.Routes[0].Method, "DELETE"; got != want {
-		t.Fatalf("unexpected s3 first route method: got %q want %q", got, want)
-	}
-	if got, want := s3Entry.Routes[0].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
-		t.Fatalf("unexpected s3 first route path: got %q want %q", got, want)
-	}
-	if got, want := s3Entry.Routes[1].Path, "/api/v1/runtime/services/s3/buckets"; got != want {
-		t.Fatalf("unexpected s3 second route path: got %q want %q", got, want)
-	}
-	if got, want := s3Entry.Routes[5].Method, "PUT"; got != want {
-		t.Fatalf("unexpected s3 last route method: got %q want %q", got, want)
-	}
-	if got, want := s3Entry.Routes[5].Path, "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object"; got != want {
-		t.Fatalf("unexpected s3 last route path: got %q want %q", got, want)
-	}
+	assertRouteExists(t, s3Entry.Routes, "GET", "/api/v1/runtime/services/s3/buckets")
+	assertRouteExists(t, s3Entry.Routes, "POST", "/api/v1/runtime/services/s3/buckets")
+	assertRouteExists(t, s3Entry.Routes, "HEAD", "/api/v1/runtime/services/s3/buckets/:bucket")
+	assertRouteExists(t, s3Entry.Routes, "DELETE", "/api/v1/runtime/services/s3/buckets/:bucket")
+	assertRouteExists(t, s3Entry.Routes, "GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects")
+	assertRouteExists(t, s3Entry.Routes, "GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/v2")
+	assertRouteExists(t, s3Entry.Routes, "POST", "/api/v1/runtime/services/s3/buckets/:bucket/objects/delete")
+	assertRouteExists(t, s3Entry.Routes, "GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object")
+	assertRouteExists(t, s3Entry.Routes, "HEAD", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object")
+	assertRouteExists(t, s3Entry.Routes, "PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object")
+	assertRouteExists(t, s3Entry.Routes, "DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object")
 
 	dynamoEntry, ok := registrar.Service("dynamodb")
 	if !ok {
@@ -126,6 +122,16 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	if got, want := state["service"], "s3"; got != want {
 		t.Fatalf("unexpected s3 state: got %v want %v", got, want)
 	}
+}
+
+func assertRouteExists(t *testing.T, routes []deliveryhttp.RegisteredRoute, method, path string) {
+	t.Helper()
+	for _, route := range routes {
+		if route.Method == method && route.Path == path {
+			return
+		}
+	}
+	t.Fatalf("expected route %s %s to be registered", method, path)
 }
 
 func TestDefaultRootFailsFastWhenPersistedS3StateIsCorrupt(t *testing.T) {
