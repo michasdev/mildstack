@@ -380,3 +380,58 @@ func TestServicePersistenceRejectsCorruptStateOnBootstrap(t *testing.T) {
 		t.Fatal("expected corrupt persisted state to fail bootstrap")
 	}
 }
+
+func TestServiceCopyAndDeleteBehaviorSurviveRestart(t *testing.T) {
+	t.Helper()
+
+	baseDir := t.TempDir()
+	config := StorageConfig{
+		BaseDir:    baseDir,
+		InstanceID: "phase-13-object-core",
+	}
+
+	first, err := NewWithPersistence(config)
+	if err != nil {
+		t.Fatalf("new with persistence: %v", err)
+	}
+
+	bucket, err := first.CreateBucket("mildstack-logs", "us-west-2")
+	if err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+	if _, err := first.PutObject(bucket.Name, "archive.txt", []byte("archive payload"), "text/plain"); err != nil {
+		t.Fatalf("put object: %v", err)
+	}
+	if _, err := first.CopyObject(bucket.Name, "archive-copy.txt", bucket.Name, "archive.txt"); err != nil {
+		t.Fatalf("copy object: %v", err)
+	}
+	if err := first.DeleteObject(bucket.Name, "already-missing.txt"); err != nil {
+		t.Fatalf("delete missing key before restart: %v", err)
+	}
+
+	second, err := NewWithPersistence(config)
+	if err != nil {
+		t.Fatalf("new with persistence after restart: %v", err)
+	}
+
+	copied, err := second.GetObject(bucket.Name, "archive-copy.txt")
+	if err != nil {
+		t.Fatalf("get copied object after restart: %v", err)
+	}
+	if got, want := string(copied.Body), "archive payload"; got != want {
+		t.Fatalf("unexpected copied body after restart: got %q want %q", got, want)
+	}
+
+	copied.Body[0] = 'A'
+	again, err := second.GetObject(bucket.Name, "archive-copy.txt")
+	if err != nil {
+		t.Fatalf("get copied object again: %v", err)
+	}
+	if got, want := string(again.Body), "archive payload"; got != want {
+		t.Fatalf("copied body was aliased after restart: got %q want %q", got, want)
+	}
+
+	if err := second.DeleteObject(bucket.Name, "already-missing.txt"); err != nil {
+		t.Fatalf("delete missing key after restart: %v", err)
+	}
+}

@@ -181,3 +181,35 @@ func TestStateObjectReturnsCopyOfStoredBody(t *testing.T) {
 		t.Fatalf("returned object body was aliased: got %q want %q", got, want)
 	}
 }
+
+func TestStateListObjectsReturnsCopySafeBodies(t *testing.T) {
+	t.Helper()
+
+	state := NewState()
+	state.UpsertObject(Object{
+		Bucket:      "mildstack-assets",
+		Key:         "listed.txt",
+		Body:        []byte("listed-body"),
+		Size:        int64(len("listed-body")),
+		ContentType: "text/plain",
+	})
+
+	objects := state.ListObjects("mildstack-assets")
+	if got, want := len(objects), 2; got != want {
+		t.Fatalf("unexpected object count: got %d want %d", got, want)
+	}
+
+	for i := range objects {
+		if objects[i].Key == "listed.txt" {
+			objects[i].Body[0] = 'L'
+		}
+	}
+
+	again, ok := state.Object("mildstack-assets", "listed.txt")
+	if !ok {
+		t.Fatal("expected listed object to remain present")
+	}
+	if got, want := string(again.Body), "listed-body"; got != want {
+		t.Fatalf("listed object body was aliased: got %q want %q", got, want)
+	}
+}

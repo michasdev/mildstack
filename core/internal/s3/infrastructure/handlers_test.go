@@ -193,3 +193,49 @@ func TestHandlersSurfaceServiceErrors(t *testing.T) {
 		t.Fatalf("expected delete on missing key to succeed: %v", err)
 	}
 }
+
+func TestHandlersCopyResponsesDoNotAliasStoredBodies(t *testing.T) {
+	t.Helper()
+
+	handlers := infrastructure.NewHandlers(application.New())
+
+	createResp, err := handlers.CreateBucket(infrastructure.CreateBucketRequest{
+		Name:   "mildstack-logs",
+		Region: "us-west-2",
+	})
+	if err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+
+	if _, err := handlers.PutObject(infrastructure.PutObjectRequest{
+		Bucket:      createResp.Bucket.Name,
+		Key:         "archive.txt",
+		Body:        []byte("archive payload"),
+		ContentType: "text/plain",
+	}); err != nil {
+		t.Fatalf("put object: %v", err)
+	}
+
+	copyResp, err := handlers.CopyObject(infrastructure.CopyObjectRequest{
+		Bucket:          createResp.Bucket.Name,
+		Key:             "archive-copy.txt",
+		SourceBucket:    createResp.Bucket.Name,
+		SourceObjectKey: "archive.txt",
+	})
+	if err != nil {
+		t.Fatalf("copy object: %v", err)
+	}
+
+	copyResp.Object.Body[0] = 'A'
+
+	again, err := handlers.GetObject(infrastructure.GetObjectRequest{
+		Bucket: createResp.Bucket.Name,
+		Key:    "archive-copy.txt",
+	})
+	if err != nil {
+		t.Fatalf("get copied object: %v", err)
+	}
+	if got, want := string(again.Object.Body), "archive payload"; got != want {
+		t.Fatalf("copied response body was aliased: got %q want %q", got, want)
+	}
+}
