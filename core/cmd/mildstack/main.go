@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"strings"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
@@ -13,7 +14,7 @@ import (
 )
 
 func main() {
-	root := composition.DefaultRoot()
+	root := composition.DefaultRoot(resolveInstanceID())
 	paths := runtime.ResolvePaths()
 	homeDir, _ := os.UserHomeDir()
 	configDir, _ := os.UserConfigDir()
@@ -40,6 +41,16 @@ func main() {
 	if err := cli.Execute(context.Background(), os.Stdout, os.Stderr, commands); err != nil {
 		os.Exit(1)
 	}
+}
+
+const defaultInstanceID = "default"
+
+func resolveInstanceID() string {
+	instanceID := strings.TrimSpace(os.Getenv("MILDSTACK_INSTANCE_ID"))
+	if instanceID == "" {
+		return defaultInstanceID
+	}
+	return instanceID
 }
 
 type instanceRegistrar struct {

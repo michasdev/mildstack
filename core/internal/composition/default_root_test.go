@@ -1,10 +1,13 @@
 package composition
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
 	dynamodbdomain "github.com/michasdev/mildstack/core/internal/dynamodb/domain"
+	"github.com/michasdev/mildstack/core/internal/s3/application"
 	s3domain "github.com/michasdev/mildstack/core/internal/s3/domain"
 )
 
@@ -28,7 +31,7 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	t.Helper()
 
 	hook := &stateHookStub{}
-	root := defaultRootWithHook(hook)
+	root := defaultRootWithHook(hook, DefaultRootConfig{InstanceID: "test-instance"})
 	if got, want := len(root.Services), 2; got != want {
 		t.Fatalf("unexpected service count: got %d want %d", got, want)
 	}
@@ -123,4 +126,35 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	if got, want := state["service"], "s3"; got != want {
 		t.Fatalf("unexpected s3 state: got %v want %v", got, want)
 	}
+}
+
+func TestDefaultRootFailsFastWhenPersistedS3StateIsCorrupt(t *testing.T) {
+	t.Helper()
+
+	baseDir := t.TempDir()
+	storagePath, err := application.ResolveStoragePath(application.StorageConfig{
+		BaseDir:    baseDir,
+		InstanceID: "broken-instance",
+	})
+	if err != nil {
+		t.Fatalf("resolve storage path: %v", err)
+	}
+	if err := os.MkdirAll(storagePath, 0o755); err != nil {
+		t.Fatalf("mkdir storage path: %v", err)
+	}
+	statePath := filepath.Join(storagePath, "state.json")
+	if err := os.WriteFile(statePath, []byte("{broken"), 0o644); err != nil {
+		t.Fatalf("write corrupt state: %v", err)
+	}
+
+	defer func() {
+		if recovered := recover(); recovered == nil {
+			t.Fatal("expected corrupt state to panic during default root bootstrap")
+		}
+	}()
+
+	_ = defaultRootWithHook(&stateHookStub{}, DefaultRootConfig{
+		InstanceID:       "broken-instance",
+		S3StorageBaseDir: baseDir,
+	})
 }

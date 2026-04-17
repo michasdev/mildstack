@@ -15,7 +15,7 @@ import (
 func TestRegisterServiceRoutesRegistersS3BeforeServing(t *testing.T) {
 	t.Helper()
 
-	root := composition.DefaultRoot()
+	root := composition.DefaultRoot("test-instance")
 	manager := runtime.New(root.Services)
 	router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
 

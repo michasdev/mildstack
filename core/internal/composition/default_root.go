@@ -2,6 +2,7 @@ package composition
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
@@ -9,13 +10,31 @@ import (
 	"github.com/michasdev/mildstack/core/internal/s3"
 )
 
-func DefaultRoot() Root {
-	return defaultRootWithHook(runtime.NewStateHook())
+type DefaultRootConfig struct {
+	InstanceID       string
+	S3StorageBaseDir string
 }
 
-func defaultRootWithHook(hook orchestrator.StateHook) Root {
+func DefaultRoot(instanceID string) Root {
+	return defaultRootWithHook(runtime.NewStateHook(), DefaultRootConfig{InstanceID: instanceID})
+}
+
+func defaultRootWithHook(hook orchestrator.StateHook, config DefaultRootConfig) Root {
+	instanceID := strings.TrimSpace(config.InstanceID)
+	if instanceID == "" {
+		panic("composition: s3 instance id is required")
+	}
+
+	s3Service, err := s3.NewWithStorage(s3.StorageConfig{
+		BaseDir:    config.S3StorageBaseDir,
+		InstanceID: instanceID,
+	})
+	if err != nil {
+		panic(fmt.Sprintf("composition: init s3 service: %v", err))
+	}
+
 	services := []orchestrator.Service{
-		s3.New(),
+		s3Service,
 		dynamodb.New(),
 	}
 

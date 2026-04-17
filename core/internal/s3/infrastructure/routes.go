@@ -3,36 +3,8 @@ package infrastructure
 import "github.com/michasdev/mildstack/core/internal/application/orchestrator"
 
 func Routes() []orchestrator.Route {
-	return []orchestrator.Route{
-		{
-			Method: "GET",
-			Path:   "/s3/buckets",
-			Name:   "s3.buckets.index",
-		},
-		{
-			Method: "POST",
-			Path:   "/s3/buckets",
-			Name:   "s3.buckets.create",
-		},
-		{
-			Method: "GET",
-			Path:   "/s3/buckets/:bucket/objects",
-			Name:   "s3.objects.index",
-		},
-		{
-			Method: "GET",
-			Path:   "/s3/buckets/:bucket/objects/:object",
-			Name:   "s3.objects.show",
-		},
-		{
-			Method: "PUT",
-			Path:   "/s3/buckets/:bucket/objects/:object",
-			Name:   "s3.objects.update",
-		},
-		{
-			Method: "DELETE",
-			Path:   "/s3/buckets/:bucket/objects/:object",
-			Name:   "s3.objects.delete",
-		},
-	}
+	routes := make([]orchestrator.Route, 0, len(bucketRoutes())+len(objectRoutes()))
+	routes = append(routes, bucketRoutes()...)
+	routes = append(routes, objectRoutes()...)
+	return routes
 }

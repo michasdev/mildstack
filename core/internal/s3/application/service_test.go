@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
@@ -179,5 +181,76 @@ func TestServiceStartAndStopAreNoops(t *testing.T) {
 	}
 	if err := service.Stop(context.Background()); err != nil {
 		t.Fatalf("stop: %v", err)
+	}
+}
+
+func TestServicePersistenceRoundTripAcrossRestart(t *testing.T) {
+	t.Helper()
+
+	baseDir := t.TempDir()
+	config := StorageConfig{
+		BaseDir:    baseDir,
+		InstanceID: "phase-12-instance",
+	}
+
+	first, err := NewWithPersistence(config)
+	if err != nil {
+		t.Fatalf("new with persistence: %v", err)
+	}
+
+	bucket, err := first.CreateBucket("mildstack-logs", "us-west-2")
+	if err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+	if _, err := first.PutObject(bucket.Name, "archive.txt", 42, "text/plain"); err != nil {
+		t.Fatalf("put object: %v", err)
+	}
+
+	second, err := NewWithPersistence(config)
+	if err != nil {
+		t.Fatalf("new with persistence after restart: %v", err)
+	}
+
+	buckets := second.ListBuckets()
+	if got, want := len(buckets), 2; got != want {
+		t.Fatalf("unexpected bucket count after restart: got %d want %d", got, want)
+	}
+	if _, err := second.GetObject(bucket.Name, "archive.txt"); err != nil {
+		t.Fatalf("expected restored object after restart: %v", err)
+	}
+
+	storagePath, err := ResolveStoragePath(config)
+	if err != nil {
+		t.Fatalf("resolve storage path: %v", err)
+	}
+	statePath := filepath.Join(storagePath, stateFileName)
+	if _, err := os.Stat(statePath); err != nil {
+		t.Fatalf("expected persisted state file: %v", err)
+	}
+}
+
+func TestServicePersistenceRejectsCorruptStateOnBootstrap(t *testing.T) {
+	t.Helper()
+
+	baseDir := t.TempDir()
+	config := StorageConfig{
+		BaseDir:    baseDir,
+		InstanceID: "broken-instance",
+	}
+
+	storagePath, err := ResolveStoragePath(config)
+	if err != nil {
+		t.Fatalf("resolve storage path: %v", err)
+	}
+	if err := os.MkdirAll(storagePath, 0o755); err != nil {
+		t.Fatalf("mkdir storage path: %v", err)
+	}
+	statePath := filepath.Join(storagePath, stateFileName)
+	if err := os.WriteFile(statePath, []byte("{invalid"), 0o644); err != nil {
+		t.Fatalf("write corrupt state: %v", err)
+	}
+
+	if _, err := NewWithPersistence(config); err == nil {
+		t.Fatal("expected corrupt persisted state to fail bootstrap")
 	}
 }
