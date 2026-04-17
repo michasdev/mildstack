@@ -14,5 +14,15 @@ func bucketRoutes() []orchestrator.Route {
 			Path:   "/s3/buckets",
 			Name:   "s3.buckets.create",
 		},
+		{
+			Method: "HEAD",
+			Path:   "/s3/buckets/:bucket",
+			Name:   "s3.buckets.head",
+		},
+		{
+			Method: "DELETE",
+			Path:   "/s3/buckets/:bucket",
+			Name:   "s3.buckets.delete",
+		},
 	}
 }

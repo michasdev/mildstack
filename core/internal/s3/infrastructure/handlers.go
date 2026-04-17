@@ -1,10 +1,16 @@
 package infrastructure
 
-import "github.com/michasdev/mildstack/core/internal/s3/domain"
+import (
+	"time"
+
+	"github.com/michasdev/mildstack/core/internal/s3/domain"
+)
 
 type Service interface {
 	ListBuckets() []domain.Bucket
 	CreateBucket(name, region string) (domain.Bucket, error)
+	HeadBucket(name string) (domain.Bucket, error)
+	DeleteBucket(name string) error
 	ListObjects(bucket string) ([]domain.Object, error)
 	GetObject(bucket, key string) (domain.Object, error)
 	PutObject(bucket, key string, size int64, contentType string) (domain.Object, error)
@@ -16,8 +22,9 @@ type Handlers struct {
 }
 
 type BucketPayload struct {
-	Name   string `json:"name"`
-	Region string `json:"region"`
+	Name      string    `json:"name"`
+	Region    string    `json:"region"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type ObjectPayload struct {
@@ -38,6 +45,22 @@ type CreateBucketRequest struct {
 
 type CreateBucketResponse struct {
 	Bucket BucketPayload `json:"bucket"`
+}
+
+type HeadBucketRequest struct {
+	Name string
+}
+
+type HeadBucketResponse struct {
+	Bucket BucketPayload `json:"bucket"`
+}
+
+type DeleteBucketRequest struct {
+	Name string
+}
+
+type DeleteBucketResponse struct {
+	Deleted bool `json:"deleted"`
 }
 
 type ListObjectsRequest struct {

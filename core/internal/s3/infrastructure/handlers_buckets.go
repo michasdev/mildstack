@@ -7,8 +7,9 @@ func (h Handlers) ListBuckets() ListBucketsResponse {
 	}
 	for i, bucket := range buckets {
 		response.Buckets[i] = BucketPayload{
-			Name:   bucket.Name,
-			Region: bucket.Region,
+			Name:      bucket.Name,
+			Region:    bucket.Region,
+			CreatedAt: bucket.CreatedAt,
 		}
 	}
 	return response
@@ -21,8 +22,30 @@ func (h Handlers) CreateBucket(request CreateBucketRequest) (CreateBucketRespons
 	}
 	return CreateBucketResponse{
 		Bucket: BucketPayload{
-			Name:   bucket.Name,
-			Region: bucket.Region,
+			Name:      bucket.Name,
+			Region:    bucket.Region,
+			CreatedAt: bucket.CreatedAt,
 		},
 	}, nil
+}
+
+func (h Handlers) HeadBucket(request HeadBucketRequest) (HeadBucketResponse, error) {
+	bucket, err := h.service.HeadBucket(request.Name)
+	if err != nil {
+		return HeadBucketResponse{}, err
+	}
+	return HeadBucketResponse{
+		Bucket: BucketPayload{
+			Name:      bucket.Name,
+			Region:    bucket.Region,
+			CreatedAt: bucket.CreatedAt,
+		},
+	}, nil
+}
+
+func (h Handlers) DeleteBucket(request DeleteBucketRequest) (DeleteBucketResponse, error) {
+	if err := h.service.DeleteBucket(request.Name); err != nil {
+		return DeleteBucketResponse{}, err
+	}
+	return DeleteBucketResponse{Deleted: true}, nil
 }
