@@ -53,14 +53,19 @@ func (s *Service) ListObjectVersions(bucket string) (domain.ListObjectVersionsRe
 		return domain.ListObjectVersionsResult{}, fmt.Errorf("s3: NoSuchBucket: bucket %q not found", bucket)
 	}
 
+	versions, err := s.hydrateVersions(s.state.ListObjectVersions(bucket))
+	if err != nil {
+		return domain.ListObjectVersionsResult{}, err
+	}
 	return domain.ListObjectVersionsResult{
 		Bucket:   bucket,
-		Versions: s.state.ListObjectVersions(bucket),
+		Versions: versions,
 	}, nil
 }
 
 func (s *Service) storeObject(object domain.Object) (domain.Object, error) {
 	stored := s.state.UpsertObject(object)
+	stored.Body = nil
 	if s.state.VersioningEnabled(stored.Bucket) {
 		s.state.RecordObjectVersion(stored)
 	}
@@ -68,14 +73,22 @@ func (s *Service) storeObject(object domain.Object) (domain.Object, error) {
 }
 
 func (s *Service) removeObject(bucket, key string) error {
+	var payloadRef string
 	if s.state.HasObject(bucket, key) {
 		if err := s.objectMutationBlocked(bucket, key); err != nil {
 			return err
 		}
+		if object, ok := s.state.Object(bucket, key); ok {
+			payloadRef = object.PayloadRef
+		}
 	}
 	if s.state.VersioningEnabled(bucket) {
 		s.state.RecordDeleteMarker(bucket, key)
+		payloadRef = ""
 	}
 	s.state.DeleteObject(bucket, key)
+	if payloadRef != "" && s.payloads != nil {
+		_ = s.payloads.DeletePayload(payloadRef)
+	}
 	return s.persist()
 }

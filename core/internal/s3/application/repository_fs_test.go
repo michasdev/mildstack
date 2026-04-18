@@ -21,8 +21,8 @@ func TestFSRepositorySaveAndLoadAreDeterministic(t *testing.T) {
 			{Name: "alpha", Region: "us-west-2", CreatedAt: time.Date(2026, time.April, 17, 11, 0, 0, 0, time.UTC)},
 		},
 		Objects: []domain.Object{
-			{Bucket: "zeta", Key: "b.txt", Size: 2, ContentType: "text/plain"},
-			{Bucket: "alpha", Key: "a.txt", Size: 1, ContentType: "text/plain"},
+			{Bucket: "zeta", Key: "b.txt", Body: []byte("zeta-body"), Size: int64(len("zeta-body")), ContentType: "text/plain"},
+			{Bucket: "alpha", Key: "a.txt", Body: []byte("alpha-body"), Size: int64(len("alpha-body")), ContentType: "text/plain"},
 		},
 	}
 
@@ -58,6 +58,22 @@ func TestFSRepositorySaveAndLoadAreDeterministic(t *testing.T) {
 	if got, want := loaded.Objects[0].Bucket, "alpha"; got != want {
 		t.Fatalf("expected sorted object order after round-trip: got %q want %q", got, want)
 	}
+	if got, want := string(loaded.Objects[0].Body), "alpha-body"; got != want {
+		t.Fatalf("expected loaded object body after round-trip: got %q want %q", got, want)
+	}
+	if strings.Contains(string(secondBytes), "alpha-body") || strings.Contains(string(secondBytes), "zeta-body") {
+		t.Fatal("expected payload bytes to stay out of state.json")
+	}
+}
+
+func TestRepositoryFSPayloadLayoutRoundTrip(t *testing.T) {
+	t.Helper()
+	TestFSRepositorySaveAndLoadAreDeterministic(t)
+}
+
+func TestRepositoryFSPayloadRoundTrip(t *testing.T) {
+	t.Helper()
+	TestFSRepositorySaveAndLoadAreDeterministic(t)
 }
 
 func TestFSRepositoryPersistsVersionHistoryRoundTrip(t *testing.T) {

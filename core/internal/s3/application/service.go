@@ -1,6 +1,8 @@
 package application
 
 import (
+	"sync"
+
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/s3/domain"
 )
@@ -11,7 +13,9 @@ type Service struct {
 	state            domain.State
 	policy           orchestrator.EmulationPolicy
 	repo             Repository
+	payloads         PayloadStore
 	multipartUploads map[string]domain.MultipartUpload
+	mu               sync.Mutex
 }
 
 const defaultRegion = "us-east-1"
@@ -21,7 +25,7 @@ func New() *Service {
 }
 
 func newService(state domain.State, repo Repository) *Service {
-	return &Service{
+	service := &Service{
 		state:            state,
 		repo:             repo,
 		multipartUploads: make(map[string]domain.MultipartUpload),
@@ -69,4 +73,10 @@ func newService(state domain.State, repo Repository) *Service {
 			"s3",
 		),
 	}
+	if payloads, ok := repo.(PayloadStore); ok {
+		service.payloads = payloads
+	} else {
+		service.payloads = newMemoryPayloadStore()
+	}
+	return service
 }

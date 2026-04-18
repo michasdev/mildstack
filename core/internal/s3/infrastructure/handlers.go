@@ -1,6 +1,7 @@
 package infrastructure
 
 import (
+	"io"
 	"time"
 
 	"github.com/michasdev/mildstack/core/internal/s3/domain"
@@ -61,7 +62,7 @@ type Service interface {
 	ListObjectsV2(request domain.ListObjectsV2Request) (domain.ListObjectsV2Result, error)
 	GetObject(bucket, key string) (domain.Object, error)
 	HeadObject(bucket, key string) (domain.Object, error)
-	PutObject(bucket, key string, body []byte, contentType string) (domain.Object, error)
+	PutObject(bucket, key string, body io.Reader, contentType string) (domain.Object, error)
 	CopyObject(bucket, key, sourceBucket, sourceKey string) (domain.Object, error)
 	DeleteObject(bucket, key string) error
 	DeleteObjects(request domain.DeleteObjectsRequest) (domain.DeleteObjectsResult, error)

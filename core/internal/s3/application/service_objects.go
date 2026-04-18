@@ -1,8 +1,10 @@
 package application
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/michasdev/mildstack/core/internal/s3/domain"
@@ -114,7 +116,7 @@ func (s *Service) GetObject(bucket, key string) (domain.Object, error) {
 	if !ok {
 		return domain.Object{}, fmt.Errorf("s3: NoSuchKey: The specified key does not exist")
 	}
-	return object, nil
+	return s.hydrateObject(object)
 }
 
 func (s *Service) HeadObject(bucket, key string) (domain.Object, error) {
@@ -126,7 +128,10 @@ func (s *Service) HeadObject(bucket, key string) (domain.Object, error) {
 	return object, nil
 }
 
-func (s *Service) PutObject(bucket, key string, body []byte, contentType string) (domain.Object, error) {
+func (s *Service) PutObject(bucket, key string, body io.Reader, contentType string) (domain.Object, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	bucket = strings.TrimSpace(bucket)
 	key = strings.TrimSpace(key)
 	contentType = strings.TrimSpace(contentType)
@@ -148,12 +153,17 @@ func (s *Service) PutObject(bucket, key string, body []byte, contentType string)
 		}
 	}
 
+	payloadRef, size, etag, err := s.payloads.StorePayload(bucket+"/"+key, body)
+	if err != nil {
+		return domain.Object{}, err
+	}
 	object, err := s.storeObject(domain.Object{
 		Bucket:      bucket,
 		Key:         key,
-		Body:        append([]byte(nil), body...),
-		Size:        int64(len(body)),
+		Size:        size,
 		ContentType: contentType,
+		ETag:        etag,
+		PayloadRef:  payloadRef,
 	})
 	if err != nil {
 		return domain.Object{}, err
@@ -163,10 +173,13 @@ func (s *Service) PutObject(bucket, key string, body []byte, contentType string)
 	if err := s.persist(); err != nil {
 		return domain.Object{}, err
 	}
-	return object, nil
+	return s.hydrateObject(object)
 }
 
 func (s *Service) CopyObject(bucket, key, sourceBucket, sourceKey string) (domain.Object, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	bucket = strings.TrimSpace(bucket)
 	key = strings.TrimSpace(key)
 	sourceBucket = strings.TrimSpace(sourceBucket)
@@ -197,15 +210,32 @@ func (s *Service) CopyObject(bucket, key, sourceBucket, sourceKey string) (domai
 		return domain.Object{}, err
 	}
 
+	var sourceReader io.ReadCloser
+	if source.PayloadRef != "" {
+		sourceReader, err = s.payloads.OpenPayload(source.PayloadRef)
+		if err != nil {
+			return domain.Object{}, err
+		}
+		defer sourceReader.Close()
+	} else if len(source.Body) > 0 {
+		sourceReader = io.NopCloser(bytes.NewReader(source.Body))
+	} else {
+		return domain.Object{}, fmt.Errorf("s3: source payload is unavailable")
+	}
+	newRef, size, etag, err := s.payloads.StorePayload(bucket+"/"+key, sourceReader)
+	if err != nil {
+		return domain.Object{}, err
+	}
+
 	object, err := s.storeObject(domain.Object{
 		Bucket:           bucket,
 		Key:              key,
-		Body:             append([]byte(nil), source.Body...),
-		Size:             source.Size,
+		Size:             size,
 		ContentType:      source.ContentType,
-		ETag:             source.ETag,
+		ETag:             etag,
 		Metadata:         source.Metadata,
 		PreservedHeaders: source.PreservedHeaders,
+		PayloadRef:       newRef,
 	})
 	if err != nil {
 		return domain.Object{}, err
@@ -216,7 +246,7 @@ func (s *Service) CopyObject(bucket, key, sourceBucket, sourceKey string) (domai
 	if err := s.persist(); err != nil {
 		return domain.Object{}, err
 	}
-	return object, nil
+	return s.hydrateObject(object)
 }
 
 func (s *Service) DeleteObject(bucket, key string) error {
@@ -292,6 +322,57 @@ func cloneObjects(objects []domain.Object) []domain.Object {
 		cloned[i].PreservedHeaders = cloneObjectStringMap(objects[i].PreservedHeaders)
 	}
 	return cloned
+}
+
+func (s *Service) hydrateObject(object domain.Object) (domain.Object, error) {
+	if len(object.Body) > 0 || object.PayloadRef == "" || s.payloads == nil {
+		return object, nil
+	}
+
+	body, err := s.readPayload(object.PayloadRef)
+	if err != nil {
+		return domain.Object{}, err
+	}
+	object.Body = body
+	return object, nil
+}
+
+func (s *Service) hydrateObjects(objects []domain.Object) ([]domain.Object, error) {
+	cloned := make([]domain.Object, len(objects))
+	for i := range objects {
+		hydrated, err := s.hydrateObject(objects[i])
+		if err != nil {
+			return nil, err
+		}
+		cloned[i] = hydrated
+	}
+	return cloned, nil
+}
+
+func (s *Service) hydrateVersions(versions []domain.VersionRecord) ([]domain.VersionRecord, error) {
+	cloned := make([]domain.VersionRecord, len(versions))
+	for i := range versions {
+		record := versions[i]
+		if len(record.Body) == 0 && record.PayloadRef != "" && s.payloads != nil {
+			body, err := s.readPayload(record.PayloadRef)
+			if err != nil {
+				return nil, err
+			}
+			record.Body = body
+		}
+		cloned[i] = record
+	}
+	return cloned, nil
+}
+
+func (s *Service) readPayload(ref string) ([]byte, error) {
+	reader, err := s.payloads.OpenPayload(ref)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	return io.ReadAll(reader)
 }
 
 func cloneObjectStringMap(values map[string]string) map[string]string {

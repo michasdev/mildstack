@@ -1,6 +1,7 @@
 package infrastructure
 
 import (
+	"bytes"
 	"github.com/michasdev/mildstack/core/internal/s3/domain"
 )
 
@@ -83,7 +84,7 @@ func (h Handlers) GetObject(request GetObjectRequest) (GetObjectResponse, error)
 }
 
 func (h Handlers) PutObject(request PutObjectRequest) (PutObjectResponse, error) {
-	object, err := h.service.PutObject(request.Bucket, request.Key, request.Body, request.ContentType)
+	object, err := h.service.PutObject(request.Bucket, request.Key, bytes.NewReader(request.Body), request.ContentType)
 	if err != nil {
 		return PutObjectResponse{}, err
 	}

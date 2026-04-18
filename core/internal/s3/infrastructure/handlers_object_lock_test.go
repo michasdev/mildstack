@@ -1,6 +1,7 @@
 package infrastructure_test
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -20,7 +21,7 @@ func TestHandlersObjectLockRoundTripAndCopySafety(t *testing.T) {
 		t.Fatalf("create bucket: %v", err)
 	}
 
-	if _, err := service.PutObject(bucket.Name, "archive.txt", []byte("payload"), "text/plain"); err != nil {
+	if _, err := service.PutObject(bucket.Name, "archive.txt", bytes.NewReader([]byte("payload")), "text/plain"); err != nil {
 		t.Fatalf("put object: %v", err)
 	}
 

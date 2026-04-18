@@ -1,11 +1,13 @@
 package application
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -44,6 +46,9 @@ func (r *FSRepository) Load() (domain.State, error) {
 		return domain.State{}, fmt.Errorf("decode %s: %w", stateFileName, err)
 	}
 	normalized := normalizeState(state)
+	if err := r.migrateLoadedPayloads(&normalized); err != nil {
+		return domain.State{}, err
+	}
 	if err := validateState(normalized); err != nil {
 		return domain.State{}, err
 	}
@@ -53,6 +58,9 @@ func (r *FSRepository) Load() (domain.State, error) {
 
 func (r *FSRepository) Save(state domain.State) error {
 	normalized := normalizeState(state)
+	if err := r.ensurePayloadRefs(&normalized); err != nil {
+		return err
+	}
 	if err := validateState(normalized); err != nil {
 		return err
 	}
@@ -115,6 +123,9 @@ func validateState(state domain.State) error {
 		if object.ContentType == "" {
 			return fmt.Errorf("invalid object %s/%s: empty content type", object.Bucket, object.Key)
 		}
+		if object.PayloadRef == "" && len(object.Body) == 0 {
+			return fmt.Errorf("invalid object %s/%s: missing payload reference", object.Bucket, object.Key)
+		}
 	}
 
 	objectKeys := make(map[string]map[string]struct{}, len(state.Objects))
@@ -154,6 +165,9 @@ func validateState(state domain.State) error {
 		}
 		if !record.IsDeleteMarker && record.ContentType == "" {
 			return fmt.Errorf("invalid version record %s/%s: empty content type", record.Bucket, record.Key)
+		}
+		if !record.IsDeleteMarker && record.PayloadRef == "" && len(record.Body) == 0 {
+			return fmt.Errorf("invalid version record %s/%s: missing payload reference", record.Bucket, record.Key)
 		}
 	}
 
@@ -657,6 +671,161 @@ func pruneOrphanedBucketReplication(values map[string]domain.BucketReplicationCo
 		return nil
 	}
 	return pruned
+}
+
+func (r *FSRepository) ensurePayloadRefs(state *domain.State) error {
+	if state == nil {
+		return nil
+	}
+
+	for i := range state.Objects {
+		if state.Objects[i].PayloadRef != "" {
+			state.Objects[i].Body = nil
+			continue
+		}
+		if len(state.Objects[i].Body) == 0 {
+			continue
+		}
+		ref, _, _, err := r.storePayload(state.Objects[i].Bucket+"/"+state.Objects[i].Key, bytes.NewReader(state.Objects[i].Body))
+		if err != nil {
+			return err
+		}
+		state.Objects[i].PayloadRef = ref
+		state.Objects[i].Body = nil
+	}
+
+	for i := range state.VersionHistory {
+		if state.VersionHistory[i].PayloadRef != "" {
+			state.VersionHistory[i].Body = nil
+			continue
+		}
+		if len(state.VersionHistory[i].Body) == 0 {
+			continue
+		}
+		ref, _, _, err := r.storePayload(state.VersionHistory[i].Bucket+"/"+state.VersionHistory[i].Key+"/"+state.VersionHistory[i].VersionID, bytes.NewReader(state.VersionHistory[i].Body))
+		if err != nil {
+			return err
+		}
+		state.VersionHistory[i].PayloadRef = ref
+		state.VersionHistory[i].Body = nil
+	}
+	return nil
+}
+
+func (r *FSRepository) migrateLoadedPayloads(state *domain.State) error {
+	if state == nil {
+		return nil
+	}
+
+	for i := range state.Objects {
+		if state.Objects[i].PayloadRef != "" {
+			if len(state.Objects[i].Body) == 0 {
+				body, err := r.readPayload(state.Objects[i].PayloadRef)
+				if err != nil {
+					return err
+				}
+				state.Objects[i].Body = body
+			}
+			continue
+		}
+		if len(state.Objects[i].Body) == 0 {
+			continue
+		}
+		ref, _, _, err := r.storePayload(state.Objects[i].Bucket+"/"+state.Objects[i].Key, bytes.NewReader(state.Objects[i].Body))
+		if err != nil {
+			return err
+		}
+		state.Objects[i].PayloadRef = ref
+	}
+
+	for i := range state.VersionHistory {
+		if state.VersionHistory[i].PayloadRef != "" {
+			if len(state.VersionHistory[i].Body) == 0 {
+				body, err := r.readPayload(state.VersionHistory[i].PayloadRef)
+				if err != nil {
+					return err
+				}
+				state.VersionHistory[i].Body = body
+			}
+			continue
+		}
+		if len(state.VersionHistory[i].Body) == 0 {
+			continue
+		}
+		ref, _, _, err := r.storePayload(state.VersionHistory[i].Bucket+"/"+state.VersionHistory[i].Key+"/"+state.VersionHistory[i].VersionID, bytes.NewReader(state.VersionHistory[i].Body))
+		if err != nil {
+			return err
+		}
+		state.VersionHistory[i].PayloadRef = ref
+	}
+	return nil
+}
+
+func (r *FSRepository) StorePayload(hint string, body io.Reader) (string, int64, string, error) {
+	return r.storePayload(hint, body)
+}
+
+func (r *FSRepository) OpenPayload(ref string) (io.ReadCloser, error) {
+	return os.Open(r.payloadFilePath(ref))
+}
+
+func (r *FSRepository) DeletePayload(ref string) error {
+	if ref == "" {
+		return nil
+	}
+	if err := os.Remove(r.payloadFilePath(ref)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func (r *FSRepository) storePayload(hint string, body io.Reader) (string, int64, string, error) {
+	if body == nil {
+		body = bytes.NewReader(nil)
+	}
+	if err := os.MkdirAll(r.payloadPath(), 0o755); err != nil {
+		return "", 0, "", err
+	}
+
+	tempFile, err := os.CreateTemp(r.payloadPath(), "payload-*.tmp")
+	if err != nil {
+		return "", 0, "", err
+	}
+	tempPath := tempFile.Name()
+
+	hash := md5.New()
+	size, copyErr := io.Copy(io.MultiWriter(tempFile, hash), body)
+	if copyErr != nil {
+		tempFile.Close()
+		_ = os.Remove(tempPath)
+		return "", 0, "", copyErr
+	}
+	if err := tempFile.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return "", 0, "", err
+	}
+	ref := payloadRefFor(hint, hash.Sum(nil))
+	if err := os.Rename(tempPath, r.payloadFilePath(ref)); err != nil {
+		_ = os.Remove(tempPath)
+		return "", 0, "", err
+	}
+	return ref, size, `"` + hex.EncodeToString(hash.Sum(nil)) + `"`, nil
+}
+
+func (r *FSRepository) readPayload(ref string) ([]byte, error) {
+	data, err := os.ReadFile(r.payloadFilePath(ref))
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (r *FSRepository) payloadPath() string {
+	return filepath.Join(r.storagePath, "payloads")
+}
+
+func (r *FSRepository) payloadFilePath(ref string) string {
+	return filepath.Join(r.payloadPath(), ref)
 }
 
 func pruneOrphanedBucketObjectLock(values map[string]domain.ObjectLockConfiguration, buckets []domain.Bucket) map[string]domain.ObjectLockConfiguration {

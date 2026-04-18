@@ -25,6 +25,7 @@ type VersionRecord struct {
 	Sequence         int64             `json:"sequence"`
 	IsDeleteMarker   bool              `json:"is_delete_marker,omitempty"`
 	Body             []byte            `json:"body,omitempty"`
+	PayloadRef       string            `json:"payload_ref,omitempty"`
 	Size             int64             `json:"size"`
 	ContentType      string            `json:"content_type,omitempty"`
 	ETag             string            `json:"etag,omitempty"`
@@ -242,6 +243,7 @@ func versionRecordFromObject(object Object, versionID string, sequence int64) Ve
 		VersionID:        versionID,
 		Sequence:         sequence,
 		Body:             append([]byte(nil), object.Body...),
+		PayloadRef:       object.PayloadRef,
 		Size:             object.Size,
 		ContentType:      object.ContentType,
 		ETag:             object.ETag,

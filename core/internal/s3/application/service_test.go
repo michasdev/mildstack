@@ -1,6 +1,7 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/base64"
@@ -272,7 +273,7 @@ func TestServiceRealOperationsMutateState(t *testing.T) {
 		t.Fatal("expected listed buckets to include creation timestamps")
 	}
 
-	object, err := service.PutObject(bucket.Name, "archive.txt", []byte("archive payload"), "text/plain")
+	object, err := service.PutObject(bucket.Name, "archive.txt", bytes.NewReader([]byte("archive payload")), "text/plain")
 	if err != nil {
 		t.Fatalf("put object: %v", err)
 	}
@@ -426,7 +427,7 @@ func TestServiceBucketGovernanceSubresourcesRoundTripAndCleanup(t *testing.T) {
 	}
 
 	governedObjectKey := "governed-object.txt"
-	if _, err := service.PutObject(bucket.Name, governedObjectKey, []byte("governed payload"), "text/plain"); err != nil {
+	if _, err := service.PutObject(bucket.Name, governedObjectKey, bytes.NewReader([]byte("governed payload")), "text/plain"); err != nil {
 		t.Fatalf("put governed object: %v", err)
 	}
 	if got, err := service.GetObjectAcl(bucket.Name, governedObjectKey); err != nil {
@@ -603,10 +604,10 @@ func TestServiceVersioningTracksHistoryAndDeleteMarkers(t *testing.T) {
 		t.Fatalf("enable bucket versioning: %v", err)
 	}
 
-	if _, err := service.PutObject(versioned.Name, "release.txt", []byte("v1"), "text/plain"); err != nil {
+	if _, err := service.PutObject(versioned.Name, "release.txt", bytes.NewReader([]byte("v1")), "text/plain"); err != nil {
 		t.Fatalf("put first version: %v", err)
 	}
-	if _, err := service.PutObject(versioned.Name, "release.txt", []byte("v2"), "text/plain"); err != nil {
+	if _, err := service.PutObject(versioned.Name, "release.txt", bytes.NewReader([]byte("v2")), "text/plain"); err != nil {
 		t.Fatalf("put second version: %v", err)
 	}
 	if err := service.DeleteObject(versioned.Name, "release.txt"); err != nil {
@@ -641,7 +642,7 @@ func TestServiceVersioningTracksHistoryAndDeleteMarkers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create plain bucket: %v", err)
 	}
-	if _, err := service.PutObject(plain.Name, "plain.txt", []byte("plain"), "text/plain"); err != nil {
+	if _, err := service.PutObject(plain.Name, "plain.txt", bytes.NewReader([]byte("plain")), "text/plain"); err != nil {
 		t.Fatalf("put plain object: %v", err)
 	}
 	plainVersions, err := service.ListObjectVersions(plain.Name)
@@ -674,10 +675,10 @@ func TestVersioningContractListObjectVersionsIsCopySafe(t *testing.T) {
 	if _, err := service.PutBucketVersioning(bucket.Name, domain.VersioningEnabled); err != nil {
 		t.Fatalf("enable versioning: %v", err)
 	}
-	if _, err := service.PutObject(bucket.Name, "release.txt", []byte("v1"), "text/plain"); err != nil {
+	if _, err := service.PutObject(bucket.Name, "release.txt", bytes.NewReader([]byte("v1")), "text/plain"); err != nil {
 		t.Fatalf("put first version: %v", err)
 	}
-	if _, err := service.PutObject(bucket.Name, "release.txt", []byte("v2"), "text/plain"); err != nil {
+	if _, err := service.PutObject(bucket.Name, "release.txt", bytes.NewReader([]byte("v2")), "text/plain"); err != nil {
 		t.Fatalf("put second version: %v", err)
 	}
 	if err := service.DeleteObject(bucket.Name, "release.txt"); err != nil {
@@ -996,7 +997,7 @@ func TestServiceRejectsInvalidAndMissingRequests(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "NoSuchKey") {
 		t.Fatalf("expected NoSuchKey lookup error, got %v", err)
 	}
-	if _, err := service.PutObject("missing", "archive.txt", []byte("x"), "text/plain"); err == nil {
+	if _, err := service.PutObject("missing", "archive.txt", bytes.NewReader([]byte("x")), "text/plain"); err == nil {
 		t.Fatal("expected put on missing bucket to fail")
 	}
 	if _, err := service.HeadObject("mildstack-assets", "missing"); err == nil {
@@ -1039,7 +1040,7 @@ func TestServiceListObjectsV1UsesMarkerPaginationDeterministically(t *testing.T)
 	}
 
 	for _, key := range []string{"charlie.txt", "alpha.txt", "bravo.txt"} {
-		if _, err := service.PutObject(bucket.Name, key, []byte(key), "text/plain"); err != nil {
+		if _, err := service.PutObject(bucket.Name, key, bytes.NewReader([]byte(key)), "text/plain"); err != nil {
 			t.Fatalf("put object %q: %v", key, err)
 		}
 	}
@@ -1093,7 +1094,7 @@ func TestServiceListObjectsV2UsesContinuationTokensAndStartAfter(t *testing.T) {
 	}
 
 	for _, key := range []string{"charlie.txt", "alpha.txt", "bravo.txt"} {
-		if _, err := service.PutObject(bucket.Name, key, []byte(key), "text/plain"); err != nil {
+		if _, err := service.PutObject(bucket.Name, key, bytes.NewReader([]byte(key)), "text/plain"); err != nil {
 			t.Fatalf("put object %q: %v", key, err)
 		}
 	}
@@ -1160,7 +1161,7 @@ func TestServiceDeleteObjectsPreservesOrderAndTreatsMissingKeysAsDeleted(t *test
 	}
 
 	for _, key := range []string{"charlie.txt", "alpha.txt", "bravo.txt"} {
-		if _, err := service.PutObject(bucket.Name, key, []byte(key), "text/plain"); err != nil {
+		if _, err := service.PutObject(bucket.Name, key, bytes.NewReader([]byte(key)), "text/plain"); err != nil {
 			t.Fatalf("put object %q: %v", key, err)
 		}
 	}
@@ -1240,7 +1241,7 @@ func TestServicePersistenceRoundTripAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
-	if _, err := first.PutObject(bucket.Name, "archive.txt", []byte("persistent archive payload"), "text/plain"); err != nil {
+	if _, err := first.PutObject(bucket.Name, "archive.txt", bytes.NewReader([]byte("persistent archive payload")), "text/plain"); err != nil {
 		t.Fatalf("put object: %v", err)
 	}
 
@@ -1315,7 +1316,7 @@ func TestServiceCopyAndDeleteBehaviorSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
-	if _, err := first.PutObject(bucket.Name, "archive.txt", []byte("archive payload"), "text/plain"); err != nil {
+	if _, err := first.PutObject(bucket.Name, "archive.txt", bytes.NewReader([]byte("archive payload")), "text/plain"); err != nil {
 		t.Fatalf("put object: %v", err)
 	}
 	if _, err := first.CopyObject(bucket.Name, "archive-copy.txt", bucket.Name, "archive.txt"); err != nil {

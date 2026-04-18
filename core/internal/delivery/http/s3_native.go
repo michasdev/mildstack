@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/xml"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,7 +20,7 @@ type S3NativeService interface {
 	DeleteBucket(name string) error
 	GetObject(bucket, key string) (s3domain.Object, error)
 	HeadObject(bucket, key string) (s3domain.Object, error)
-	PutObject(bucket, key string, body []byte, contentType string) (s3domain.Object, error)
+	PutObject(bucket, key string, body io.Reader, contentType string) (s3domain.Object, error)
 	DeleteObject(bucket, key string) error
 }
 
@@ -192,18 +193,12 @@ func (h s3NativeHandler) headObject(c *gin.Context, bucketName, objectKey string
 }
 
 func (h s3NativeHandler) putObject(c *gin.Context, bucketName, objectKey string) {
-	body, err := c.GetRawData()
-	if err != nil {
-		writeS3Error(c, err)
-		return
-	}
-
 	contentType := strings.TrimSpace(c.GetHeader("Content-Type"))
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
 
-	object, err := h.service.PutObject(bucketName, objectKey, body, contentType)
+	object, err := h.service.PutObject(bucketName, objectKey, c.Request.Body, contentType)
 	if err != nil {
 		writeS3Error(c, err)
 		return

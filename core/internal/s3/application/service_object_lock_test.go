@@ -1,6 +1,7 @@
 package application
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -15,7 +16,7 @@ func TestServiceObjectLockConfigurationAndMutationGuards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
-	archive, err := service.PutObject(bucket.Name, "archive.txt", []byte("archive payload"), "text/plain")
+	archive, err := service.PutObject(bucket.Name, "archive.txt", bytes.NewReader([]byte("archive payload")), "text/plain")
 	if err != nil {
 		t.Fatalf("put object: %v", err)
 	}
@@ -98,7 +99,7 @@ func TestServiceObjectLockConfigurationAndMutationGuards(t *testing.T) {
 		t.Fatalf("unexpected object legal hold lookup: err=%v body=%s", err, body)
 	}
 
-	if _, err := service.PutObject(bucket.Name, "archive.txt", []byte("updated payload"), "text/plain"); err == nil {
+	if _, err := service.PutObject(bucket.Name, "archive.txt", bytes.NewReader([]byte("updated payload")), "text/plain"); err == nil {
 		t.Fatal("expected protected overwrite to fail")
 	}
 	if _, err := service.CopyObject(bucket.Name, "archive.txt", bucket.Name, archive.Key); err == nil {
@@ -129,7 +130,7 @@ func TestServiceObjectLockAppliesDefaultRetentionToNewWrites(t *testing.T) {
 		t.Fatalf("create bucket: %v", err)
 	}
 
-	if _, err := service.PutObject(bucket.Name, "source.txt", []byte("source payload"), "text/plain"); err != nil {
+	if _, err := service.PutObject(bucket.Name, "source.txt", bytes.NewReader([]byte("source payload")), "text/plain"); err != nil {
 		t.Fatalf("put source object: %v", err)
 	}
 	if _, err := service.PutBucketVersioning(bucket.Name, domain.VersioningEnabled); err != nil {
@@ -151,7 +152,7 @@ func TestServiceObjectLockAppliesDefaultRetentionToNewWrites(t *testing.T) {
 	if _, err := service.CopyObject(bucket.Name, "copy.txt", bucket.Name, "source.txt"); err != nil {
 		t.Fatalf("copy object: %v", err)
 	}
-	if _, err := service.PutObject(bucket.Name, "new.txt", []byte("new payload"), "text/plain"); err != nil {
+	if _, err := service.PutObject(bucket.Name, "new.txt", bytes.NewReader([]byte("new payload")), "text/plain"); err != nil {
 		t.Fatalf("put retained object: %v", err)
 	}
 
@@ -186,7 +187,7 @@ func TestServiceDeleteObjectsContinuesAfterProtectedErrors(t *testing.T) {
 		t.Fatalf("create bucket: %v", err)
 	}
 
-	if _, err := service.PutObject(bucket.Name, "free.txt", []byte("free payload"), "text/plain"); err != nil {
+	if _, err := service.PutObject(bucket.Name, "free.txt", bytes.NewReader([]byte("free payload")), "text/plain"); err != nil {
 		t.Fatalf("put free object: %v", err)
 	}
 	if _, err := service.PutBucketVersioning(bucket.Name, domain.VersioningEnabled); err != nil {
@@ -204,7 +205,7 @@ func TestServiceDeleteObjectsContinuesAfterProtectedErrors(t *testing.T) {
 </ObjectLockConfiguration>`)); err != nil {
 		t.Fatalf("put object lock configuration: %v", err)
 	}
-	if _, err := service.PutObject(bucket.Name, "protected.txt", []byte("protected payload"), "text/plain"); err != nil {
+	if _, err := service.PutObject(bucket.Name, "protected.txt", bytes.NewReader([]byte("protected payload")), "text/plain"); err != nil {
 		t.Fatalf("put protected object: %v", err)
 	}
 

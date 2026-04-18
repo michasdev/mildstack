@@ -170,6 +170,7 @@ func (s *Service) CompleteMultipartUpload(uploadID string) (domain.Object, error
 	if err != nil {
 		return domain.Object{}, err
 	}
+	object.Body = append([]byte(nil), assembled...)
 	s.clearObjectProtection(upload.Bucket, upload.Key)
 	s.applyDefaultRetention(upload.Bucket, upload.Key)
 	if err := s.persist(); err != nil {
