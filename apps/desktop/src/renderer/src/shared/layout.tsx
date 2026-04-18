@@ -3,7 +3,7 @@ import { Outlet } from "react-router"
 
 export const Layout = () => {
     return (
-        <div className="p-5">
+        <div className="max-w-[1440px] mx-auto p-5 relative">
             <Header />
             <div className="mt-5">
                 <Outlet />
