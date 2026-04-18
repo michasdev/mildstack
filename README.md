@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="apps/desktop/src/renderer/src/assets/logos/mildstack-logo-full-white.png">
+    <source media="(prefers-color-scheme: light)" srcset="apps/desktop/src/renderer/src/assets/logos/mildstack-logo-full-black.png">
+    <img alt="MildStack Logo" src="apps/desktop/src/renderer/src/assets/logos/mildstack-logo-full-black.png" width="400">
+  </picture>
+</p>
+
 # MildStack
 
 > A lightweight, local-first AWS emulator built for developers.
