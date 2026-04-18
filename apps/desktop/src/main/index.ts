@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import icon from '../../resources/icon.png?asset'
+import { registerS3IpcHandlers } from './s3-ipc'
 
 function checkForUpdates(): void {
   if (is.dev) return
@@ -26,7 +27,8 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      webSecurity: true
     }
   })
 
@@ -64,6 +66,7 @@ app.whenReady().then(() => {
 
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
+  registerS3IpcHandlers()
 
   createWindow()
   checkForUpdates()
