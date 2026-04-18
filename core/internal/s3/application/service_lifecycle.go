@@ -32,6 +32,7 @@ func (s *Service) Policy() orchestrator.EmulationPolicy {
 
 func (s *Service) RegisterRoutes(registrar orchestrator.RouteRegistrar) error {
 	for _, route := range infrastructure.Routes() {
+		route.Path = "/s3" + route.Path
 		if err := registrar.Register(route); err != nil {
 			return err
 		}

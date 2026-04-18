@@ -15,12 +15,12 @@ func TestObjectLockRoutesAreRegisteredOnce(t *testing.T) {
 		path   string
 		name   string
 	}{
-		{method: "GET", path: "/s3/buckets/:bucket/object-lock", name: "s3.buckets.object-lock.show"},
-		{method: "PUT", path: "/s3/buckets/:bucket/object-lock", name: "s3.buckets.object-lock.update"},
-		{method: "GET", path: "/s3/buckets/:bucket/objects/:object/retention", name: "s3.objects.retention.show"},
-		{method: "PUT", path: "/s3/buckets/:bucket/objects/:object/retention", name: "s3.objects.retention.update"},
-		{method: "GET", path: "/s3/buckets/:bucket/objects/:object/legal-hold", name: "s3.objects.legal-hold.show"},
-		{method: "PUT", path: "/s3/buckets/:bucket/objects/:object/legal-hold", name: "s3.objects.legal-hold.update"},
+		{method: "GET", path: "/:bucket?object-lock", name: "s3.buckets.object-lock.show"},
+		{method: "PUT", path: "/:bucket?object-lock", name: "s3.buckets.object-lock.update"},
+		{method: "GET", path: "/:bucket/:object?retention", name: "s3.objects.retention.show"},
+		{method: "PUT", path: "/:bucket/:object?retention", name: "s3.objects.retention.update"},
+		{method: "GET", path: "/:bucket/:object?legal-hold", name: "s3.objects.legal-hold.show"},
+		{method: "PUT", path: "/:bucket/:object?legal-hold", name: "s3.objects.legal-hold.update"},
 	}
 
 	if got, want := routes[37].Name, "s3.objects.versions"; got != want {

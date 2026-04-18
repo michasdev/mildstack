@@ -6,27 +6,27 @@ func objectGovernanceRoutes() []orchestrator.Route {
 	return []orchestrator.Route{
 		{
 			Method: "GET",
-			Path:   "/s3/buckets/:bucket/objects/:object/acl",
+			Path:   "/:bucket/:object?acl",
 			Name:   "s3.objects.acl.show",
 		},
 		{
 			Method: "PUT",
-			Path:   "/s3/buckets/:bucket/objects/:object/acl",
+			Path:   "/:bucket/:object?acl",
 			Name:   "s3.objects.acl.update",
 		},
 		{
 			Method: "GET",
-			Path:   "/s3/buckets/:bucket/objects/:object/tagging",
+			Path:   "/:bucket/:object?tagging",
 			Name:   "s3.objects.tagging.show",
 		},
 		{
 			Method: "PUT",
-			Path:   "/s3/buckets/:bucket/objects/:object/tagging",
+			Path:   "/:bucket/:object?tagging",
 			Name:   "s3.objects.tagging.update",
 		},
 		{
 			Method: "DELETE",
-			Path:   "/s3/buckets/:bucket/objects/:object/tagging",
+			Path:   "/:bucket/:object?tagging",
 			Name:   "s3.objects.tagging.delete",
 		},
 	}

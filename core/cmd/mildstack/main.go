@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 
@@ -27,6 +28,9 @@ func main() {
 	httpServerFactory := func(port int) cli.HTTPServer {
 		router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
 		if err := registerServiceRoutes(router.Registrar(), root.Services); err != nil {
+			return failedHTTPServer{err: err}
+		}
+		if err := registerNativeS3Routes(router, root.Services); err != nil {
 			return failedHTTPServer{err: err}
 		}
 		return deliveryhttp.NewServer(instanceRegistrar{manager: manager, storage: storage}, router, port)
@@ -59,8 +63,10 @@ type instanceRegistrar struct {
 }
 
 func (r instanceRegistrar) Serve(ctx context.Context, port int) error {
-	if err := r.manager.Serve(ctx, port); err != nil {
-		return err
+	if !containsPort(r.manager.Ports(ctx), port) {
+		if err := r.manager.Serve(ctx, port); err != nil {
+			return err
+		}
 	}
 	if err := r.storage.SaveSavedInstance(port); err != nil {
 		return err
@@ -93,4 +99,34 @@ func registerServiceRoutes(registrar orchestrator.RouteRegistrar, services []orc
 		}
 	}
 	return nil
+}
+
+func registerNativeS3Routes(router *deliveryhttp.Router, services []orchestrator.Service) error {
+	if router == nil {
+		return nil
+	}
+
+	for _, service := range services {
+		if service == nil || service.Metadata().Name != "s3" {
+			continue
+		}
+
+		s3Service, ok := service.(deliveryhttp.S3NativeService)
+		if !ok {
+			return fmt.Errorf("s3 service does not expose the native http surface")
+		}
+		deliveryhttp.RegisterS3NativeRoutes(router.Engine(), s3Service)
+		return nil
+	}
+
+	return nil
+}
+
+func containsPort(ports []int, port int) bool {
+	for _, existing := range ports {
+		if existing == port {
+			return true
+		}
+	}
+	return false
 }

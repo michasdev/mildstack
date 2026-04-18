@@ -132,3 +132,22 @@ Use the current npm scripts for validation before submitting changes:
 npm run typecheck
 npm run lint
 ```
+
+## S3 smoke test
+
+The app now includes a smoke runner for the MildStack S3 surface:
+
+```bash
+npm run s3:smoke
+```
+
+By default it targets the local MildStack runtime API at
+`http://127.0.0.1:4566/api/v1/runtime/services/s3`. Override that with
+`MILDSTACK_API_BASE_URL` if your server is running elsewhere.
+
+An optional `--native` mode is also available for S3-compatible endpoints via
+`@aws-sdk/client-s3`:
+
+```bash
+npm run s3:smoke -- --native
+```

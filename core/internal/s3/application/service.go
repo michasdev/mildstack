@@ -60,7 +60,12 @@ func newService(state domain.State, repo Repository) *Service {
 				"object acl",
 				"object tagging",
 			},
-			nil,
+			[]string{
+				"directory buckets / S3 Express",
+				"reporting and admin surfaces",
+				"lower-value management features",
+				"specialized data-plane / Object Lambda actions",
+			},
 			"s3",
 		),
 	}

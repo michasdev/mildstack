@@ -6,32 +6,32 @@ func multipartRoutes() []orchestrator.Route {
 	return []orchestrator.Route{
 		{
 			Method: "GET",
-			Path:   "/s3/buckets/:bucket/uploads",
+			Path:   "/:bucket?uploads",
 			Name:   "s3.multipart.uploads.index",
 		},
 		{
 			Method: "GET",
-			Path:   "/s3/buckets/:bucket/uploads/:upload/parts",
+			Path:   "/:bucket/:object?uploadId=:upload",
 			Name:   "s3.multipart.uploads.parts.index",
 		},
 		{
 			Method: "POST",
-			Path:   "/s3/buckets/:bucket/objects/:object/uploads",
+			Path:   "/:bucket/:object?uploads",
 			Name:   "s3.multipart.uploads.create",
 		},
 		{
 			Method: "PUT",
-			Path:   "/s3/buckets/:bucket/objects/:object/uploads/:upload/parts/:part",
+			Path:   "/:bucket/:object?partNumber=:part&uploadId=:upload",
 			Name:   "s3.multipart.uploads.part",
 		},
 		{
 			Method: "POST",
-			Path:   "/s3/buckets/:bucket/objects/:object/uploads/:upload/complete",
+			Path:   "/:bucket/:object?uploadId=:upload",
 			Name:   "s3.multipart.uploads.complete",
 		},
 		{
 			Method: "DELETE",
-			Path:   "/s3/buckets/:bucket/objects/:object/uploads/:upload",
+			Path:   "/:bucket/:object?uploadId=:upload",
 			Name:   "s3.multipart.uploads.abort",
 		},
 	}

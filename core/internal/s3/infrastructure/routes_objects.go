@@ -6,37 +6,37 @@ func objectRoutes() []orchestrator.Route {
 	return []orchestrator.Route{
 		{
 			Method: "GET",
-			Path:   "/s3/buckets/:bucket/objects",
+			Path:   "/:bucket",
 			Name:   "s3.objects.list-v1",
 		},
 		{
 			Method: "GET",
-			Path:   "/s3/buckets/:bucket/objects/v2",
+			Path:   "/:bucket?list-type=2",
 			Name:   "s3.objects.list-v2",
 		},
 		{
 			Method: "POST",
-			Path:   "/s3/buckets/:bucket/objects/delete",
+			Path:   "/:bucket?delete",
 			Name:   "s3.objects.delete-batch",
 		},
 		{
 			Method: "GET",
-			Path:   "/s3/buckets/:bucket/objects/:object",
+			Path:   "/:bucket/:object",
 			Name:   "s3.objects.show",
 		},
 		{
 			Method: "HEAD",
-			Path:   "/s3/buckets/:bucket/objects/:object",
+			Path:   "/:bucket/:object",
 			Name:   "s3.objects.head",
 		},
 		{
 			Method: "PUT",
-			Path:   "/s3/buckets/:bucket/objects/:object",
+			Path:   "/:bucket/:object",
 			Name:   "s3.objects.update",
 		},
 		{
 			Method: "DELETE",
-			Path:   "/s3/buckets/:bucket/objects/:object",
+			Path:   "/:bucket/:object",
 			Name:   "s3.objects.delete",
 		},
 	}

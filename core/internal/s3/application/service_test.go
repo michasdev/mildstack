@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -45,52 +46,59 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := policy.ErrorPrefix, "s3"; got != want {
 		t.Fatalf("unexpected policy error prefix: got %q want %q", got, want)
 	}
-	if got, want := len(policy.Supported), 31; got != want {
-		t.Fatalf("unexpected supported count: got %d want %d", got, want)
+	expectedSupported := []string{
+		"list buckets",
+		"create bucket",
+		"head bucket",
+		"get bucket location",
+		"delete bucket",
+		"bucket policy",
+		"bucket encryption",
+		"bucket lifecycle",
+		"bucket CORS",
+		"bucket ACL",
+		"bucket tagging",
+		"list objects v1",
+		"list objects v2",
+		"get object",
+		"head object",
+		"put object",
+		"copy object",
+		"delete object",
+		"delete objects",
+		"bucket versioning",
+		"multipart upload",
+		"list multipart uploads",
+		"list parts",
+		"bucket notification",
+		"bucket logging",
+		"bucket replication",
+		"object locking",
+		"bucket ownership controls",
+		"public access block",
+		"object acl",
+		"object tagging",
 	}
-	if got, want := len(policy.Unsupported), 0; got != want {
-		t.Fatalf("unexpected unsupported count: got %d want %d", got, want)
+	expectedUnsupported := []string{
+		"directory buckets / S3 Express",
+		"reporting and admin surfaces",
+		"lower-value management features",
+		"specialized data-plane / Object Lambda actions",
+	}
+	if !reflect.DeepEqual(policy.Supported, expectedSupported) {
+		t.Fatalf("unexpected supported inventory: got %#v want %#v", policy.Supported, expectedSupported)
+	}
+	if !reflect.DeepEqual(policy.Unsupported, expectedUnsupported) {
+		t.Fatalf("unexpected unsupported inventory: got %#v want %#v", policy.Unsupported, expectedUnsupported)
 	}
 	policy.Supported[0] = "changed"
+	policy.Unsupported[0] = "changed"
 	again := service.Policy()
 	if got, want := again.Supported[0], "list buckets"; got != want {
 		t.Fatalf("policy supported slice was not copied: got %q want %q", got, want)
 	}
-	if got, want := again.Supported[5], "bucket policy"; got != want {
-		t.Fatalf("expected policy to move into supported capabilities: got %q want %q", got, want)
-	}
-	if got, want := again.Supported[10], "bucket tagging"; got != want {
-		t.Fatalf("expected tagging to move into supported capabilities: got %q want %q", got, want)
-	}
-	if got, want := again.Supported[19], "bucket versioning"; got != want {
-		t.Fatalf("expected versioning to move into supported capabilities: got %q want %q", got, want)
-	}
-	if got, want := again.Supported[20], "multipart upload"; got != want {
-		t.Fatalf("expected multipart to move into supported capabilities: got %q want %q", got, want)
-	}
-	if got, want := again.Supported[21], "list multipart uploads"; got != want {
-		t.Fatalf("expected multipart uploads listing to move into supported capabilities: got %q want %q", got, want)
-	}
-	if got, want := again.Supported[22], "list parts"; got != want {
-		t.Fatalf("expected multipart parts listing to move into supported capabilities: got %q want %q", got, want)
-	}
-	if got, want := again.Supported[26], "object locking"; got != want {
-		t.Fatalf("expected object locking to move into supported capabilities: got %q want %q", got, want)
-	}
-	if got, want := again.Supported[27], "bucket ownership controls"; got != want {
-		t.Fatalf("expected bucket ownership controls to move into supported capabilities: got %q want %q", got, want)
-	}
-	if got, want := again.Supported[28], "public access block"; got != want {
-		t.Fatalf("expected public access block to move into supported capabilities: got %q want %q", got, want)
-	}
-	if got, want := again.Supported[29], "object acl"; got != want {
-		t.Fatalf("expected object acl to move into supported capabilities: got %q want %q", got, want)
-	}
-	if got, want := again.Supported[30], "object tagging"; got != want {
-		t.Fatalf("expected object tagging to move into supported capabilities: got %q want %q", got, want)
-	}
-	if got, want := again.Supported[3], "get bucket location"; got != want {
-		t.Fatalf("expected bucket location support to be tracked: got %q want %q", got, want)
+	if got, want := again.Unsupported[0], "directory buckets / S3 Express"; got != want {
+		t.Fatalf("policy unsupported slice was not copied: got %q want %q", got, want)
 	}
 
 	registrar := deliveryhttp.NewRegistrar()
@@ -110,68 +118,68 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 		path   string
 		name   string
 	}{
-		{"GET", "/api/v1/runtime/services/s3/buckets", "s3.buckets.index"},
-		{"POST", "/api/v1/runtime/services/s3/buckets", "s3.buckets.create"},
-		{"HEAD", "/api/v1/runtime/services/s3/buckets/:bucket", "s3.buckets.head"},
-		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket", "s3.buckets.delete"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/location", "s3.buckets.location.show"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/policy", "s3.buckets.policy.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/policy", "s3.buckets.policy.update"},
-		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/policy", "s3.buckets.policy.delete"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/encryption", "s3.buckets.encryption.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/encryption", "s3.buckets.encryption.update"},
-		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/encryption", "s3.buckets.encryption.delete"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/lifecycle", "s3.buckets.lifecycle.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/lifecycle", "s3.buckets.lifecycle.update"},
-		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/lifecycle", "s3.buckets.lifecycle.delete"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/cors", "s3.buckets.cors.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/cors", "s3.buckets.cors.update"},
-		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/cors", "s3.buckets.cors.delete"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/acl", "s3.buckets.acl.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/acl", "s3.buckets.acl.update"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/tagging", "s3.buckets.tagging.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/tagging", "s3.buckets.tagging.update"},
-		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/tagging", "s3.buckets.tagging.delete"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/ownership-controls", "s3.buckets.ownership-controls.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/ownership-controls", "s3.buckets.ownership-controls.update"},
-		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/ownership-controls", "s3.buckets.ownership-controls.delete"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/public-access-block", "s3.buckets.public-access-block.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/public-access-block", "s3.buckets.public-access-block.update"},
-		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/public-access-block", "s3.buckets.public-access-block.delete"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/notification", "s3.buckets.notification.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/notification", "s3.buckets.notification.update"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/logging", "s3.buckets.logging.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/logging", "s3.buckets.logging.update"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/replication", "s3.buckets.replication.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/replication", "s3.buckets.replication.update"},
-		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/replication", "s3.buckets.replication.delete"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/versioning", "s3.buckets.versioning.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/versioning", "s3.buckets.versioning.update"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/versions", "s3.objects.versions"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/object-lock", "s3.buckets.object-lock.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/object-lock", "s3.buckets.object-lock.update"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/retention", "s3.objects.retention.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/retention", "s3.objects.retention.update"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/legal-hold", "s3.objects.legal-hold.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/legal-hold", "s3.objects.legal-hold.update"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/acl", "s3.objects.acl.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/acl", "s3.objects.acl.update"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/tagging", "s3.objects.tagging.show"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/tagging", "s3.objects.tagging.update"},
-		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/tagging", "s3.objects.tagging.delete"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects", "s3.objects.list-v1"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/v2", "s3.objects.list-v2"},
-		{"POST", "/api/v1/runtime/services/s3/buckets/:bucket/objects/delete", "s3.objects.delete-batch"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object", "s3.objects.show"},
-		{"HEAD", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object", "s3.objects.head"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object", "s3.objects.update"},
-		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object", "s3.objects.delete"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/uploads", "s3.multipart.uploads.index"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/uploads/:upload/parts", "s3.multipart.uploads.parts.index"},
-		{"POST", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads", "s3.multipart.uploads.create"},
-		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads/:upload/parts/:part", "s3.multipart.uploads.part"},
-		{"POST", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads/:upload/complete", "s3.multipart.uploads.complete"},
-		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads/:upload", "s3.multipart.uploads.abort"},
+		{"GET", "/api/v1/runtime/services/s3", "s3.buckets.index"},
+		{"POST", "/api/v1/runtime/services/s3", "s3.buckets.create"},
+		{"HEAD", "/api/v1/runtime/services/s3/:bucket", "s3.buckets.head"},
+		{"DELETE", "/api/v1/runtime/services/s3/:bucket", "s3.buckets.delete"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?location", "s3.buckets.location.show"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?policy", "s3.buckets.policy.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket?policy", "s3.buckets.policy.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/:bucket?policy", "s3.buckets.policy.delete"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?encryption", "s3.buckets.encryption.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket?encryption", "s3.buckets.encryption.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/:bucket?encryption", "s3.buckets.encryption.delete"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?lifecycle", "s3.buckets.lifecycle.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket?lifecycle", "s3.buckets.lifecycle.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/:bucket?lifecycle", "s3.buckets.lifecycle.delete"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?cors", "s3.buckets.cors.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket?cors", "s3.buckets.cors.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/:bucket?cors", "s3.buckets.cors.delete"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?acl", "s3.buckets.acl.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket?acl", "s3.buckets.acl.update"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?tagging", "s3.buckets.tagging.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket?tagging", "s3.buckets.tagging.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/:bucket?tagging", "s3.buckets.tagging.delete"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?ownershipControls", "s3.buckets.ownership-controls.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket?ownershipControls", "s3.buckets.ownership-controls.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/:bucket?ownershipControls", "s3.buckets.ownership-controls.delete"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?publicAccessBlock", "s3.buckets.public-access-block.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket?publicAccessBlock", "s3.buckets.public-access-block.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/:bucket?publicAccessBlock", "s3.buckets.public-access-block.delete"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?notification", "s3.buckets.notification.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket?notification", "s3.buckets.notification.update"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?logging", "s3.buckets.logging.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket?logging", "s3.buckets.logging.update"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?replication", "s3.buckets.replication.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket?replication", "s3.buckets.replication.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/:bucket?replication", "s3.buckets.replication.delete"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?versioning", "s3.buckets.versioning.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket?versioning", "s3.buckets.versioning.update"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?versions", "s3.objects.versions"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?object-lock", "s3.buckets.object-lock.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket?object-lock", "s3.buckets.object-lock.update"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket/:object?retention", "s3.objects.retention.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket/:object?retention", "s3.objects.retention.update"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket/:object?legal-hold", "s3.objects.legal-hold.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket/:object?legal-hold", "s3.objects.legal-hold.update"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket/:object?acl", "s3.objects.acl.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket/:object?acl", "s3.objects.acl.update"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket/:object?tagging", "s3.objects.tagging.show"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket/:object?tagging", "s3.objects.tagging.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/:bucket/:object?tagging", "s3.objects.tagging.delete"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket", "s3.objects.list-v1"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?list-type=2", "s3.objects.list-v2"},
+		{"POST", "/api/v1/runtime/services/s3/:bucket?delete", "s3.objects.delete-batch"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket/:object", "s3.objects.show"},
+		{"HEAD", "/api/v1/runtime/services/s3/:bucket/:object", "s3.objects.head"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket/:object", "s3.objects.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/:bucket/:object", "s3.objects.delete"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket?uploads", "s3.multipart.uploads.index"},
+		{"GET", "/api/v1/runtime/services/s3/:bucket/:object?uploadId=:upload", "s3.multipart.uploads.parts.index"},
+		{"POST", "/api/v1/runtime/services/s3/:bucket/:object?uploads", "s3.multipart.uploads.create"},
+		{"PUT", "/api/v1/runtime/services/s3/:bucket/:object?partNumber=:part&uploadId=:upload", "s3.multipart.uploads.part"},
+		{"POST", "/api/v1/runtime/services/s3/:bucket/:object?uploadId=:upload", "s3.multipart.uploads.complete"},
+		{"DELETE", "/api/v1/runtime/services/s3/:bucket/:object?uploadId=:upload", "s3.multipart.uploads.abort"},
 	}
 	sort.SliceStable(expectedRoutes, func(i, j int) bool {
 		if expectedRoutes[i].method != expectedRoutes[j].method {
@@ -191,6 +199,30 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 		}
 		if got, want := entry.Routes[i].Name, expected.name; got != want {
 			t.Fatalf("unexpected route name at %d: got %q want %q", i, got, want)
+		}
+	}
+
+	for _, forbidden := range []string{
+		"lifecycle-configuration",
+		"notification-configuration",
+		"directory-buckets",
+		"s3-express",
+		"object-lambda",
+		"metadata-configuration",
+		"metadata-table",
+		"inventory",
+		"analytics",
+		"accelerate",
+		"request-payment",
+		"website",
+		"metrics",
+		"select-object-content",
+		"write-get-object-response",
+	} {
+		for _, route := range entry.Routes {
+			if strings.Contains(route.Path, forbidden) || strings.Contains(route.Name, forbidden) {
+				t.Fatalf("unexpected deferred route exposed: %s matched %q", route.Path, forbidden)
+			}
 		}
 	}
 

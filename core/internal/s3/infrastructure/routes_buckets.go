@@ -6,22 +6,22 @@ func bucketRoutes() []orchestrator.Route {
 	return []orchestrator.Route{
 		{
 			Method: "GET",
-			Path:   "/s3/buckets",
+			Path:   "/",
 			Name:   "s3.buckets.index",
 		},
 		{
 			Method: "POST",
-			Path:   "/s3/buckets",
+			Path:   "/",
 			Name:   "s3.buckets.create",
 		},
 		{
 			Method: "HEAD",
-			Path:   "/s3/buckets/:bucket",
+			Path:   "/:bucket",
 			Name:   "s3.buckets.head",
 		},
 		{
 			Method: "DELETE",
-			Path:   "/s3/buckets/:bucket",
+			Path:   "/:bucket",
 			Name:   "s3.buckets.delete",
 		},
 	}
