@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
@@ -36,7 +37,7 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := policy.ErrorPrefix, "dynamodb"; got != want {
 		t.Fatalf("unexpected policy error prefix: got %q want %q", got, want)
 	}
-	if got, want := len(policy.Supported), 5; got != want {
+	if got, want := len(policy.Supported), 7; got != want {
 		t.Fatalf("unexpected supported count: got %d want %d", got, want)
 	}
 	if got, want := len(policy.Unsupported), 2; got != want {
@@ -115,48 +116,132 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	}
 }
 
-func TestServiceRealOperationsMutateState(t *testing.T) {
+func TestServicePersistsAcrossRestart(t *testing.T) {
+	t.Helper()
+
+	baseDir := t.TempDir()
+	config := StorageConfig{BaseDir: baseDir, InstanceID: "instance-a"}
+
+	service, err := NewWithPersistence(config)
+	if err != nil {
+		t.Fatalf("new with persistence: %v", err)
+	}
+
+	if _, err := service.CreateTable("mildstack-archive", "pk", "sk", "PAY_PER_REQUEST"); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if _, err := service.PutItem("mildstack-archive", "item#1", map[string]string{
+		"id":    "item#1",
+		"title": "archive item",
+	}); err != nil {
+		t.Fatalf("put item: %v", err)
+	}
+	if err := service.Stop(context.Background()); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+
+	restarted, err := NewWithPersistence(config)
+	if err != nil {
+		t.Fatalf("restart with persistence: %v", err)
+	}
+	defer func() {
+		if err := restarted.Stop(context.Background()); err != nil {
+			t.Fatalf("stop restarted service: %v", err)
+		}
+	}()
+
+	tables := restarted.ListTables()
+	if got, want := len(tables), 2; got != want {
+		t.Fatalf("unexpected table count after restart: got %d want %d", got, want)
+	}
+
+	fetched, err := restarted.GetItem("mildstack-archive", "item#1")
+	if err != nil {
+		t.Fatalf("get item after restart: %v", err)
+	}
+	if got, want := fetched.Attributes["title"], "archive item"; got != want {
+		t.Fatalf("unexpected item attribute after restart: got %q want %q", got, want)
+	}
+
+	hook := runtime.NewStateHook()
+	if err := restarted.AttachState(hook); err != nil {
+		t.Fatalf("attach state after restart: %v", err)
+	}
+	value, ok := hook.Get(domain.StateKey)
+	if !ok {
+		t.Fatalf("expected restart snapshot for %q to be present", domain.StateKey)
+	}
+	state := value.(map[string]any)
+	items := state["items"].([]any)
+	if got, want := len(items), 2; got != want {
+		t.Fatalf("unexpected snapshot item count after restart: got %d want %d", got, want)
+	}
+}
+
+func TestServiceTableLifecycleTransitions(t *testing.T) {
+	t.Helper()
+
+	service := New()
+	current := time.Date(2026, time.April, 18, 12, 0, 0, 0, time.UTC)
+	service.now = func() time.Time {
+		return current
+	}
+
+	created, err := service.CreateTable("mildstack-archive", "pk", "sk", "PAY_PER_REQUEST")
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if got, want := created.Status, domain.TableStatusCreating; got != want {
+		t.Fatalf("unexpected create status: got %q want %q", got, want)
+	}
+
+	if _, err := service.DescribeTable("mildstack-archive"); err == nil {
+		t.Fatal("expected describe on a newly creating table to be temporarily unavailable")
+	}
+
+	current = current.Add(250 * time.Millisecond)
+	described, err := service.DescribeTable("mildstack-archive")
+	if err != nil {
+		t.Fatalf("describe active table: %v", err)
+	}
+	if got, want := described.Status, domain.TableStatusActive; got != want {
+		t.Fatalf("unexpected active status: got %q want %q", got, want)
+	}
+
+	deleted, err := service.DeleteTable("mildstack-archive")
+	if err != nil {
+		t.Fatalf("delete table: %v", err)
+	}
+	if got, want := deleted.Status, domain.TableStatusDeleting; got != want {
+		t.Fatalf("unexpected deleted status: got %q want %q", got, want)
+	}
+
+	if _, err := service.DescribeTable("mildstack-archive"); err == nil {
+		t.Fatal("expected describe on deleted table to fail")
+	}
+
+	tables := service.ListTables()
+	for _, table := range tables {
+		if table.Name == "mildstack-archive" {
+			t.Fatalf("expected deleted table to be hidden from ListTables, got %+v", table)
+		}
+	}
+
+	if _, err := service.DeleteTable("mildstack-archive"); err != nil {
+		t.Fatalf("repeat delete should be idempotent: %v", err)
+	}
+}
+
+func TestServiceRejectsDuplicateTableCreation(t *testing.T) {
 	t.Helper()
 
 	service := New()
 
-	table, err := service.CreateTable("mildstack-archive", "pk", "sk", "PAY_PER_REQUEST")
-	if err != nil {
+	if _, err := service.CreateTable("mildstack-archive", "pk", "sk", "PAY_PER_REQUEST"); err != nil {
 		t.Fatalf("create table: %v", err)
 	}
-	if got, want := table.Name, "mildstack-archive"; got != want {
-		t.Fatalf("unexpected table name: got %q want %q", got, want)
-	}
-
-	tables := service.ListTables()
-	if got, want := len(tables), 2; got != want {
-		t.Fatalf("unexpected table count: got %d want %d", got, want)
-	}
-
-	item, err := service.PutItem(table.Name, "item#1", map[string]string{
-		"id":    "item#1",
-		"title": "archive item",
-	})
-	if err != nil {
-		t.Fatalf("put item: %v", err)
-	}
-	if got, want := item.Key, "item#1"; got != want {
-		t.Fatalf("unexpected item key: got %q want %q", got, want)
-	}
-
-	fetched, err := service.GetItem(table.Name, item.Key)
-	if err != nil {
-		t.Fatalf("get item: %v", err)
-	}
-	if got, want := fetched.Attributes["title"], "archive item"; got != want {
-		t.Fatalf("unexpected item attribute: got %q want %q", got, want)
-	}
-
-	if err := service.DeleteItem(table.Name, item.Key); err != nil {
-		t.Fatalf("delete item: %v", err)
-	}
-	if _, err := service.GetItem(table.Name, item.Key); err == nil {
-		t.Fatal("expected deleted item lookup to fail")
+	if _, err := service.CreateTable("mildstack-archive", "pk", "sk", "PAY_PER_REQUEST"); err == nil {
+		t.Fatal("expected duplicate table creation to fail")
 	}
 }
 
@@ -179,15 +264,21 @@ func TestServiceRejectsInvalidAndMissingRequests(t *testing.T) {
 	}
 }
 
-func TestServiceStartAndStopAreNoops(t *testing.T) {
+func TestServiceStartAndStopCloseRepository(t *testing.T) {
 	t.Helper()
 
-	service := New()
+	service, err := NewWithPersistence(StorageConfig{BaseDir: t.TempDir(), InstanceID: "instance-a"})
+	if err != nil {
+		t.Fatalf("new with persistence: %v", err)
+	}
 
 	if err := service.Start(context.Background()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	if err := service.Stop(context.Background()); err != nil {
 		t.Fatalf("stop: %v", err)
+	}
+	if err := service.Stop(context.Background()); err != nil {
+		t.Fatalf("stop should be idempotent: %v", err)
 	}
 }

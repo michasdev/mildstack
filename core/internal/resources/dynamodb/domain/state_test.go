@@ -6,7 +6,14 @@ func TestStateSnapshotCopiesLiveData(t *testing.T) {
 	t.Helper()
 
 	state := NewState()
-	table := state.UpsertTable("mildstack-archive", "pk", "sk", "PAY_PER_REQUEST")
+	table := state.UpsertTable(Table{
+		Name:         "mildstack-archive",
+		PartitionKey: "pk",
+		SortKey:      "sk",
+		BillingMode:  "PAY_PER_REQUEST",
+		Status:       TableStatusCreating,
+		CreatedAt:    state.Tables[0].CreatedAt,
+	})
 	state.UpsertItem(Item{
 		Table: table.Name,
 		Key:   "item#1",
@@ -29,6 +36,9 @@ func TestStateSnapshotCopiesLiveData(t *testing.T) {
 	}
 	if got, want := originalTable.Name, "mildstack-records"; got != want {
 		t.Fatalf("unexpected table name: got %q want %q", got, want)
+	}
+	if got, want := originalTable.Status, TableStatusActive; got != want {
+		t.Fatalf("unexpected bootstrap table status: got %q want %q", got, want)
 	}
 	originalItem, ok := state.Item(table.Name, "item#1")
 	if !ok {
@@ -60,7 +70,12 @@ func TestStateMutationHelpersReturnCopiesAndUpdateState(t *testing.T) {
 		t.Fatalf("item attributes aliased live state: got %q want %q", got, want)
 	}
 
-	table := state.UpsertTable("mildstack-logs", "pk", "", "PAY_PER_REQUEST")
+	table := state.UpsertTable(Table{
+		Name:         "mildstack-logs",
+		PartitionKey: "pk",
+		BillingMode:  "PAY_PER_REQUEST",
+		Status:       TableStatusCreating,
+	})
 	if got, want := table.Name, "mildstack-logs"; got != want {
 		t.Fatalf("unexpected table name: got %q want %q", got, want)
 	}
@@ -88,5 +103,20 @@ func TestStateMutationHelpersReturnCopiesAndUpdateState(t *testing.T) {
 	}
 	if state.HasItem(table.Name, "item#1") {
 		t.Fatal("expected deleted item to be removed")
+	}
+
+	deleting := state.UpsertTable(Table{
+		Name:         "mildstack-archive",
+		PartitionKey: "pk",
+		BillingMode:  "PAY_PER_REQUEST",
+		Status:       TableStatusDeleting,
+	})
+	if got, want := deleting.Status, TableStatusDeleting; got != want {
+		t.Fatalf("unexpected deleting status: got %q want %q", got, want)
+	}
+	for _, visible := range state.VisibleTables() {
+		if visible.Name == "mildstack-archive" && visible.Status == TableStatusDeleting {
+			t.Fatal("expected deleting table to be hidden from visible tables")
+		}
 	}
 }

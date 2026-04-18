@@ -1,8 +1,18 @@
 package domain
 
-import "sort"
+import (
+	"sort"
+	"strings"
+	"time"
+)
 
 const StateKey = "services/dynamodb"
+
+const (
+	TableStatusCreating = "CREATING"
+	TableStatusActive   = "ACTIVE"
+	TableStatusDeleting = "DELETING"
+)
 
 type State struct {
 	Service string
@@ -15,6 +25,10 @@ type Table struct {
 	PartitionKey string
 	SortKey      string
 	BillingMode  string
+	Status       string
+	CreatedAt    time.Time
+	ActivationAt time.Time
+	DeletedAt    time.Time
 }
 
 type Item struct {
@@ -32,6 +46,8 @@ func NewState() State {
 				PartitionKey: "id",
 				SortKey:      "version",
 				BillingMode:  "PAY_PER_REQUEST",
+				Status:       TableStatusActive,
+				CreatedAt:    time.Date(2026, time.April, 18, 0, 0, 0, 0, time.UTC),
 			},
 		},
 		Items: []Item{
@@ -51,10 +67,25 @@ func NewState() State {
 func (s State) ListTables() []Table {
 	tables := make([]Table, len(s.Tables))
 	copy(tables, s.Tables)
+	for i := range tables {
+		tables[i] = normalizeTable(tables[i])
+	}
 	sort.SliceStable(tables, func(i, j int) bool {
 		return tables[i].Name < tables[j].Name
 	})
 	return tables
+}
+
+func (s State) VisibleTables() []Table {
+	tables := s.ListTables()
+	visible := make([]Table, 0, len(tables))
+	for _, table := range tables {
+		if table.Status == TableStatusDeleting {
+			continue
+		}
+		visible = append(visible, table)
+	}
+	return visible
 }
 
 func (s State) ListItems(table string) []Item {
@@ -78,7 +109,7 @@ func (s State) ListItems(table string) []Item {
 func (s State) Table(name string) (Table, bool) {
 	for _, table := range s.Tables {
 		if table.Name == name {
-			return table, true
+			return normalizeTable(table), true
 		}
 	}
 	return Table{}, false
@@ -107,22 +138,15 @@ func (s State) HasItem(table, key string) bool {
 	return ok
 }
 
-func (s *State) UpsertTable(name, partitionKey, sortKey, billingMode string) Table {
+func (s *State) UpsertTable(table Table) Table {
+	table = normalizeTable(table)
 	for i := range s.Tables {
-		if s.Tables[i].Name == name {
-			s.Tables[i].PartitionKey = partitionKey
-			s.Tables[i].SortKey = sortKey
-			s.Tables[i].BillingMode = billingMode
+		if s.Tables[i].Name == table.Name {
+			s.Tables[i] = table
 			return s.Tables[i]
 		}
 	}
 
-	table := Table{
-		Name:         name,
-		PartitionKey: partitionKey,
-		SortKey:      sortKey,
-		BillingMode:  billingMode,
-	}
 	s.Tables = append(s.Tables, table)
 	return table
 }
@@ -171,6 +195,10 @@ func (s State) Snapshot() map[string]any {
 			"partition_key": table.PartitionKey,
 			"sort_key":      table.SortKey,
 			"billing_mode":  table.BillingMode,
+			"status":        table.Status,
+			"created_at":    snapshotTime(table.CreatedAt),
+			"activation_at": snapshotTime(table.ActivationAt),
+			"deleted_at":    snapshotTime(table.DeletedAt),
 		})
 	}
 
@@ -188,6 +216,49 @@ func (s State) Snapshot() map[string]any {
 		"tables":  tables,
 		"items":   items,
 	}
+}
+
+func (s State) Clone() State {
+	cloned := State{
+		Service: s.Service,
+		Tables:  make([]Table, len(s.Tables)),
+		Items:   make([]Item, len(s.Items)),
+	}
+	copy(cloned.Tables, s.Tables)
+	for i, item := range s.Items {
+		cloned.Items[i] = Item{
+			Table:      item.Table,
+			Key:        item.Key,
+			Attributes: cloneAttributes(item.Attributes),
+		}
+	}
+	return cloned
+}
+
+func normalizeTable(table Table) Table {
+	table.Name = strings.TrimSpace(table.Name)
+	table.PartitionKey = strings.TrimSpace(table.PartitionKey)
+	table.SortKey = strings.TrimSpace(table.SortKey)
+	table.BillingMode = strings.TrimSpace(table.BillingMode)
+	table.Status = strings.ToUpper(strings.TrimSpace(table.Status))
+
+	switch table.Status {
+	case "", TableStatusActive:
+		table.Status = TableStatusActive
+	case TableStatusCreating, TableStatusDeleting:
+		// leave as-is
+	default:
+		table.Status = TableStatusActive
+	}
+
+	return table
+}
+
+func snapshotTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func (s State) sortedItems() []Item {

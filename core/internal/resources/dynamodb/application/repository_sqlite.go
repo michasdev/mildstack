@@ -1,0 +1,488 @@
+package application
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	_ "modernc.org/sqlite"
+
+	"github.com/michasdev/mildstack/core/internal/resources/dynamodb/domain"
+)
+
+const (
+	sqliteFileName   = "state.db"
+	schemaVersionKey = "schema_version"
+	schemaVersion    = "2"
+)
+
+type SQLiteRepository struct {
+	db         *sql.DB
+	dbPath     string
+	storageDir string
+	mu         sync.Mutex
+}
+
+var errSQLiteRepositoryClosed = errors.New("dynamodb: repository is closed")
+
+func NewSQLiteRepository(storagePath string) (*SQLiteRepository, error) {
+	storagePath = strings.TrimSpace(storagePath)
+	if storagePath == "" {
+		return nil, fmt.Errorf("dynamodb: storage path is required")
+	}
+
+	if err := os.MkdirAll(storagePath, 0o755); err != nil {
+		return nil, fmt.Errorf("dynamodb: create storage directory: %w", err)
+	}
+
+	dbPath := filepath.Join(storagePath, sqliteFileName)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("dynamodb: open sqlite database: %w", err)
+	}
+
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+
+	repo := &SQLiteRepository{
+		db:         db,
+		dbPath:     dbPath,
+		storageDir: storagePath,
+	}
+
+	if err := repo.bootstrap(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
+	return repo, nil
+}
+
+func (r *SQLiteRepository) Load() (domain.State, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.db == nil {
+		return domain.State{}, errSQLiteRepositoryClosed
+	}
+
+	state, err := r.loadLocked()
+	if err != nil {
+		return domain.State{}, err
+	}
+	if len(state.Tables) == 0 {
+		state = domain.NewState()
+		if err := r.saveLocked(state); err != nil {
+			return domain.State{}, err
+		}
+	}
+
+	return state, nil
+}
+
+func (r *SQLiteRepository) Save(state domain.State) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.db == nil {
+		return errSQLiteRepositoryClosed
+	}
+
+	return r.saveLocked(state)
+}
+
+func (r *SQLiteRepository) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.db == nil {
+		return nil
+	}
+
+	err := r.db.Close()
+	r.db = nil
+	return err
+}
+
+func (r *SQLiteRepository) bootstrap() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.db == nil {
+		return errSQLiteRepositoryClosed
+	}
+
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("dynamodb: bootstrap transaction: %w", err)
+	}
+
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS dynamodb_meta (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS dynamodb_tables (
+			name TEXT PRIMARY KEY,
+			partition_key TEXT NOT NULL,
+			sort_key TEXT NOT NULL,
+			billing_mode TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'ACTIVE',
+			created_at_ns INTEGER NOT NULL DEFAULT 0,
+			activation_at_ns INTEGER NOT NULL DEFAULT 0,
+			deleted_at_ns INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE TABLE IF NOT EXISTS dynamodb_items (
+			table_name TEXT NOT NULL,
+			item_key TEXT NOT NULL,
+			attributes_json TEXT NOT NULL,
+			PRIMARY KEY (table_name, item_key),
+			FOREIGN KEY (table_name) REFERENCES dynamodb_tables(name) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_dynamodb_items_table_name ON dynamodb_items(table_name)`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("dynamodb: bootstrap schema: %w", err)
+		}
+	}
+
+	if err := ensureTableColumn(ctx, tx, "dynamodb_tables", "status", "TEXT NOT NULL DEFAULT 'ACTIVE'"); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := ensureTableColumn(ctx, tx, "dynamodb_tables", "created_at_ns", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := ensureTableColumn(ctx, tx, "dynamodb_tables", "activation_at_ns", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := ensureTableColumn(ctx, tx, "dynamodb_tables", "deleted_at_ns", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO dynamodb_meta(key, value)
+		VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, schemaVersionKey, schemaVersion); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("dynamodb: bootstrap schema version: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("dynamodb: commit bootstrap: %w", err)
+	}
+
+	return nil
+}
+
+func (r *SQLiteRepository) loadLocked() (domain.State, error) {
+	ctx := context.Background()
+	state := domain.State{Service: "dynamodb"}
+
+	tableRows, err := r.db.QueryContext(ctx, `
+		SELECT name, partition_key, sort_key, billing_mode, status, created_at_ns, activation_at_ns, deleted_at_ns
+		FROM dynamodb_tables
+		ORDER BY name
+	`)
+	if err != nil {
+		return domain.State{}, fmt.Errorf("dynamodb: query tables: %w", err)
+	}
+	defer tableRows.Close()
+
+	for tableRows.Next() {
+		var table domain.Table
+		var createdAtNS, activationAtNS, deletedAtNS int64
+		if err := tableRows.Scan(&table.Name, &table.PartitionKey, &table.SortKey, &table.BillingMode, &table.Status, &createdAtNS, &activationAtNS, &deletedAtNS); err != nil {
+			return domain.State{}, fmt.Errorf("dynamodb: scan table: %w", err)
+		}
+		table.CreatedAt = unixNanoToTime(createdAtNS)
+		table.ActivationAt = unixNanoToTime(activationAtNS)
+		table.DeletedAt = unixNanoToTime(deletedAtNS)
+		state.Tables = append(state.Tables, table)
+	}
+	if err := tableRows.Err(); err != nil {
+		return domain.State{}, fmt.Errorf("dynamodb: iterate tables: %w", err)
+	}
+
+	itemRows, err := r.db.QueryContext(ctx, `
+		SELECT table_name, item_key, attributes_json
+		FROM dynamodb_items
+		ORDER BY table_name, item_key
+	`)
+	if err != nil {
+		return domain.State{}, fmt.Errorf("dynamodb: query items: %w", err)
+	}
+	defer itemRows.Close()
+
+	for itemRows.Next() {
+		var (
+			item       domain.Item
+			attributes string
+		)
+		if err := itemRows.Scan(&item.Table, &item.Key, &attributes); err != nil {
+			return domain.State{}, fmt.Errorf("dynamodb: scan item: %w", err)
+		}
+		decoded, err := decodeAttributes(attributes)
+		if err != nil {
+			return domain.State{}, err
+		}
+		item.Attributes = decoded
+		state.Items = append(state.Items, item)
+	}
+	if err := itemRows.Err(); err != nil {
+		return domain.State{}, fmt.Errorf("dynamodb: iterate items: %w", err)
+	}
+
+	return state, nil
+}
+
+func (r *SQLiteRepository) saveLocked(state domain.State) error {
+	normalized := state.Clone()
+	if normalized.Service == "" {
+		normalized.Service = "dynamodb"
+	}
+	if err := validatePersistedState(normalized); err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("dynamodb: save transaction: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM dynamodb_items`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("dynamodb: clear items: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM dynamodb_tables`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("dynamodb: clear tables: %w", err)
+	}
+
+	tableStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO dynamodb_tables(name, partition_key, sort_key, billing_mode, status, created_at_ns, activation_at_ns, deleted_at_ns)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("dynamodb: prepare table insert: %w", err)
+	}
+	defer tableStmt.Close()
+
+	for _, table := range normalized.ListTables() {
+		if _, err := tableStmt.ExecContext(ctx,
+			table.Name,
+			table.PartitionKey,
+			table.SortKey,
+			table.BillingMode,
+			table.Status,
+			timeToUnixNano(table.CreatedAt),
+			timeToUnixNano(table.ActivationAt),
+			timeToUnixNano(table.DeletedAt),
+		); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("dynamodb: insert table %q: %w", table.Name, err)
+		}
+	}
+
+	itemStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO dynamodb_items(table_name, item_key, attributes_json)
+		VALUES (?, ?, ?)
+	`)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("dynamodb: prepare item insert: %w", err)
+	}
+	defer itemStmt.Close()
+
+	for _, table := range normalized.ListTables() {
+		for _, item := range normalized.ListItems(table.Name) {
+			attributesJSON, err := marshalAttributesStable(item.Attributes)
+			if err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+			if _, err := itemStmt.ExecContext(ctx, item.Table, item.Key, string(attributesJSON)); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("dynamodb: insert item %s/%s: %w", item.Table, item.Key, err)
+			}
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO dynamodb_meta(key, value)
+		VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, schemaVersionKey, schemaVersion); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("dynamodb: update schema version: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("dynamodb: commit save: %w", err)
+	}
+
+	return nil
+}
+
+func validatePersistedState(state domain.State) error {
+	if state.Service != "dynamodb" {
+		return fmt.Errorf("dynamodb: invalid service %q", state.Service)
+	}
+
+	tables := make(map[string]struct{}, len(state.Tables))
+	for _, table := range state.Tables {
+		table = normalizePersistedTable(table)
+		if table.Name == "" {
+			return fmt.Errorf("dynamodb: invalid table: empty name")
+		}
+		if table.PartitionKey == "" {
+			return fmt.Errorf("dynamodb: invalid table %q: empty partition key", table.Name)
+		}
+		if table.BillingMode == "" {
+			return fmt.Errorf("dynamodb: invalid table %q: empty billing mode", table.Name)
+		}
+		if _, ok := tables[table.Name]; ok {
+			return fmt.Errorf("dynamodb: duplicate table %q", table.Name)
+		}
+		tables[table.Name] = struct{}{}
+	}
+
+	for _, item := range state.Items {
+		item.Table = strings.TrimSpace(item.Table)
+		item.Key = strings.TrimSpace(item.Key)
+		if item.Table == "" {
+			return fmt.Errorf("dynamodb: invalid item: empty table name")
+		}
+		if item.Key == "" {
+			return fmt.Errorf("dynamodb: invalid item %q: empty key", item.Table)
+		}
+		if _, ok := tables[item.Table]; !ok {
+			return fmt.Errorf("dynamodb: invalid item %s/%s: table not found", item.Table, item.Key)
+		}
+	}
+
+	return nil
+}
+
+func normalizePersistedTable(table domain.Table) domain.Table {
+	table.Name = strings.TrimSpace(table.Name)
+	table.PartitionKey = strings.TrimSpace(table.PartitionKey)
+	table.SortKey = strings.TrimSpace(table.SortKey)
+	table.BillingMode = strings.TrimSpace(table.BillingMode)
+	table.Status = strings.ToUpper(strings.TrimSpace(table.Status))
+
+	switch table.Status {
+	case "", domain.TableStatusActive:
+		table.Status = domain.TableStatusActive
+	case domain.TableStatusCreating, domain.TableStatusDeleting:
+	default:
+		table.Status = domain.TableStatusActive
+	}
+
+	return table
+}
+
+func ensureTableColumn(ctx context.Context, tx *sql.Tx, tableName, columnName, definition string) error {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, tableName))
+	if err != nil {
+		return fmt.Errorf("dynamodb: inspect %s columns: %w", tableName, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid          int
+			name         string
+			columnType   string
+			notNull      int
+			defaultValue sql.NullString
+			pk           int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return fmt.Errorf("dynamodb: scan %s columns: %w", tableName, err)
+		}
+		if name == columnName {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("dynamodb: iterate %s columns: %w", tableName, err)
+	}
+
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, tableName, columnName, definition)); err != nil {
+		return fmt.Errorf("dynamodb: add %s.%s column: %w", tableName, columnName, err)
+	}
+	return nil
+}
+
+func timeToUnixNano(value time.Time) int64 {
+	if value.IsZero() {
+		return 0
+	}
+	return value.UTC().UnixNano()
+}
+
+func unixNanoToTime(value int64) time.Time {
+	if value == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, value).UTC()
+}
+
+func marshalAttributesStable(attributes map[string]string) ([]byte, error) {
+	if attributes == nil {
+		return []byte("null"), nil
+	}
+
+	keys := make([]string, 0, len(attributes))
+	for key := range attributes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var builder strings.Builder
+	builder.Grow(len(attributes) * 8)
+	builder.WriteByte('{')
+	for i, key := range keys {
+		if i > 0 {
+			builder.WriteByte(',')
+		}
+		builder.WriteString(strconv.Quote(key))
+		builder.WriteByte(':')
+		builder.WriteString(strconv.Quote(attributes[key]))
+	}
+	builder.WriteByte('}')
+	return []byte(builder.String()), nil
+}
+
+func decodeAttributes(raw string) (map[string]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return nil, nil
+	}
+
+	attributes := make(map[string]string)
+	if err := json.Unmarshal([]byte(raw), &attributes); err != nil {
+		return nil, fmt.Errorf("dynamodb: decode item attributes: %w", err)
+	}
+	return attributes, nil
+}
