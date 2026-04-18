@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/michasdev/mildstack/core/internal/s3/domain"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
 func (s *Service) CreateMultipartUpload(bucket, key, contentType string, metadata, preservedHeaders map[string]string) (domain.MultipartUpload, error) {

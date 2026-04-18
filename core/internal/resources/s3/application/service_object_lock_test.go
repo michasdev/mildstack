@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/michasdev/mildstack/core/internal/s3/domain"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
 func TestServiceObjectLockConfigurationAndMutationGuards(t *testing.T) {

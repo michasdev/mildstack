@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/michasdev/mildstack/core/internal/s3/domain"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
 const objectLockXMLNamespace = "http://s3.amazonaws.com/doc/2006-03-01/"

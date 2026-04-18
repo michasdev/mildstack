@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/michasdev/mildstack/core/internal/s3/domain"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
 var bucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)

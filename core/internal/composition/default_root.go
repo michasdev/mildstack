@@ -6,8 +6,8 @@ import (
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
-	"github.com/michasdev/mildstack/core/internal/dynamodb"
-	"github.com/michasdev/mildstack/core/internal/s3"
+	"github.com/michasdev/mildstack/core/internal/resources/dynamodb"
+	"github.com/michasdev/mildstack/core/internal/resources/s3"
 )
 
 type DefaultRootConfig struct {

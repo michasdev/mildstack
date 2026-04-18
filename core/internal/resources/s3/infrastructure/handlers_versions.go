@@ -1,6 +1,6 @@
 package infrastructure
 
-import "github.com/michasdev/mildstack/core/internal/s3/domain"
+import "github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 
 func (h Handlers) GetBucketVersioning(request GetBucketVersioningRequest) (GetBucketVersioningResponse, error) {
 	versioning, err := h.service.GetBucketVersioning(request.Bucket)

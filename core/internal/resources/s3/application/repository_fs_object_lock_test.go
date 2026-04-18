@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/michasdev/mildstack/core/internal/s3/domain"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
 func TestFSRepositoryPersistsObjectLockRoundTrip(t *testing.T) {

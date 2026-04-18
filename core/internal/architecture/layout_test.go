@@ -29,12 +29,12 @@ func TestInwardLayersStayFrameworkFree(t *testing.T) {
 	mustExist(t, "../delivery/cli/ui")
 	mustExist(t, "../delivery/http")
 	mustExist(t, "../infrastructure")
-	mustExist(t, "../s3/domain")
-	mustExist(t, "../s3/application")
-	mustExist(t, "../s3/infrastructure")
-	mustExist(t, "../dynamodb/domain")
-	mustExist(t, "../dynamodb/application")
-	mustExist(t, "../dynamodb/infrastructure")
+	mustExist(t, "../resources/s3/domain")
+	mustExist(t, "../resources/s3/application")
+	mustExist(t, "../resources/s3/infrastructure")
+	mustExist(t, "../resources/dynamodb/domain")
+	mustExist(t, "../resources/dynamodb/application")
+	mustExist(t, "../resources/dynamodb/infrastructure")
 	mustExist(t, "layout.md")
 
 	scan := []string{
@@ -42,12 +42,12 @@ func TestInwardLayersStayFrameworkFree(t *testing.T) {
 		"../application",
 		"../application/orchestrator",
 		"../application/runtime",
-		"../s3/domain",
-		"../s3/application",
-		"../s3/infrastructure",
-		"../dynamodb/domain",
-		"../dynamodb/application",
-		"../dynamodb/infrastructure",
+		"../resources/s3/domain",
+		"../resources/s3/application",
+		"../resources/s3/infrastructure",
+		"../resources/dynamodb/domain",
+		"../resources/dynamodb/application",
+		"../resources/dynamodb/infrastructure",
 	}
 	for _, root := range scan {
 		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {

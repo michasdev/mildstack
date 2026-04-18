@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
-	dynamodbdomain "github.com/michasdev/mildstack/core/internal/dynamodb/domain"
-	"github.com/michasdev/mildstack/core/internal/s3/application"
-	s3domain "github.com/michasdev/mildstack/core/internal/s3/domain"
+	dynamodbdomain "github.com/michasdev/mildstack/core/internal/resources/dynamodb/domain"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/application"
+	s3domain "github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
 type stateHookStub struct {

@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
-	"github.com/michasdev/mildstack/core/internal/dynamodb/domain"
-	"github.com/michasdev/mildstack/core/internal/dynamodb/infrastructure"
+	"github.com/michasdev/mildstack/core/internal/resources/dynamodb/domain"
+	"github.com/michasdev/mildstack/core/internal/resources/dynamodb/infrastructure"
 )
 
 var _ orchestrator.Service = (*Service)(nil)

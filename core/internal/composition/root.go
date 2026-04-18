@@ -11,4 +11,3 @@ func Assemble(services []orchestrator.Service) Root {
 	copy(copied, services)
 	return Root{Services: copied}
 }
-

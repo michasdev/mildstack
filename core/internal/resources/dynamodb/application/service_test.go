@@ -7,7 +7,7 @@ import (
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
-	"github.com/michasdev/mildstack/core/internal/dynamodb/domain"
+	"github.com/michasdev/mildstack/core/internal/resources/dynamodb/domain"
 )
 
 func TestServiceMetadataRoutesAndState(t *testing.T) {

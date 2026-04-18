@@ -4,8 +4,8 @@ import (
 	"encoding/xml"
 	"testing"
 
-	"github.com/michasdev/mildstack/core/internal/s3/application"
-	"github.com/michasdev/mildstack/core/internal/s3/infrastructure"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/application"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/infrastructure"
 )
 
 func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {

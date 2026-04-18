@@ -18,7 +18,7 @@ import (
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
-	"github.com/michasdev/mildstack/core/internal/s3/domain"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
 func TestServiceMetadataRoutesAndState(t *testing.T) {

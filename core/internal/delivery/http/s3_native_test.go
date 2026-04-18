@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	s3domain "github.com/michasdev/mildstack/core/internal/s3/domain"
+	s3domain "github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
 type countingBody struct {

@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
-	"github.com/michasdev/mildstack/core/internal/s3/domain"
-	"github.com/michasdev/mildstack/core/internal/s3/infrastructure"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/domain"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/infrastructure"
 )
 
 func (s *Service) Start(context.Context) error {

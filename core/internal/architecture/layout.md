@@ -10,13 +10,13 @@ This repository uses a feature-oriented tree under `core/internal/`. The current
 - `core/internal/delivery/http/`
 - `core/internal/delivery/cli/`
 - `core/internal/delivery/cli/ui/`
-- `core/internal/s3/`
-- `core/internal/dynamodb/`
+- `core/internal/resources/s3/`
+- `core/internal/resources/dynamodb/`
 - `core/internal/<feature>/domain/`
 - `core/internal/<feature>/application/`
 - `core/internal/<feature>/infrastructure/`
 
-The shared roots above stay visible because they are part of the architecture contract, not incidental helpers. The current feature trees live under `core/internal/s3/` and `core/internal/dynamodb/`. Their `domain`, `application`, and `infrastructure` packages stay feature-local, while the shared roots handle orchestration, runtime snapshots, composition, and transport presentation.
+The shared roots above stay visible because they are part of the architecture contract, not incidental helpers. The current feature trees live under `core/internal/resources/s3/` and `core/internal/resources/dynamodb/`. Their `domain`, `application`, and `infrastructure` packages stay feature-local, while the shared roots handle orchestration, runtime snapshots, composition, and transport presentation.
 
 These two services define the reusable real-service template for the milestone: domain-owned mutation, application-layer request/response methods, and a feature-local `infrastructure/` package for route catalogs and thin adapters.
 

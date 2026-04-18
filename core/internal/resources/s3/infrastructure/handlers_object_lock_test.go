@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/michasdev/mildstack/core/internal/s3/application"
-	"github.com/michasdev/mildstack/core/internal/s3/domain"
-	"github.com/michasdev/mildstack/core/internal/s3/infrastructure"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/application"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/domain"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/infrastructure"
 )
 
 func TestHandlersObjectLockRoundTripAndCopySafety(t *testing.T) {

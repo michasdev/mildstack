@@ -2,7 +2,7 @@ package infrastructure
 
 import (
 	"bytes"
-	"github.com/michasdev/mildstack/core/internal/s3/domain"
+	"github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
 func (h Handlers) ListObjects(request ListObjectsRequest) (ListObjectsResponse, error) {

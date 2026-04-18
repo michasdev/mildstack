@@ -3,8 +3,8 @@ package infrastructure_test
 import (
 	"testing"
 
-	"github.com/michasdev/mildstack/core/internal/dynamodb/application"
-	"github.com/michasdev/mildstack/core/internal/dynamodb/infrastructure"
+	"github.com/michasdev/mildstack/core/internal/resources/dynamodb/application"
+	"github.com/michasdev/mildstack/core/internal/resources/dynamodb/infrastructure"
 )
 
 func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {

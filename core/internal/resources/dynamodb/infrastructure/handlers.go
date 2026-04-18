@@ -1,6 +1,6 @@
 package infrastructure
 
-import "github.com/michasdev/mildstack/core/internal/dynamodb/domain"
+import "github.com/michasdev/mildstack/core/internal/resources/dynamodb/domain"
 
 type Service interface {
 	ListTables() []domain.Table
