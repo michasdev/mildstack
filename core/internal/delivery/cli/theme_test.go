@@ -19,7 +19,7 @@ func TestRenderStatusUsesStructuredTheme(t *testing.T) {
 		Ports: []int{8080, 9090},
 	})
 
-	if got, want := stripANSI(RenderStatus(DefaultTheme(), presenter)), "Runtime Status\nState: ready\n\nServices\n  alpha v1\n  beta v2\n\nPorts\n  8080\n  9090\n"; got != want {
+	if got, want := stripANSI(RenderStatus(DefaultTheme(), presenter)), "Runtime Status\nState: running\n\nServices\n  alpha v1\n  beta v2\n\nInstances\n  8080 running\n  9090 running\n\nPorts\n  8080\n  9090\n"; got != want {
 		t.Fatalf("unexpected status render:\n got %q\nwant %q", got, want)
 	}
 }
@@ -29,13 +29,13 @@ func TestRenderEmptyStatusAndPlainPorts(t *testing.T) {
 
 	presenter := NewPresenter(runtime.Snapshot{})
 
-	if got, want := stripANSI(RenderStatus(DefaultTheme(), presenter)), "Runtime Status\nState: not_ready\n\nServices\n  (none)\n\nPorts\n  (none)\n"; got != want {
+	if got, want := stripANSI(RenderStatus(DefaultTheme(), presenter)), "Runtime Status\nState: not_started\n\nServices\n  (none)\n\nInstances\n  (none)\n\nPorts\n  (none)\n"; got != want {
 		t.Fatalf("unexpected empty status render:\n got %q\nwant %q", got, want)
 	}
 	if got, want := stripANSI(RenderPorts(DefaultTheme(), presenter)), "No ports registered\n"; got != want {
 		t.Fatalf("unexpected empty ports render:\n got %q\nwant %q", got, want)
 	}
-	if got, want := stripANSI(RenderReadiness(DefaultTheme(), presenter)), "State: not_ready"; got != want {
+	if got, want := stripANSI(RenderReadiness(DefaultTheme(), presenter)), "State: not_started"; got != want {
 		t.Fatalf("unexpected readiness render:\n got %q\nwant %q", got, want)
 	}
 	if got, want := RenderError(DefaultTheme(), errors.New("boom")), "error: boom"; got != want {

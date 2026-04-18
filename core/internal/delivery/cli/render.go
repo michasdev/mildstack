@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
+	"github.com/michasdev/mildstack/core/internal/application/runtime"
 )
 
 func RenderStatus(theme Theme, presenter Presenter) string {
@@ -15,6 +16,8 @@ func RenderStatus(theme Theme, presenter Presenter) string {
 	fmt.Fprintf(&buf, "%s: %s\n\n", theme.LabelStyle.Render(theme.StateLabel), theme.AccentStyle.Render(presenter.PresentReadiness()))
 
 	renderSection(&buf, theme.SectionStyle.Render(theme.ServicesLabel), theme.Indent, theme.EmptyStyle.Render(theme.EmptyLabel), renderServiceLines(presenter.Services()))
+	buf.WriteString("\n")
+	renderSection(&buf, theme.SectionStyle.Render(theme.InstancesLabel), theme.Indent, theme.EmptyStyle.Render(theme.EmptyLabel), renderInstanceLines(presenter.instancesForDisplay()))
 	buf.WriteString("\n")
 	renderSection(&buf, theme.SectionStyle.Render(theme.PortsLabel), theme.Indent, theme.EmptyStyle.Render(theme.EmptyLabel), renderPortLines(presenter.Ports()))
 
@@ -88,6 +91,19 @@ func renderPortLines(ports []int) []string {
 	lines := make([]string, len(ports))
 	for i, port := range ports {
 		lines[i] = fmt.Sprintf("%d", port)
+	}
+	return lines
+}
+
+func renderInstanceLines(instances []runtime.Instance) []string {
+	if len(instances) == 0 {
+		return nil
+	}
+
+	lines := make([]string, len(instances))
+	for i, instance := range instances {
+		line := fmt.Sprintf("%d %s", instance.Port, instanceStatusLine(instance))
+		lines[i] = line
 	}
 	return lines
 }

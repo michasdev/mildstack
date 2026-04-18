@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
+	"syscall"
 
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 )
@@ -18,8 +20,17 @@ type Storage struct {
 }
 
 type instanceRecord struct {
-	Port int `json:"port"`
-	PID  int `json:"pid"`
+	Port   int    `json:"port"`
+	PID    int    `json:"pid,omitempty"`
+	Status string `json:"status,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+type instanceSummary struct {
+	Port   int    `json:"port"`
+	PID    int    `json:"pid,omitempty"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
 }
 
 func NewStorage(paths runtime.Paths, legacyBaseDir string) Storage {
@@ -78,11 +89,19 @@ func (s Storage) MigrateInstance(name string) (bool, error) {
 }
 
 func (s Storage) SaveSavedInstance(port int) error {
-	return s.saveInstance(s.SavedInstancesDir(), port)
+	return s.saveInstance(s.SavedInstancesDir(), port, "not_started", "")
 }
 
 func (s Storage) SaveActiveInstance(port int) error {
-	return s.saveInstance(s.ActiveInstancesDir(), port)
+	return s.saveInstance(s.ActiveInstancesDir(), port, "running", "")
+}
+
+func (s Storage) SaveErroredInstance(port int, err error) error {
+	message := ""
+	if err != nil {
+		message = strings.TrimSpace(err.Error())
+	}
+	return s.saveInstance(s.ActiveInstancesDir(), port, "errored", message)
 }
 
 func (s Storage) DeleteActiveInstance(port int) error {
@@ -94,10 +113,89 @@ func (s Storage) DeleteActiveInstance(port int) error {
 }
 
 func (s Storage) LoadActivePorts() ([]int, error) {
-	return s.loadInstancePorts(s.ActiveInstancesDir())
+	instances, err := s.LoadInstances()
+	if err != nil {
+		return nil, err
+	}
+
+	ports := make([]int, 0, len(instances))
+	for _, instance := range instances {
+		if instance.Status == "running" {
+			ports = append(ports, instance.Port)
+		}
+	}
+
+	sort.Ints(ports)
+	return ports, nil
 }
 
-func (s Storage) loadInstancePorts(dir string) ([]int, error) {
+func (s Storage) LoadInstances() ([]instanceSummary, error) {
+	active, err := s.loadInstanceRecords(s.ActiveInstancesDir())
+	if err != nil {
+		return nil, err
+	}
+	saved, err := s.loadInstanceRecords(s.SavedInstancesDir())
+	if err != nil {
+		return nil, err
+	}
+
+	instances := make(map[int]instanceSummary, len(saved)+len(active))
+	for _, record := range saved {
+		if record.Port <= 0 {
+			continue
+		}
+		instances[record.Port] = instanceSummary{
+			Port:   record.Port,
+			PID:    record.PID,
+			Status: "not_started",
+			Error:  strings.TrimSpace(record.Error),
+		}
+	}
+	for _, record := range active {
+		if record.Port <= 0 {
+			continue
+		}
+		status := strings.TrimSpace(record.Status)
+		alive := record.PID > 0 && processAlive(record.PID)
+		switch status {
+		case "":
+			if alive {
+				status = "running"
+			} else {
+				status = "errored"
+			}
+		case "running":
+			if !alive {
+				status = "errored"
+			}
+		}
+		if status != "running" && status != "errored" && status != "not_started" {
+			status = "errored"
+		}
+		instance := instanceSummary{
+			Port:   record.Port,
+			PID:    record.PID,
+			Status: status,
+			Error:  strings.TrimSpace(record.Error),
+		}
+		if instance.Status == "running" {
+			instance.Error = ""
+		}
+		instances[record.Port] = instance
+	}
+
+	result := make([]instanceSummary, 0, len(instances))
+	for _, instance := range instances {
+		result = append(result, instance)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Port < result[j].Port
+	})
+	return result, nil
+}
+
+func (s Storage) loadInstanceRecords(dir string) ([]instanceRecord, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -106,7 +204,7 @@ func (s Storage) loadInstancePorts(dir string) ([]int, error) {
 		return nil, err
 	}
 
-	ports := make([]int, 0, len(entries))
+	records := make([]instanceRecord, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -120,12 +218,14 @@ func (s Storage) loadInstancePorts(dir string) ([]int, error) {
 			return nil, err
 		}
 		if record.Port > 0 {
-			ports = append(ports, record.Port)
+			records = append(records, record)
 		}
 	}
 
-	sort.Ints(ports)
-	return ports, nil
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].Port < records[j].Port
+	})
+	return records, nil
 }
 
 func (s Storage) readFile(primary string, legacy string) ([]byte, error) {
@@ -178,10 +278,18 @@ func (s Storage) legacyCategoryPath(category, name string) string {
 	return filepath.Join(s.legacyBaseDir, category, name)
 }
 
-func (s Storage) saveInstance(dir string, port int) error {
+func (s Storage) saveInstance(dir string, port int, status string, message string) error {
 	record := instanceRecord{
-		Port: port,
-		PID:  os.Getpid(),
+		Port:   port,
+		PID:    os.Getpid(),
+		Status: status,
+		Error:  strings.TrimSpace(message),
+	}
+	if record.Status == "not_started" {
+		record.PID = 0
+	}
+	if record.Status == "errored" {
+		record.PID = 0
 	}
 
 	data, err := json.MarshalIndent(record, "", "  ")
@@ -195,6 +303,19 @@ func (s Storage) saveInstance(dir string, port int) error {
 	}
 
 	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+
+	return process.Signal(syscall.Signal(0)) == nil
 }
 
 func (s Storage) instanceRecordPath(dir string, port int) string {

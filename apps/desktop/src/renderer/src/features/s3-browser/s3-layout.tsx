@@ -3,7 +3,6 @@ import { useLocation, useNavigate, Outlet } from 'react-router'
 import { ArrowLeft, ChevronRight, Database } from 'lucide-react'
 
 import { Button } from '@renderer/components/ui/button'
-import { Badge } from '@renderer/components/ui/badge'
 import {
   Frame,
   FrameDescription,

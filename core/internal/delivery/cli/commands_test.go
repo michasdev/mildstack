@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"path/filepath"
 	"regexp"
 	"testing"
 
@@ -36,11 +37,18 @@ func (s *commandServiceStub) AttachState(orchestrator.StateHook) error { return 
 
 type commandServerStub struct {
 	manager *runtime.Manager
+	storage Storage
 	port    int
 }
 
 func (s *commandServerStub) Start(ctx context.Context) error {
-	return s.manager.Serve(ctx, s.port)
+	if err := s.manager.Serve(ctx, s.port); err != nil {
+		return err
+	}
+	if err := s.storage.SaveSavedInstance(s.port); err != nil {
+		return err
+	}
+	return s.storage.SaveActiveInstance(s.port)
 }
 
 type noopListener struct{}
@@ -62,6 +70,7 @@ func (a noopAddr) String() string { return string(a) }
 func TestCommandsServeStatusAndPorts(t *testing.T) {
 	t.Helper()
 
+	storage := newTestStorage(t)
 	manager := runtime.New(composition.Assemble([]orchestrator.Service{
 		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
 		&commandServiceStub{metadata: orchestrator.Metadata{Name: "beta", Version: "v2"}},
@@ -70,14 +79,14 @@ func TestCommandsServeStatusAndPorts(t *testing.T) {
 	runCommand := func(args ...string) string {
 		t.Helper()
 
-		return executeCommand(t, manager, args...)
+		return executeCommand(t, manager, storage, args...)
 	}
 
 	runCommand("serve", "--port", "9090")
 	runCommand("serve", "--port", "8080")
 
 	statusOutput := stripANSI(runCommand("status"))
-	if got, want := statusOutput, "Runtime Status\nState: ready\n\nServices\n  alpha v1\n  beta v2\n\nPorts\n  8080\n  9090\n"; got != want {
+	if got, want := statusOutput, "Runtime Status\nState: running\n\nServices\n  alpha v1\n  beta v2\n\nInstances\n  8080 running\n  9090 running\n\nPorts\n  8080\n  9090\n"; got != want {
 		t.Fatalf("unexpected status output:\n got %q\nwant %q", got, want)
 	}
 
@@ -90,6 +99,7 @@ func TestCommandsServeStatusAndPorts(t *testing.T) {
 func TestCommandsServeStatusAndPortsJSON(t *testing.T) {
 	t.Helper()
 
+	storage := newTestStorage(t)
 	manager := runtime.New(composition.Assemble([]orchestrator.Service{
 		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
 		&commandServiceStub{metadata: orchestrator.Metadata{Name: "beta", Version: "v2"}},
@@ -98,7 +108,7 @@ func TestCommandsServeStatusAndPortsJSON(t *testing.T) {
 	runCommand := func(args ...string) string {
 		t.Helper()
 
-		return executeCommand(t, manager, args...)
+		return executeCommand(t, manager, storage, args...)
 	}
 
 	runCommand("serve", "--port", "9090")
@@ -112,12 +122,17 @@ func TestCommandsServeStatusAndPortsJSON(t *testing.T) {
 			Version string   `json:"version"`
 			Tags    []string `json:"tags"`
 		} `json:"services"`
+		Instances []struct {
+			Port   int    `json:"port"`
+			Status string `json:"status"`
+			Error  string `json:"error"`
+		} `json:"instances"`
 		Ports []int `json:"ports"`
 	}
 	if err := json.Unmarshal([]byte(statusOutput), &statusPayload); err != nil {
 		t.Fatalf("unmarshal status json: %v\npayload: %s", err, statusOutput)
 	}
-	if got, want := statusPayload.State, "ready"; got != want {
+	if got, want := statusPayload.State, "running"; got != want {
 		t.Fatalf("unexpected status state: got %q want %q", got, want)
 	}
 	if len(statusPayload.Services) != 2 || statusPayload.Services[0].Name != "alpha" || statusPayload.Services[1].Name != "beta" {
@@ -125,6 +140,9 @@ func TestCommandsServeStatusAndPortsJSON(t *testing.T) {
 	}
 	if len(statusPayload.Ports) != 2 || statusPayload.Ports[0] != 8080 || statusPayload.Ports[1] != 9090 {
 		t.Fatalf("unexpected status ports: %#v", statusPayload.Ports)
+	}
+	if len(statusPayload.Instances) != 2 || statusPayload.Instances[0].Status != "running" || statusPayload.Instances[1].Status != "running" {
+		t.Fatalf("unexpected status instances: %#v", statusPayload.Instances)
 	}
 
 	portsOutput := runCommand("ports", "--json")
@@ -142,6 +160,7 @@ func TestCommandsServeStatusAndPortsJSON(t *testing.T) {
 func TestServeDefaultsTo4566AndFallsBackWhenBusy(t *testing.T) {
 	t.Helper()
 
+	storage := newTestStorage(t)
 	originalListenTCP := listenTCP
 	defer func() { listenTCP = originalListenTCP }()
 
@@ -166,7 +185,7 @@ func TestServeDefaultsTo4566AndFallsBackWhenBusy(t *testing.T) {
 	runCommand := func(args ...string) string {
 		t.Helper()
 
-		return executeCommand(t, manager, args...)
+		return executeCommand(t, manager, storage, args...)
 	}
 
 	runCommand("serve")
@@ -184,6 +203,7 @@ func TestServeDefaultsTo4566AndFallsBackWhenBusy(t *testing.T) {
 func TestServeExplicitPortSkipsFallback(t *testing.T) {
 	t.Helper()
 
+	storage := newTestStorage(t)
 	originalListenTCP := listenTCP
 	defer func() { listenTCP = originalListenTCP }()
 
@@ -200,7 +220,7 @@ func TestServeExplicitPortSkipsFallback(t *testing.T) {
 	runCommand := func(args ...string) string {
 		t.Helper()
 
-		return executeCommand(t, manager, args...)
+		return executeCommand(t, manager, storage, args...)
 	}
 
 	runCommand("serve", "--port", "4566")
@@ -218,10 +238,11 @@ func TestServeExplicitPortSkipsFallback(t *testing.T) {
 func TestCommandsRenderEmptyRuntimeStatus(t *testing.T) {
 	t.Helper()
 
+	storage := newTestStorage(t)
 	manager := runtime.New(nil)
-	statusOutput := executeCommand(t, manager, "status")
+	statusOutput := executeCommand(t, manager, storage, "status")
 
-	if got, want := stripANSI(statusOutput), "Runtime Status\nState: not_ready\n\nServices\n  (none)\n\nPorts\n  (none)\n"; got != want {
+	if got, want := stripANSI(statusOutput), "Runtime Status\nState: not_started\n\nServices\n  (none)\n\nInstances\n  (none)\n\nPorts\n  (none)\n"; got != want {
 		t.Fatalf("unexpected empty status output:\n got %q\nwant %q", got, want)
 	}
 }
@@ -229,25 +250,47 @@ func TestCommandsRenderEmptyRuntimeStatus(t *testing.T) {
 func TestCommandsRenderEmptyPortsState(t *testing.T) {
 	t.Helper()
 
+	storage := newTestStorage(t)
 	manager := runtime.New(nil)
-	portsOutput := stripANSI(executeCommand(t, manager, "ports"))
+	portsOutput := stripANSI(executeCommand(t, manager, storage, "ports"))
 
 	if got, want := portsOutput, "No ports registered\n"; got != want {
 		t.Fatalf("unexpected empty ports output:\n got %q\nwant %q", got, want)
 	}
 }
 
-func executeCommand(t *testing.T, manager *runtime.Manager, args ...string) string {
+func TestCommandsRenderErroredInstanceStatus(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	manager := runtime.New(composition.Assemble([]orchestrator.Service{
+		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
+	}).Services)
+
+	if err := storage.SaveSavedInstance(8080); err != nil {
+		t.Fatalf("save saved instance: %v", err)
+	}
+	if err := storage.SaveErroredInstance(8080, errors.New("failed to start")); err != nil {
+		t.Fatalf("save errored instance: %v", err)
+	}
+
+	statusOutput := stripANSI(executeCommand(t, manager, storage, "status"))
+	if got, want := statusOutput, "Runtime Status\nState: errored\n\nServices\n  alpha v1\n\nInstances\n  8080 errored: failed to start\n\nPorts\n  (none)\n"; got != want {
+		t.Fatalf("unexpected errored status output:\n got %q\nwant %q", got, want)
+	}
+}
+
+func executeCommand(t *testing.T, manager *runtime.Manager, storage Storage, args ...string) string {
 	t.Helper()
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd := NewRootCommand(stdout, stderr, Commands{
 		Serve: NewServeCommand(manager, func(port int) HTTPServer {
-			return &commandServerStub{manager: manager, port: port}
+			return &commandServerStub{manager: manager, storage: storage, port: port}
 		}),
-		Status: NewStatusCommand(manager),
-		Ports:  NewPortsCommand(manager),
+		Status: NewStatusCommand(manager, storage),
+		Ports:  NewPortsCommand(manager, storage),
 	})
 	cmd.SetArgs(args)
 
@@ -256,6 +299,15 @@ func executeCommand(t *testing.T, manager *runtime.Manager, args ...string) stri
 	}
 
 	return stdout.String()
+}
+
+func newTestStorage(t *testing.T) Storage {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	configDir := filepath.Join(t.TempDir(), "config")
+	paths := runtime.ResolvePathsFrom(homeDir, configDir)
+	return NewStorage(paths, runtime.LegacyBaseDirFrom(homeDir, configDir))
 }
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)

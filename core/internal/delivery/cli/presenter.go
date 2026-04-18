@@ -10,14 +10,16 @@ import (
 )
 
 type Presenter struct {
-	services []orchestrator.Metadata
-	ports    []int
+	services  []orchestrator.Metadata
+	ports     []int
+	instances []runtime.Instance
 }
 
 func NewPresenter(snapshot runtime.Snapshot) Presenter {
 	return Presenter{
-		services: cloneMetadata(snapshot.Services),
-		ports:    append([]int(nil), snapshot.Ports...),
+		services:  cloneMetadata(snapshot.Services),
+		ports:     append([]int(nil), snapshot.Ports...),
+		instances: cloneInstances(snapshot.Instances),
 	}
 }
 
@@ -40,6 +42,7 @@ func PresentError(err error) string {
 func (p Presenter) PresentStatus() string {
 	var buf bytes.Buffer
 
+	fmt.Fprintf(&buf, "State: %s\n\n", p.PresentReadiness())
 	buf.WriteString("Services:\n")
 	if len(p.services) == 0 {
 		buf.WriteString("  (none)\n")
@@ -49,11 +52,21 @@ func (p Presenter) PresentStatus() string {
 		}
 	}
 
-	buf.WriteString("Ports:\n")
-	if len(p.ports) == 0 {
+	buf.WriteString("\nInstances:\n")
+	if len(p.instancesForDisplay()) == 0 {
 		buf.WriteString("  (none)\n")
 	} else {
-		for _, port := range p.ports {
+		for _, instance := range p.instancesForDisplay() {
+			fmt.Fprintf(&buf, "- %d %s\n", instance.Port, instanceStatusLine(instance))
+		}
+	}
+
+	buf.WriteString("Ports:\n")
+	runningPorts := p.runningPorts()
+	if len(runningPorts) == 0 {
+		buf.WriteString("  (none)\n")
+	} else {
+		for _, port := range runningPorts {
 			fmt.Fprintf(&buf, "- %d\n", port)
 		}
 	}
@@ -66,39 +79,61 @@ func (p Presenter) Services() []orchestrator.Metadata {
 }
 
 func (p Presenter) Ports() []int {
-	return append([]int(nil), p.ports...)
+	return append([]int(nil), p.runningPorts()...)
 }
 
 func (p Presenter) PresentPorts() string {
-	if len(p.ports) == 0 {
+	ports := p.runningPorts()
+	if len(ports) == 0 {
 		return "No ports registered\n"
 	}
 
 	var buf bytes.Buffer
-	for _, port := range p.ports {
+	for _, port := range ports {
 		fmt.Fprintf(&buf, "%d\n", port)
 	}
 	return buf.String()
 }
 
 func (p Presenter) PresentReadiness() string {
-	if len(p.ports) > 0 {
-		return "ready"
+	instances := p.instancesForDisplay()
+	if len(instances) == 0 {
+		return "not_started"
 	}
-	return "not_ready"
+
+	running := false
+	errored := false
+	for _, instance := range instances {
+		switch instance.Status {
+		case "running":
+			running = true
+		case "errored":
+			errored = true
+		}
+	}
+
+	switch {
+	case running:
+		return "running"
+	case errored:
+		return "errored"
+	default:
+		return "not_started"
+	}
 }
 
 func (p Presenter) StatusPayload() statusPayload {
 	return statusPayload{
-		State:    p.PresentReadiness(),
-		Services: cloneServices(p.services),
-		Ports:    append([]int(nil), p.ports...),
+		State:     p.PresentReadiness(),
+		Services:  cloneServices(p.services),
+		Instances: cloneInstancesPayload(p.instancesForDisplay()),
+		Ports:     append([]int(nil), p.runningPorts()...),
 	}
 }
 
 func (p Presenter) PortsPayload() portsPayload {
 	return portsPayload{
-		Ports: append([]int(nil), p.ports...),
+		Ports: append([]int(nil), p.runningPorts()...),
 	}
 }
 
@@ -115,6 +150,19 @@ func cloneMetadata(metadata []orchestrator.Metadata) []orchestrator.Metadata {
 	return copied
 }
 
+func cloneInstances(instances []runtime.Instance) []runtime.Instance {
+	copied := make([]runtime.Instance, len(instances))
+	for i, instance := range instances {
+		copied[i] = runtime.Instance{
+			Port:   instance.Port,
+			PID:    instance.PID,
+			Status: instance.Status,
+			Error:  instance.Error,
+		}
+	}
+	return copied
+}
+
 func cloneServices(services []orchestrator.Metadata) []servicePayload {
 	copied := make([]servicePayload, len(services))
 	for i, item := range services {
@@ -126,6 +174,61 @@ func cloneServices(services []orchestrator.Metadata) []servicePayload {
 		}
 	}
 	return copied
+}
+
+func cloneInstancesPayload(instances []runtime.Instance) []instancePayload {
+	copied := make([]instancePayload, len(instances))
+	for i, instance := range instances {
+		copied[i] = instancePayload{
+			Port:   instance.Port,
+			PID:    instance.PID,
+			Status: instance.Status,
+			Error:  instance.Error,
+		}
+	}
+	return copied
+}
+
+func (p Presenter) instancesForDisplay() []runtime.Instance {
+	if len(p.instances) > 0 {
+		return cloneInstances(p.instances)
+	}
+	if len(p.ports) == 0 {
+		return nil
+	}
+	instances := make([]runtime.Instance, len(p.ports))
+	for i, port := range p.ports {
+		instances[i] = runtime.Instance{
+			Port:   port,
+			Status: "running",
+		}
+	}
+	return instances
+}
+
+func (p Presenter) runningPorts() []int {
+	instances := p.instancesForDisplay()
+	if len(instances) == 0 {
+		return append([]int(nil), p.ports...)
+	}
+
+	ports := make([]int, 0, len(instances))
+	for _, instance := range instances {
+		if instance.Status == "running" {
+			ports = append(ports, instance.Port)
+		}
+	}
+	return ports
+}
+
+func instanceStatusLine(instance runtime.Instance) string {
+	if instance.Status == "" {
+		return "running"
+	}
+	if instance.Error == "" {
+		return instance.Status
+	}
+	return instance.Status + ": " + instance.Error
 }
 
 func renderError(err error) string {

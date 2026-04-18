@@ -25,13 +25,13 @@ func TestPresenterCopiesSnapshotData(t *testing.T) {
 	snapshot.Services[0].Tags = append(snapshot.Services[0].Tags, "mutated")
 	snapshot.Ports[0] = 9090
 
-	if got, want := presenter.PresentStatus(), "Services:\n- alpha v1\nPorts:\n- 8080\n"; got != want {
+	if got, want := presenter.PresentStatus(), "State: running\n\nServices:\n- alpha v1\n\nInstances:\n- 8080 running\nPorts:\n- 8080\n"; got != want {
 		t.Fatalf("unexpected copied status output:\n got %q\nwant %q", got, want)
 	}
 	if got, want := presenter.PresentPorts(), "8080\n"; got != want {
 		t.Fatalf("unexpected copied ports output:\n got %q\nwant %q", got, want)
 	}
-	if got, want := presenter.PresentReadiness(), "ready"; got != want {
+	if got, want := presenter.PresentReadiness(), "running"; got != want {
 		t.Fatalf("unexpected copied readiness output:\n got %q\nwant %q", got, want)
 	}
 }
@@ -39,13 +39,13 @@ func TestPresenterCopiesSnapshotData(t *testing.T) {
 func TestPresenterRendersEmptyAndErrorStates(t *testing.T) {
 	t.Helper()
 
-	if got, want := PresentStatus(runtime.Snapshot{}), "Services:\n  (none)\nPorts:\n  (none)\n"; got != want {
+	if got, want := PresentStatus(runtime.Snapshot{}), "State: not_started\n\nServices:\n  (none)\n\nInstances:\n  (none)\nPorts:\n  (none)\n"; got != want {
 		t.Fatalf("unexpected empty status output:\n got %q\nwant %q", got, want)
 	}
 	if got, want := PresentPorts(nil), "No ports registered\n"; got != want {
 		t.Fatalf("unexpected empty ports output:\n got %q\nwant %q", got, want)
 	}
-	if got, want := PresentReadiness(runtime.Snapshot{}), "not_ready"; got != want {
+	if got, want := PresentReadiness(runtime.Snapshot{}), "not_started"; got != want {
 		t.Fatalf("unexpected empty readiness output:\n got %q\nwant %q", got, want)
 	}
 	if got, want := PresentError(nil), ""; got != want {

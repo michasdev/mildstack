@@ -23,9 +23,10 @@ func resolveOutputMode(cmd *cobra.Command) OutputMode {
 }
 
 type statusPayload struct {
-	State    string           `json:"state"`
-	Services []servicePayload `json:"services"`
-	Ports    []int            `json:"ports"`
+	State     string            `json:"state"`
+	Services  []servicePayload  `json:"services"`
+	Instances []instancePayload `json:"instances"`
+	Ports     []int             `json:"ports"`
 }
 
 type servicePayload struct {
@@ -37,6 +38,13 @@ type servicePayload struct {
 
 type portsPayload struct {
 	Ports []int `json:"ports"`
+}
+
+type instancePayload struct {
+	Port   int    `json:"port"`
+	PID    int    `json:"pid,omitempty"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
 }
 
 func renderJSON(value any) string {

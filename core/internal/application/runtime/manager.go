@@ -10,8 +10,16 @@ import (
 )
 
 type Snapshot struct {
-	Services []orchestrator.Metadata
-	Ports    []int
+	Services  []orchestrator.Metadata
+	Ports     []int
+	Instances []Instance
+}
+
+type Instance struct {
+	Port   int
+	PID    int
+	Status string
+	Error  string
 }
 
 type Manager struct {
@@ -71,8 +79,9 @@ func (m *Manager) Snapshot(ctx context.Context) Snapshot {
 	defer m.mu.Unlock()
 
 	return Snapshot{
-		Services: cloneMetadataSlice(m.services),
-		Ports:    sortedPorts(m.ports),
+		Services:  cloneMetadataSlice(m.services),
+		Ports:     sortedPorts(m.ports),
+		Instances: runningInstances(m.ports),
 	}
 }
 
@@ -109,4 +118,16 @@ func sortedPorts(ports []int) []int {
 	copied := append([]int(nil), ports...)
 	sort.Ints(copied)
 	return copied
+}
+
+func runningInstances(ports []int) []Instance {
+	copiedPorts := sortedPorts(ports)
+	instances := make([]Instance, len(copiedPorts))
+	for i, port := range copiedPorts {
+		instances[i] = Instance{
+			Port:   port,
+			Status: "running",
+		}
+	}
+	return instances
 }

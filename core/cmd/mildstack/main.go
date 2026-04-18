@@ -28,20 +28,20 @@ func main() {
 	httpServerFactory := func(port int) cli.HTTPServer {
 		router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
 		if err := registerServiceRoutes(router.Registrar(), root.Services); err != nil {
-			return failedHTTPServer{err: err}
+			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port}
 		}
 		if err := registerNativeDynamoDBRoutes(router, root.Services); err != nil {
-			return failedHTTPServer{err: err}
+			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port}
 		}
 		if err := registerNativeS3Routes(router, root.Services); err != nil {
-			return failedHTTPServer{err: err}
+			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port}
 		}
-		return deliveryhttp.NewServer(instanceRegistrar{manager: manager, storage: storage}, router, port)
+		return recordingHTTPServer{server: deliveryhttp.NewServer(instanceRegistrar{manager: manager, storage: storage}, router, port), storage: storage, port: port}
 	}
 	commands := cli.Commands{
 		Serve:  cli.NewServeCommand(manager, httpServerFactory),
-		Status: cli.NewStatusCommand(manager),
-		Ports:  cli.NewPortsCommand(manager),
+		Status: cli.NewStatusCommand(manager, storage),
+		Ports:  cli.NewPortsCommand(manager, storage),
 		UI:     cliui.NewUICommand(manager),
 	}
 
@@ -90,6 +90,22 @@ type failedHTTPServer struct {
 
 func (s failedHTTPServer) Start(context.Context) error {
 	return s.err
+}
+
+type recordingHTTPServer struct {
+	server  cli.HTTPServer
+	storage cli.Storage
+	port    int
+}
+
+func (s recordingHTTPServer) Start(ctx context.Context) error {
+	err := s.server.Start(ctx)
+	if err != nil {
+		if recordErr := s.storage.SaveErroredInstance(s.port, err); recordErr != nil {
+			return fmt.Errorf("%w (and failed to persist errored instance: %v)", err, recordErr)
+		}
+	}
+	return err
 }
 
 func registerServiceRoutes(registrar orchestrator.RouteRegistrar, services []orchestrator.Service) error {
