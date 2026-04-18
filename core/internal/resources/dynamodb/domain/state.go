@@ -34,7 +34,60 @@ type Table struct {
 type Item struct {
 	Table      string
 	Key        string
-	Attributes map[string]string
+	Attributes map[string]AttributeValue
+}
+
+type ReadPage struct {
+	Items            []Item
+	Count            int
+	ScannedCount     int
+	LastEvaluatedKey map[string]AttributeValue
+}
+
+type AttributeValue struct {
+	S    *string
+	N    *string
+	BOOL *bool
+	NULL bool
+	M    *map[string]AttributeValue
+	L    *[]AttributeValue
+}
+
+func StringValue(value string) AttributeValue {
+	copied := value
+	return AttributeValue{S: &copied}
+}
+
+func NumberValue(value string) AttributeValue {
+	copied := value
+	return AttributeValue{N: &copied}
+}
+
+func BoolValue(value bool) AttributeValue {
+	copied := value
+	return AttributeValue{BOOL: &copied}
+}
+
+func NullValue() AttributeValue {
+	return AttributeValue{NULL: true}
+}
+
+func MapValue(values map[string]AttributeValue) AttributeValue {
+	cloned := cloneAttributes(values)
+	return AttributeValue{M: &cloned}
+}
+
+func ListValue(values []AttributeValue) AttributeValue {
+	cloned := cloneAttributeList(values)
+	return AttributeValue{L: &cloned}
+}
+
+func (v AttributeValue) Clone() AttributeValue {
+	return cloneAttributeValue(v)
+}
+
+func (v AttributeValue) Any() any {
+	return attributeValueToAny(v)
 }
 
 func NewState() State {
@@ -54,10 +107,10 @@ func NewState() State {
 			{
 				Table: "mildstack-records",
 				Key:   "example#1",
-				Attributes: map[string]string{
-					"id":      "example#1",
-					"version": "1",
-					"title":   "bootstrap item",
+				Attributes: map[string]AttributeValue{
+					"id":      StringValue("example#1"),
+					"version": NumberValue("1"),
+					"title":   StringValue("bootstrap item"),
 				},
 			},
 		},
@@ -280,26 +333,92 @@ func (s State) sortedItems() []Item {
 	return items
 }
 
-func cloneAttributes(attributes map[string]string) map[string]string {
+func cloneAttributes(attributes map[string]AttributeValue) map[string]AttributeValue {
 	if attributes == nil {
 		return nil
 	}
 
-	cloned := make(map[string]string, len(attributes))
+	cloned := make(map[string]AttributeValue, len(attributes))
 	for key, value := range attributes {
-		cloned[key] = value
+		cloned[key] = cloneAttributeValue(value)
 	}
 	return cloned
 }
 
-func copyAttributesAny(attributes map[string]string) map[string]any {
+func cloneAttributeList(values []AttributeValue) []AttributeValue {
+	if values == nil {
+		return nil
+	}
+
+	cloned := make([]AttributeValue, len(values))
+	for i, value := range values {
+		cloned[i] = cloneAttributeValue(value)
+	}
+	return cloned
+}
+
+func cloneAttributeValue(value AttributeValue) AttributeValue {
+	cloned := AttributeValue{
+		NULL: value.NULL,
+	}
+	if value.S != nil {
+		copied := *value.S
+		cloned.S = &copied
+	}
+	if value.N != nil {
+		copied := *value.N
+		cloned.N = &copied
+	}
+	if value.BOOL != nil {
+		copied := *value.BOOL
+		cloned.BOOL = &copied
+	}
+	if value.M != nil {
+		clonedMap := cloneAttributes(*value.M)
+		cloned.M = &clonedMap
+	}
+	if value.L != nil {
+		clonedList := cloneAttributeList(*value.L)
+		cloned.L = &clonedList
+	}
+	return cloned
+}
+
+func copyAttributesAny(attributes map[string]AttributeValue) map[string]any {
 	if attributes == nil {
 		return nil
 	}
 
 	copied := make(map[string]any, len(attributes))
 	for key, value := range attributes {
-		copied[key] = value
+		copied[key] = attributeValueToAny(value)
 	}
 	return copied
+}
+
+func attributeValueToAny(value AttributeValue) any {
+	switch {
+	case value.S != nil:
+		return *value.S
+	case value.N != nil:
+		return *value.N
+	case value.BOOL != nil:
+		return *value.BOOL
+	case value.NULL:
+		return nil
+	case value.M != nil:
+		copied := make(map[string]any, len(*value.M))
+		for key, child := range *value.M {
+			copied[key] = attributeValueToAny(child)
+		}
+		return copied
+	case value.L != nil:
+		copied := make([]any, len(*value.L))
+		for i, child := range *value.L {
+			copied[i] = attributeValueToAny(child)
+		}
+		return copied
+	default:
+		return nil
+	}
 }

@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -61,9 +62,9 @@ func TestSQLiteRepositoryBootstrapAndPersistAcrossRestart(t *testing.T) {
 	state.UpsertItem(domain.Item{
 		Table: "mildstack-archive",
 		Key:   "item#1",
-		Attributes: map[string]string{
-			"id":    "item#1",
-			"title": "archive item",
+		Attributes: map[string]domain.AttributeValue{
+			"id":    domain.StringValue("item#1"),
+			"title": domain.StringValue("archive item"),
 		},
 	})
 	if err := repo.Save(state); err != nil {
@@ -98,7 +99,7 @@ func TestSQLiteRepositoryBootstrapAndPersistAcrossRestart(t *testing.T) {
 	if !ok {
 		t.Fatal("expected item to survive restart")
 	}
-	if got, want := fetched.Attributes["title"], "archive item"; got != want {
+	if got, want := fetched.Attributes["title"].Any(), "archive item"; got != want {
 		t.Fatalf("unexpected item title after restart: got %q want %q", got, want)
 	}
 
@@ -235,6 +236,46 @@ func TestSQLiteRepositoryClosesCleanly(t *testing.T) {
 	}
 	if _, err := repo.Load(); err == nil {
 		t.Fatal("expected load on closed repo to fail")
+	}
+}
+
+func TestSQLiteRepositoryLoadsLegacyItemEncoding(t *testing.T) {
+	t.Helper()
+
+	repo := mustOpenSQLiteRepository(t, "instance-legacy")
+	defer func() {
+		if err := repo.Close(); err != nil {
+			t.Fatalf("close repo: %v", err)
+		}
+	}()
+
+	if _, err := repo.db.ExecContext(context.Background(), `
+		INSERT INTO dynamodb_tables(name, partition_key, sort_key, billing_mode, status, created_at_ns, activation_at_ns, deleted_at_ns)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, "mildstack-archive", "id", "", "PAY_PER_REQUEST", domain.TableStatusActive, 0, 0, 0); err != nil {
+		t.Fatalf("insert table: %v", err)
+	}
+	if _, err := repo.db.ExecContext(context.Background(), `
+		INSERT INTO dynamodb_items(table_name, item_key, attributes_json)
+		VALUES (?, ?, ?)
+	`, "mildstack-archive", "item#legacy", `{"id":"item#legacy","title":"legacy item","version":"1"}`); err != nil {
+		t.Fatalf("insert legacy item: %v", err)
+	}
+
+	loaded, err := repo.Load()
+	if err != nil {
+		t.Fatalf("load legacy state: %v", err)
+	}
+
+	item, ok := loaded.Item("mildstack-archive", "item#legacy")
+	if !ok {
+		t.Fatal("expected legacy item to load")
+	}
+	if got, want := item.Attributes["title"].Any(), "legacy item"; got != want {
+		t.Fatalf("unexpected legacy title: got %q want %q", got, want)
+	}
+	if got, want := item.Attributes["version"].Any(), "1"; got != want {
+		t.Fatalf("unexpected legacy version: got %q want %q", got, want)
 	}
 }
 

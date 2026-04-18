@@ -47,6 +47,7 @@ func newService(state domain.State, repo Repository) *Service {
 				"delete table",
 				"get item",
 				"put item",
+				"update item",
 				"delete item",
 			},
 			[]string{
@@ -191,9 +192,6 @@ func (s *Service) DescribeTable(name string) (domain.Table, error) {
 			}
 		}
 	}
-	if table.Status == domain.TableStatusCreating {
-		return domain.Table{}, fmt.Errorf("dynamodb: table %q not found", name)
-	}
 	return table, nil
 }
 
@@ -219,9 +217,6 @@ func (s *Service) DeleteTable(name string) (domain.Table, error) {
 			return table, nil
 		}
 		return domain.Table{}, fmt.Errorf("dynamodb: table %q not found", name)
-	}
-	if table.Status == domain.TableStatusCreating {
-		return domain.Table{}, fmt.Errorf("dynamodb: table %q is still creating", name)
 	}
 
 	next = s.state.Clone()
@@ -264,7 +259,7 @@ func (s *Service) GetItem(table, key string) (domain.Item, error) {
 	return item, nil
 }
 
-func (s *Service) PutItem(table, key string, attributes map[string]string) (domain.Item, error) {
+func (s *Service) PutItem(table, key string, attributes map[string]domain.AttributeValue) (domain.Item, error) {
 	table = strings.TrimSpace(table)
 	key = strings.TrimSpace(key)
 	if table == "" {
@@ -320,6 +315,79 @@ func (s *Service) DeleteItem(table, key string) error {
 		return fmt.Errorf("dynamodb: item %s/%s not found", table, key)
 	}
 	return s.commitStateLocked(next)
+}
+
+func (s *Service) Query(table, keyConditionExpression, filterExpression string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]domain.AttributeValue, limit *int, exclusiveStartKey map[string]domain.AttributeValue, scanIndexForward *bool) (domain.ReadPage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	table = strings.TrimSpace(table)
+	if table == "" {
+		return domain.ReadPage{}, fmt.Errorf("dynamodb: table name is required")
+	}
+
+	tableInfo, ok := s.state.Table(table)
+	if !ok {
+		return domain.ReadPage{}, fmt.Errorf("dynamodb: table %q not found", table)
+	}
+
+	plan, err := buildQueryPlan(tableInfo, keyConditionExpression, expressionAttributeNames, expressionAttributeValues)
+	if err != nil {
+		return domain.ReadPage{}, err
+	}
+
+	items := s.state.ListItems(table)
+	candidates := make([]domain.Item, 0, len(items))
+	for _, item := range items {
+		matches, err := plan.matches(item, tableInfo)
+		if err != nil {
+			return domain.ReadPage{}, err
+		}
+		if matches {
+			candidates = append(candidates, item)
+		}
+	}
+
+	ordered := orderQueryItems(candidates, tableInfo, scanIndexForward)
+	startIndex, err := locateExclusiveStartKey(ordered, tableInfo, exclusiveStartKey)
+	if err != nil {
+		return domain.ReadPage{}, err
+	}
+
+	filter, err := buildExpressionFilter(filterExpression, expressionAttributeNames, expressionAttributeValues)
+	if err != nil {
+		return domain.ReadPage{}, err
+	}
+
+	return pageReadItems(ordered, tableInfo, startIndex, limit, filter)
+}
+
+func (s *Service) Scan(table, filterExpression string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]domain.AttributeValue, limit *int, exclusiveStartKey map[string]domain.AttributeValue) (domain.ReadPage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	table = strings.TrimSpace(table)
+	if table == "" {
+		return domain.ReadPage{}, fmt.Errorf("dynamodb: table name is required")
+	}
+
+	tableInfo, ok := s.state.Table(table)
+	if !ok {
+		return domain.ReadPage{}, fmt.Errorf("dynamodb: table %q not found", table)
+	}
+
+	items := s.state.ListItems(table)
+	startIndex, err := locateExclusiveStartKey(items, tableInfo, exclusiveStartKey)
+	if err != nil {
+		return domain.ReadPage{}, err
+	}
+
+	filter, err := buildExpressionFilter(filterExpression, expressionAttributeNames, expressionAttributeValues)
+	if err != nil {
+		return domain.ReadPage{}, err
+	}
+
+	return pageReadItems(items, tableInfo, startIndex, limit, filter)
 }
 
 func (s *Service) commitStateLocked(next domain.State) error {

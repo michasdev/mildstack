@@ -6,7 +6,8 @@ type Service interface {
 	ListTables() []domain.Table
 	CreateTable(name, partitionKey, sortKey, billingMode string) (domain.Table, error)
 	GetItem(table, key string) (domain.Item, error)
-	PutItem(table, key string, attributes map[string]string) (domain.Item, error)
+	PutItem(table, key string, attributes map[string]domain.AttributeValue) (domain.Item, error)
+	UpdateItem(table, key, updateExpression, conditionExpression string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]domain.AttributeValue) (domain.Item, error)
 	DeleteItem(table, key string) error
 }
 
@@ -54,10 +55,23 @@ type GetItemResponse struct {
 type PutItemRequest struct {
 	Table      string
 	Key        string
-	Attributes map[string]string
+	Attributes map[string]domain.AttributeValue
 }
 
 type PutItemResponse struct {
+	Item ItemPayload `json:"item"`
+}
+
+type UpdateItemRequest struct {
+	Table                      string
+	Key                        string
+	UpdateExpression           string
+	ConditionExpression        string
+	ExpressionAttributeNames   map[string]string
+	ExpressionAttributeValues  map[string]domain.AttributeValue
+}
+
+type UpdateItemResponse struct {
 	Item ItemPayload `json:"item"`
 }
 
@@ -114,7 +128,7 @@ func (h Handlers) GetItem(request GetItemRequest) (GetItemResponse, error) {
 		Item: ItemPayload{
 			Table:      item.Table,
 			Key:        item.Key,
-			Attributes: copyAttributes(item.Attributes),
+			Attributes: copyDocument(item.Attributes),
 		},
 	}, nil
 }
@@ -128,7 +142,21 @@ func (h Handlers) PutItem(request PutItemRequest) (PutItemResponse, error) {
 		Item: ItemPayload{
 			Table:      item.Table,
 			Key:        item.Key,
-			Attributes: copyAttributes(item.Attributes),
+			Attributes: copyDocument(item.Attributes),
+		},
+	}, nil
+}
+
+func (h Handlers) UpdateItem(request UpdateItemRequest) (UpdateItemResponse, error) {
+	item, err := h.service.UpdateItem(request.Table, request.Key, request.UpdateExpression, request.ConditionExpression, request.ExpressionAttributeNames, request.ExpressionAttributeValues)
+	if err != nil {
+		return UpdateItemResponse{}, err
+	}
+	return UpdateItemResponse{
+		Item: ItemPayload{
+			Table:      item.Table,
+			Key:        item.Key,
+			Attributes: copyDocument(item.Attributes),
 		},
 	}, nil
 }
@@ -140,14 +168,14 @@ func (h Handlers) DeleteItem(request DeleteItemRequest) (DeleteItemResponse, err
 	return DeleteItemResponse{Deleted: true}, nil
 }
 
-func copyAttributes(attributes map[string]string) map[string]any {
+func copyDocument(attributes map[string]domain.AttributeValue) map[string]any {
 	if attributes == nil {
 		return nil
 	}
 
 	copied := make(map[string]any, len(attributes))
 	for key, value := range attributes {
-		copied[key] = value
+		copied[key] = value.Any()
 	}
 	return copied
 }

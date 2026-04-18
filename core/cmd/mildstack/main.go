@@ -30,6 +30,9 @@ func main() {
 		if err := registerServiceRoutes(router.Registrar(), root.Services); err != nil {
 			return failedHTTPServer{err: err}
 		}
+		if err := registerNativeDynamoDBRoutes(router, root.Services); err != nil {
+			return failedHTTPServer{err: err}
+		}
 		if err := registerNativeS3Routes(router, root.Services); err != nil {
 			return failedHTTPServer{err: err}
 		}
@@ -116,6 +119,27 @@ func registerNativeS3Routes(router *deliveryhttp.Router, services []orchestrator
 			return fmt.Errorf("s3 service does not expose the native http surface")
 		}
 		deliveryhttp.RegisterS3NativeRoutes(router.Engine(), s3Service)
+		return nil
+	}
+
+	return nil
+}
+
+func registerNativeDynamoDBRoutes(router *deliveryhttp.Router, services []orchestrator.Service) error {
+	if router == nil {
+		return nil
+	}
+
+	for _, service := range services {
+		if service == nil || service.Metadata().Name != "dynamodb" {
+			continue
+		}
+
+		dynamoDBService, ok := service.(deliveryhttp.DynamoDBNativeService)
+		if !ok {
+			return fmt.Errorf("dynamodb service does not expose the native http surface")
+		}
+		deliveryhttp.RegisterDynamoDBNativeRoutes(router.Engine(), dynamoDBService)
 		return nil
 	}
 

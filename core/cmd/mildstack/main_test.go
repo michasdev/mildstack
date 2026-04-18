@@ -193,14 +193,44 @@ func TestRegisterNativeDynamoDBRoutesExposesAwsCompatibleSmokeSurface(t *testing
 	waitForTableStatus(t, ctx, client, tableName, types.TableStatusActive)
 
 	itemValue := map[string]types.AttributeValue{
-		"id":    &types.AttributeValueMemberS{Value: "item#1"},
-		"title": &types.AttributeValueMemberS{Value: "native-mode smoke payload"},
+		"id":       &types.AttributeValueMemberS{Value: "item#1"},
+		"title":    &types.AttributeValueMemberS{Value: "native-mode smoke payload"},
+		"version":  &types.AttributeValueMemberN{Value: "1"},
+		"obsolete": &types.AttributeValueMemberS{Value: "remove me"},
 	}
 	if _, err := client.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName: aws.String(tableName),
 		Item:      itemValue,
 	}); err != nil {
 		t.Fatalf("put item via sdk: %v", err)
+	}
+
+	updateOut, err := client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(tableName),
+		Key: map[string]types.AttributeValue{
+			"id": &types.AttributeValueMemberS{Value: "item#1"},
+		},
+		UpdateExpression: aws.String("SET title = :title ADD version :inc REMOVE obsolete"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":title": &types.AttributeValueMemberS{Value: "native-mode smoke updated"},
+			":inc":   &types.AttributeValueMemberN{Value: "1"},
+		},
+		ReturnValues: types.ReturnValueAllNew,
+	})
+	if err != nil {
+		t.Fatalf("update item via sdk: %v", err)
+	}
+	if updateOut.Attributes == nil {
+		t.Fatal("expected update item response to include attributes")
+	}
+	if got, want := attrValueString(t, updateOut.Attributes["title"]), "native-mode smoke updated"; got != want {
+		t.Fatalf("unexpected updated item title: got %q want %q", got, want)
+	}
+	if got, want := attrValueString(t, updateOut.Attributes["version"]), "2"; got != want {
+		t.Fatalf("unexpected updated item version: got %q want %q", got, want)
+	}
+	if _, ok := updateOut.Attributes["obsolete"]; ok {
+		t.Fatal("expected obsolete attribute to be removed from update response")
 	}
 
 	getOut, err := client.GetItem(ctx, &dynamodb.GetItemInput{
@@ -215,8 +245,153 @@ func TestRegisterNativeDynamoDBRoutesExposesAwsCompatibleSmokeSurface(t *testing
 	if got, want := attrValueString(t, getOut.Item["id"]), "item#1"; got != want {
 		t.Fatalf("unexpected item id: got %q want %q", got, want)
 	}
-	if got, want := attrValueString(t, getOut.Item["title"]), "native-mode smoke payload"; got != want {
+	if got, want := attrValueString(t, getOut.Item["title"]), "native-mode smoke updated"; got != want {
 		t.Fatalf("unexpected item title: got %q want %q", got, want)
+	}
+	if got, want := attrValueString(t, getOut.Item["version"]), "2"; got != want {
+		t.Fatalf("unexpected item version: got %q want %q", got, want)
+	}
+	if _, ok := getOut.Item["obsolete"]; ok {
+		t.Fatal("expected obsolete attribute to be absent after update")
+	}
+
+	const readTableName = "native-smoke-read-table"
+	readCreateOut, err := client.CreateTable(ctx, &dynamodb.CreateTableInput{
+		TableName: aws.String(readTableName),
+		KeySchema: []types.KeySchemaElement{
+			{
+				AttributeName: aws.String("id"),
+				KeyType:       types.KeyTypeHash,
+			},
+			{
+				AttributeName: aws.String("sk"),
+				KeyType:       types.KeyTypeRange,
+			},
+		},
+		AttributeDefinitions: []types.AttributeDefinition{
+			{
+				AttributeName: aws.String("id"),
+				AttributeType: types.ScalarAttributeTypeS,
+			},
+			{
+				AttributeName: aws.String("sk"),
+				AttributeType: types.ScalarAttributeTypeS,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create read table via sdk: %v", err)
+	}
+	if readCreateOut.TableDescription == nil {
+		t.Fatal("expected read table create response to include table description")
+	}
+	waitForTableStatus(t, ctx, client, readTableName, types.TableStatusActive)
+
+	for _, item := range []map[string]types.AttributeValue{
+		{
+			"id":    &types.AttributeValueMemberS{Value: "series#1"},
+			"sk":    &types.AttributeValueMemberS{Value: "001"},
+			"title": &types.AttributeValueMemberS{Value: "skip-one"},
+		},
+		{
+			"id":    &types.AttributeValueMemberS{Value: "series#1"},
+			"sk":    &types.AttributeValueMemberS{Value: "002"},
+			"title": &types.AttributeValueMemberS{Value: "keep-two"},
+		},
+		{
+			"id":    &types.AttributeValueMemberS{Value: "series#1"},
+			"sk":    &types.AttributeValueMemberS{Value: "003"},
+			"title": &types.AttributeValueMemberS{Value: "keep-three"},
+		},
+	} {
+		if _, err := client.PutItem(ctx, &dynamodb.PutItemInput{
+			TableName: aws.String(readTableName),
+			Item:      item,
+		}); err != nil {
+			t.Fatalf("seed read table item via sdk: %v", err)
+		}
+	}
+
+	queryOut, err := client.Query(ctx, &dynamodb.QueryInput{
+		TableName:              aws.String(readTableName),
+		KeyConditionExpression: aws.String("id = :id AND sk BETWEEN :start AND :end"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":id":    &types.AttributeValueMemberS{Value: "series#1"},
+			":start": &types.AttributeValueMemberS{Value: "001"},
+			":end":   &types.AttributeValueMemberS{Value: "003"},
+		},
+		ScanIndexForward: aws.Bool(false),
+		Limit:            aws.Int32(2),
+	})
+	if err != nil {
+		t.Fatalf("query via sdk: %v", err)
+	}
+	if got, want := len(queryOut.Items), 2; got != want {
+		t.Fatalf("unexpected query item count: got %d want %d", got, want)
+	}
+	if got, want := attrValueString(t, queryOut.Items[0]["sk"]), "003"; got != want {
+		t.Fatalf("unexpected first query sort key: got %q want %q", got, want)
+	}
+	if got, want := attrValueString(t, queryOut.Items[1]["sk"]), "002"; got != want {
+		t.Fatalf("unexpected second query sort key: got %q want %q", got, want)
+	}
+	if got, want := attrValueString(t, queryOut.LastEvaluatedKey["sk"]), "002"; got != want {
+		t.Fatalf("unexpected query cursor: got %q want %q", got, want)
+	}
+
+	beginsOut, err := client.Query(ctx, &dynamodb.QueryInput{
+		TableName:              aws.String(readTableName),
+		KeyConditionExpression: aws.String("id = :id AND begins_with(sk, :prefix)"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":id":     &types.AttributeValueMemberS{Value: "series#1"},
+			":prefix": &types.AttributeValueMemberS{Value: "00"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("begins_with query via sdk: %v", err)
+	}
+	if got, want := len(beginsOut.Items), 3; got != want {
+		t.Fatalf("unexpected begins_with query item count: got %d want %d", got, want)
+	}
+	if got, want := attrValueString(t, beginsOut.Items[0]["sk"]), "001"; got != want {
+		t.Fatalf("unexpected begins_with first sort key: got %q want %q", got, want)
+	}
+
+	scanOut, err := client.Scan(ctx, &dynamodb.ScanInput{
+		TableName:        aws.String(readTableName),
+		FilterExpression: aws.String("begins_with(title, :prefix)"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":prefix": &types.AttributeValueMemberS{Value: "keep"},
+		},
+		Limit: aws.Int32(1),
+	})
+	if err != nil {
+		t.Fatalf("scan via sdk: %v", err)
+	}
+	if got, want := len(scanOut.Items), 0; got != want {
+		t.Fatalf("unexpected first scan page item count: got %d want %d", got, want)
+	}
+	if got, want := attrValueString(t, scanOut.LastEvaluatedKey["sk"]), "001"; got != want {
+		t.Fatalf("unexpected first scan cursor: got %q want %q", got, want)
+	}
+
+	scanOut, err = client.Scan(ctx, &dynamodb.ScanInput{
+		TableName:        aws.String(readTableName),
+		FilterExpression: aws.String("begins_with(title, :prefix)"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":prefix": &types.AttributeValueMemberS{Value: "keep"},
+		},
+		Limit:             aws.Int32(1),
+		ExclusiveStartKey: scanOut.LastEvaluatedKey,
+	})
+	if err != nil {
+		t.Fatalf("scan second page via sdk: %v", err)
+	}
+	if got, want := len(scanOut.Items), 1; got != want {
+		t.Fatalf("unexpected second scan page item count: got %d want %d", got, want)
+	}
+	if got, want := attrValueString(t, scanOut.Items[0]["title"]), "keep-two"; got != want {
+		t.Fatalf("unexpected second scan title: got %q want %q", got, want)
 	}
 
 	paginator := dynamodb.NewListTablesPaginator(client, &dynamodb.ListTablesInput{Limit: aws.Int32(1)})
@@ -228,7 +403,7 @@ func TestRegisterNativeDynamoDBRoutesExposesAwsCompatibleSmokeSurface(t *testing
 		}
 		listed = append(listed, page.TableNames...)
 	}
-	if got, want := listed, []string{"mildstack-records", tableName}; !equalStringSlices(got, want) {
+	if got, want := listed, []string{"mildstack-records", readTableName, tableName}; !equalStringSlices(got, want) {
 		t.Fatalf("unexpected paginated table list: got %v want %v", got, want)
 	}
 

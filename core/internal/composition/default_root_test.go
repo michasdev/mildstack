@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
+	dynamodbapp "github.com/michasdev/mildstack/core/internal/resources/dynamodb/application"
 	dynamodbdomain "github.com/michasdev/mildstack/core/internal/resources/dynamodb/domain"
-	"github.com/michasdev/mildstack/core/internal/resources/s3/application"
 	s3domain "github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
@@ -30,8 +30,13 @@ func (h *stateHookStub) Get(key string) (any, bool) {
 func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	t.Helper()
 
+	baseDir := t.TempDir()
 	hook := &stateHookStub{}
-	root := defaultRootWithHook(hook, DefaultRootConfig{InstanceID: "test-instance"})
+	root := defaultRootWithHook(hook, DefaultRootConfig{
+		InstanceID:             "test-instance",
+		S3StorageBaseDir:       baseDir,
+		DynamoDBStorageBaseDir: baseDir,
+	})
 	if got, want := len(root.Services), 2; got != want {
 		t.Fatalf("unexpected service count: got %d want %d", got, want)
 	}
@@ -117,6 +122,9 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	if got, want := dynamoEntry.Routes[4].Path, "/api/v1/runtime/services/dynamodb/tables/:table/items/:item"; got != want {
 		t.Fatalf("unexpected dynamodb last route path: got %q want %q", got, want)
 	}
+	if _, ok := root.Services[1].(deliveryhttp.DynamoDBNativeService); !ok {
+		t.Fatal("expected dynamodb service to expose the native http surface")
+	}
 
 	if value, ok := hook.Get(dynamodbdomain.StateKey); !ok {
 		t.Fatalf("expected state for %q to be present", dynamodbdomain.StateKey)
@@ -135,6 +143,11 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	if got, want := state["service"], "s3"; got != want {
 		t.Fatalf("unexpected s3 state: got %v want %v", got, want)
 	}
+
+	dynamoDBPath := filepath.Join(baseDir, "instances", "test-instance", "dynamodb", "state.db")
+	if _, err := os.Stat(dynamoDBPath); err != nil {
+		t.Fatalf("expected dynamodb database to exist at %s: %v", dynamoDBPath, err)
+	}
 }
 
 func assertRouteExists(t *testing.T, routes []deliveryhttp.RegisteredRoute, method, path string) {
@@ -147,33 +160,38 @@ func assertRouteExists(t *testing.T, routes []deliveryhttp.RegisteredRoute, meth
 	t.Fatalf("expected route %s %s to be registered", method, path)
 }
 
-func TestDefaultRootFailsFastWhenPersistedS3StateIsCorrupt(t *testing.T) {
+func TestDefaultRootUsesInstanceScopedDynamoDBStorage(t *testing.T) {
 	t.Helper()
 
 	baseDir := t.TempDir()
-	storagePath, err := application.ResolveStoragePath(application.StorageConfig{
+	storagePath, err := dynamodbapp.ResolveStoragePath(dynamodbapp.StorageConfig{
 		BaseDir:    baseDir,
-		InstanceID: "broken-instance",
+		InstanceID: "instance-a",
 	})
 	if err != nil {
 		t.Fatalf("resolve storage path: %v", err)
 	}
-	if err := os.MkdirAll(storagePath, 0o755); err != nil {
-		t.Fatalf("mkdir storage path: %v", err)
-	}
-	statePath := filepath.Join(storagePath, "state.json")
-	if err := os.WriteFile(statePath, []byte("{broken"), 0o644); err != nil {
-		t.Fatalf("write corrupt state: %v", err)
-	}
-
-	defer func() {
-		if recovered := recover(); recovered == nil {
-			t.Fatal("expected corrupt state to panic during default root bootstrap")
-		}
-	}()
-
-	_ = defaultRootWithHook(&stateHookStub{}, DefaultRootConfig{
-		InstanceID:       "broken-instance",
-		S3StorageBaseDir: baseDir,
+	otherStoragePath, err := dynamodbapp.ResolveStoragePath(dynamodbapp.StorageConfig{
+		BaseDir:    baseDir,
+		InstanceID: "instance-b",
 	})
+	if err != nil {
+		t.Fatalf("resolve other storage path: %v", err)
+	}
+	if storagePath == otherStoragePath {
+		t.Fatalf("expected distinct storage paths, got %q", storagePath)
+	}
+
+	root := defaultRootWithHook(&stateHookStub{}, DefaultRootConfig{
+		InstanceID:             "instance-a",
+		S3StorageBaseDir:       baseDir,
+		DynamoDBStorageBaseDir: baseDir,
+	})
+	if got, want := len(root.Services), 2; got != want {
+		t.Fatalf("unexpected service count: got %d want %d", got, want)
+	}
+
+	if _, err := os.Stat(filepath.Join(storagePath, "state.db")); err != nil {
+		t.Fatalf("expected storage file at %s: %v", storagePath, err)
+	}
 }

@@ -448,7 +448,7 @@ func unixNanoToTime(value int64) time.Time {
 	return time.Unix(0, value).UTC()
 }
 
-func marshalAttributesStable(attributes map[string]string) ([]byte, error) {
+func marshalAttributesStable(attributes map[string]domain.AttributeValue) ([]byte, error) {
 	if attributes == nil {
 		return []byte("null"), nil
 	}
@@ -468,21 +468,205 @@ func marshalAttributesStable(attributes map[string]string) ([]byte, error) {
 		}
 		builder.WriteString(strconv.Quote(key))
 		builder.WriteByte(':')
-		builder.WriteString(strconv.Quote(attributes[key]))
+		valueJSON, err := marshalAttributeValueStable(attributes[key])
+		if err != nil {
+			return nil, err
+		}
+		builder.Write(valueJSON)
 	}
 	builder.WriteByte('}')
 	return []byte(builder.String()), nil
 }
 
-func decodeAttributes(raw string) (map[string]string, error) {
+func marshalAttributeValueStable(value domain.AttributeValue) ([]byte, error) {
+	parts := make([]string, 0, 6)
+	if value.S != nil {
+		parts = append(parts, `"S":`+strconv.Quote(*value.S))
+	}
+	if value.N != nil {
+		parts = append(parts, `"N":`+strconv.Quote(*value.N))
+	}
+	if value.BOOL != nil {
+		if *value.BOOL {
+			parts = append(parts, `"BOOL":true`)
+		} else {
+			parts = append(parts, `"BOOL":false`)
+		}
+	}
+	if value.NULL {
+		parts = append(parts, `"NULL":true`)
+	}
+	if value.M != nil {
+		nested, err := marshalAttributesStable(*value.M)
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, `"M":`+string(nested))
+	}
+	if value.L != nil {
+		nested, err := marshalAttributeListStable(*value.L)
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, `"L":`+string(nested))
+	}
+	if len(parts) == 0 {
+		return []byte("null"), nil
+	}
+	return []byte("{" + strings.Join(parts, ",") + "}"), nil
+}
+
+func marshalAttributeListStable(values []domain.AttributeValue) ([]byte, error) {
+	if values == nil {
+		return []byte("null"), nil
+	}
+
+	items := make([]string, len(values))
+	for i, value := range values {
+		nested, err := marshalAttributeValueStable(value)
+		if err != nil {
+			return nil, err
+		}
+		items[i] = string(nested)
+	}
+	return []byte("[" + strings.Join(items, ",") + "]"), nil
+}
+
+func decodeAttributes(raw string) (map[string]domain.AttributeValue, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "null" {
 		return nil, nil
 	}
 
-	attributes := make(map[string]string)
+	attributes := make(map[string]json.RawMessage)
 	if err := json.Unmarshal([]byte(raw), &attributes); err != nil {
 		return nil, fmt.Errorf("dynamodb: decode item attributes: %w", err)
 	}
-	return attributes, nil
+
+	decoded := make(map[string]domain.AttributeValue, len(attributes))
+	for key, value := range attributes {
+		decodedValue, err := decodeAttributeValue(value)
+		if err != nil {
+			return nil, fmt.Errorf("dynamodb: decode item attributes %q: %w", key, err)
+		}
+		decoded[key] = decodedValue
+	}
+	return decoded, nil
+}
+
+func decodeAttributeValue(raw json.RawMessage) (domain.AttributeValue, error) {
+	raw = json.RawMessage(strings.TrimSpace(string(raw)))
+	if len(raw) == 0 || string(raw) == "null" {
+		return domain.NullValue(), nil
+	}
+
+	switch raw[0] {
+	case '"':
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return domain.AttributeValue{}, fmt.Errorf("dynamodb: decode string attribute: %w", err)
+		}
+		return domain.StringValue(value), nil
+	case '{':
+		typed, ok, err := decodeStoredAttributeValue(raw)
+		if err != nil {
+			return domain.AttributeValue{}, err
+		}
+		if ok {
+			return typed, nil
+		}
+
+		legacy := make(map[string]json.RawMessage)
+		if err := json.Unmarshal(raw, &legacy); err != nil {
+			return domain.AttributeValue{}, fmt.Errorf("dynamodb: decode legacy map attribute: %w", err)
+		}
+		values := make(map[string]domain.AttributeValue, len(legacy))
+		for key, child := range legacy {
+			decoded, err := decodeAttributeValue(child)
+			if err != nil {
+				return domain.AttributeValue{}, fmt.Errorf("dynamodb: decode legacy map attribute %q: %w", key, err)
+			}
+			values[key] = decoded
+		}
+		return domain.MapValue(values), nil
+	case '[':
+		var legacy []json.RawMessage
+		if err := json.Unmarshal(raw, &legacy); err != nil {
+			return domain.AttributeValue{}, fmt.Errorf("dynamodb: decode list attribute: %w", err)
+		}
+		values := make([]domain.AttributeValue, len(legacy))
+		for i, child := range legacy {
+			decoded, err := decodeAttributeValue(child)
+			if err != nil {
+				return domain.AttributeValue{}, fmt.Errorf("dynamodb: decode list attribute[%d]: %w", i, err)
+			}
+			values[i] = decoded
+		}
+		return domain.ListValue(values), nil
+	case 't', 'f':
+		var value bool
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return domain.AttributeValue{}, fmt.Errorf("dynamodb: decode bool attribute: %w", err)
+		}
+		return domain.BoolValue(value), nil
+	default:
+		var value json.Number
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return domain.AttributeValue{}, fmt.Errorf("dynamodb: decode number attribute: %w", err)
+		}
+		return domain.NumberValue(value.String()), nil
+	}
+}
+
+type storedAttributeValue struct {
+	S    *string                     `json:"S,omitempty"`
+	N    *string                     `json:"N,omitempty"`
+	BOOL *bool                       `json:"BOOL,omitempty"`
+	NULL bool                        `json:"NULL,omitempty"`
+	M    map[string]json.RawMessage  `json:"M,omitempty"`
+	L    []json.RawMessage           `json:"L,omitempty"`
+}
+
+func decodeStoredAttributeValue(raw json.RawMessage) (domain.AttributeValue, bool, error) {
+	var stored storedAttributeValue
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return domain.AttributeValue{}, false, fmt.Errorf("dynamodb: decode stored attribute value: %w", err)
+	}
+
+	if stored.S != nil {
+		return domain.StringValue(*stored.S), true, nil
+	}
+	if stored.N != nil {
+		return domain.NumberValue(*stored.N), true, nil
+	}
+	if stored.BOOL != nil {
+		return domain.BoolValue(*stored.BOOL), true, nil
+	}
+	if stored.NULL {
+		return domain.NullValue(), true, nil
+	}
+	if stored.M != nil {
+		values := make(map[string]domain.AttributeValue, len(stored.M))
+		for key, child := range stored.M {
+			decoded, err := decodeAttributeValue(child)
+			if err != nil {
+				return domain.AttributeValue{}, false, fmt.Errorf("dynamodb: decode stored map attribute %q: %w", key, err)
+			}
+			values[key] = decoded
+		}
+		return domain.MapValue(values), true, nil
+	}
+	if stored.L != nil {
+		values := make([]domain.AttributeValue, len(stored.L))
+		for i, child := range stored.L {
+			decoded, err := decodeAttributeValue(child)
+			if err != nil {
+				return domain.AttributeValue{}, false, fmt.Errorf("dynamodb: decode stored list attribute[%d]: %w", i, err)
+			}
+			values[i] = decoded
+		}
+		return domain.ListValue(values), true, nil
+	}
+
+	return domain.AttributeValue{}, false, nil
 }

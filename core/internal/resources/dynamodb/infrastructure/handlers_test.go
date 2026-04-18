@@ -1,16 +1,30 @@
 package infrastructure_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/michasdev/mildstack/core/internal/resources/dynamodb/application"
+	"github.com/michasdev/mildstack/core/internal/resources/dynamodb/domain"
 	"github.com/michasdev/mildstack/core/internal/resources/dynamodb/infrastructure"
 )
 
 func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	t.Helper()
 
-	service := application.New()
+	service, err := application.NewWithPersistence(application.StorageConfig{
+		BaseDir:    t.TempDir(),
+		InstanceID: "instance-a",
+	})
+	if err != nil {
+		t.Fatalf("new persistent service: %v", err)
+	}
+	defer func() {
+		if err := service.Stop(context.Background()); err != nil {
+			t.Fatalf("stop service: %v", err)
+		}
+	}()
+
 	handlers := infrastructure.NewHandlers(service)
 
 	tables := handlers.ListTables()
@@ -39,9 +53,11 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	putResp, err := handlers.PutItem(infrastructure.PutItemRequest{
 		Table: createResp.Table.Name,
 		Key:   "item#1",
-		Attributes: map[string]string{
-			"id":    "item#1",
-			"title": "archive item",
+		Attributes: map[string]domain.AttributeValue{
+			"id":       domain.StringValue("item#1"),
+			"title":    domain.StringValue("archive item"),
+			"version":  domain.NumberValue("1"),
+			"obsolete": domain.StringValue("remove me"),
 		},
 	})
 	if err != nil {
@@ -62,7 +78,29 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 		t.Fatalf("unexpected item title: got %q want %q", got, want)
 	}
 
-	getResp.Item.Attributes["title"] = "mutated"
+	updateResp, err := handlers.UpdateItem(infrastructure.UpdateItemRequest{
+		Table:                createResp.Table.Name,
+		Key:                  putResp.Item.Key,
+		UpdateExpression:     "SET title = :title ADD version :inc REMOVE obsolete",
+		ExpressionAttributeValues: map[string]domain.AttributeValue{
+			":title": domain.StringValue("updated archive item"),
+			":inc":   domain.NumberValue("1"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("update item: %v", err)
+	}
+	if got, want := updateResp.Item.Attributes["title"], "updated archive item"; got != want {
+		t.Fatalf("unexpected updated title: got %q want %q", got, want)
+	}
+	if got, want := updateResp.Item.Attributes["version"], "2"; got != want {
+		t.Fatalf("unexpected updated version: got %q want %q", got, want)
+	}
+	if _, ok := updateResp.Item.Attributes["obsolete"]; ok {
+		t.Fatal("expected obsolete attribute to be removed")
+	}
+
+	updateResp.Item.Attributes["title"] = "mutated"
 	againItem, err := handlers.GetItem(infrastructure.GetItemRequest{
 		Table: createResp.Table.Name,
 		Key:   putResp.Item.Key,
@@ -70,7 +108,7 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get item: %v", err)
 	}
-	if got, want := againItem.Item.Attributes["title"], "archive item"; got != want {
+	if got, want := againItem.Item.Attributes["title"], "updated archive item"; got != want {
 		t.Fatalf("item payload was not copied: got %q want %q", got, want)
 	}
 

@@ -17,9 +17,9 @@ func TestStateSnapshotCopiesLiveData(t *testing.T) {
 	state.UpsertItem(Item{
 		Table: table.Name,
 		Key:   "item#1",
-		Attributes: map[string]string{
-			"id":    "item#1",
-			"title": "archive item",
+		Attributes: map[string]AttributeValue{
+			"id":    StringValue("item#1"),
+			"title": StringValue("archive item"),
 		},
 	})
 
@@ -44,7 +44,7 @@ func TestStateSnapshotCopiesLiveData(t *testing.T) {
 	if !ok {
 		t.Fatal("expected item to remain present")
 	}
-	if got, want := originalItem.Attributes["title"], "archive item"; got != want {
+	if got, want := originalItem.Attributes["title"].Any(), "archive item"; got != want {
 		t.Fatalf("unexpected item title: got %q want %q", got, want)
 	}
 }
@@ -62,11 +62,11 @@ func TestStateMutationHelpersReturnCopiesAndUpdateState(t *testing.T) {
 
 	items := state.ListItems("mildstack-records")
 	items[0].Key = "mutated"
-	items[0].Attributes["title"] = "changed"
+	items[0].Attributes["title"] = StringValue("changed")
 	if got, want := state.Items[0].Key, "example#1"; got != want {
 		t.Fatalf("item slice aliased live state: got %q want %q", got, want)
 	}
-	if got, want := state.Items[0].Attributes["title"], "bootstrap item"; got != want {
+	if got, want := state.Items[0].Attributes["title"].Any(), "bootstrap item"; got != want {
 		t.Fatalf("item attributes aliased live state: got %q want %q", got, want)
 	}
 
@@ -86,12 +86,12 @@ func TestStateMutationHelpersReturnCopiesAndUpdateState(t *testing.T) {
 	item := state.UpsertItem(Item{
 		Table: table.Name,
 		Key:   "item#1",
-		Attributes: map[string]string{
-			"id":    "item#1",
-			"title": "logs item",
+		Attributes: map[string]AttributeValue{
+			"id":    StringValue("item#1"),
+			"title": StringValue("logs item"),
 		},
 	})
-	if got, want := item.Attributes["title"], "logs item"; got != want {
+	if got, want := item.Attributes["title"].Any(), "logs item"; got != want {
 		t.Fatalf("unexpected item title: got %q want %q", got, want)
 	}
 	if !state.HasItem(table.Name, "item#1") {

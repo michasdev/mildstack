@@ -1,6 +1,7 @@
 package composition
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -11,8 +12,9 @@ import (
 )
 
 type DefaultRootConfig struct {
-	InstanceID       string
-	S3StorageBaseDir string
+	InstanceID             string
+	S3StorageBaseDir       string
+	DynamoDBStorageBaseDir string
 }
 
 func DefaultRoot(instanceID string) Root {
@@ -33,13 +35,21 @@ func defaultRootWithHook(hook orchestrator.StateHook, config DefaultRootConfig) 
 		panic(fmt.Sprintf("composition: init s3 service: %v", err))
 	}
 
-	services := []orchestrator.Service{
-		s3Service,
-		dynamodb.New(),
+	dynamoService, err := dynamodb.NewWithStorage(dynamodb.StorageConfig{
+		BaseDir:    config.DynamoDBStorageBaseDir,
+		InstanceID: instanceID,
+	})
+	if err != nil {
+		_ = s3Service.Stop(context.Background())
+		panic(fmt.Sprintf("composition: init dynamodb service: %v", err))
 	}
 
+	services := []orchestrator.Service{s3Service, dynamoService}
 	for _, service := range services {
 		if err := service.AttachState(hook); err != nil {
+			for _, candidate := range services {
+				_ = candidate.Stop(context.Background())
+			}
 			panic(fmt.Sprintf("composition: attach %s state: %v", service.Metadata().Name, err))
 		}
 	}

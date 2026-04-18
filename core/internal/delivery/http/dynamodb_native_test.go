@@ -17,7 +17,7 @@ func TestDynamoDBTargetRegistryDistinguishesSupportedAndUnsupportedOperations(t 
 
 	handler := newDynamoDBNativeHandler(application.New())
 
-	for _, target := range []string{"ListTables", "CreateTable", "DescribeTable", "DeleteTable", "GetItem", "PutItem", "DeleteItem"} {
+	for _, target := range []string{"ListTables", "CreateTable", "DescribeTable", "DeleteTable", "GetItem", "PutItem", "UpdateItem", "Query", "Scan", "DeleteItem"} {
 		spec, ok := handler.registry[target]
 		if !ok {
 			t.Fatalf("expected target %q to be registered", target)
@@ -27,7 +27,7 @@ func TestDynamoDBTargetRegistryDistinguishesSupportedAndUnsupportedOperations(t 
 		}
 	}
 
-	for _, target := range []string{"UpdateItem", "Query", "Scan", "BatchGetItem", "TransactWriteItems"} {
+	for _, target := range []string{"BatchGetItem", "TransactWriteItems"} {
 		spec, ok := handler.registry[target]
 		if !ok {
 			t.Fatalf("expected target %q to be registered", target)
@@ -88,6 +88,21 @@ func TestDynamoDBNativeRoutesHandleSupportedLocalSubset(t *testing.T) {
 		t.Fatalf("expected create table creation date time to be populated, got %d", got)
 	}
 
+	describeTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.DescribeTable",
+		body: `{
+			"TableName":"mildstack-archive"
+		}`,
+	})
+	if got, want := describeTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected creating describe table status: got %d want %d", got, want)
+	}
+	var describeTableResponse describeTableResponse
+	decodeResponse(t, describeTable.body, &describeTableResponse)
+	if got, want := describeTableResponse.Table.TableStatus, "CREATING"; got != want {
+		t.Fatalf("unexpected creating table status: got %q want %q", got, want)
+	}
+
 	putItem := doDynamoDBRequest(t, engine, dynamoRequest{
 		target: "DynamoDB_20120810.PutItem",
 		body: `{
@@ -95,12 +110,41 @@ func TestDynamoDBNativeRoutesHandleSupportedLocalSubset(t *testing.T) {
 			"Item":{
 				"id":{"S":"item#1"},
 				"title":{"S":"archive item"},
-				"version":{"N":"1"}
+				"version":{"N":"1"},
+				"obsolete":{"S":"remove me"}
 			}
 		}`,
 	})
 	if got, want := putItem.code, http.StatusOK; got != want {
 		t.Fatalf("unexpected put item status: got %d want %d", got, want)
+	}
+
+	updateItem := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.UpdateItem",
+		body: `{
+			"TableName":"mildstack-archive",
+			"Key":{"id":{"S":"item#1"}},
+			"UpdateExpression":"SET title = :title ADD version :inc REMOVE obsolete",
+			"ExpressionAttributeValues":{
+				":title":{"S":"updated archive item"},
+				":inc":{"N":"1"}
+			},
+			"ReturnValues":"ALL_NEW"
+		}`,
+	})
+	if got, want := updateItem.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected update item status: got %d want %d", got, want)
+	}
+	var updateItemResponse updateItemResponse
+	decodeResponse(t, updateItem.body, &updateItemResponse)
+	if got, want := updateItemResponse.Attributes["title"].S, "updated archive item"; got != want {
+		t.Fatalf("unexpected updated title: got %q want %q", got, want)
+	}
+	if got, want := updateItemResponse.Attributes["version"].N, "2"; got != want {
+		t.Fatalf("unexpected updated version: got %q want %q", got, want)
+	}
+	if _, ok := updateItemResponse.Attributes["obsolete"]; ok {
+		t.Fatal("expected obsolete attribute to be removed from update response")
 	}
 
 	getItem := doDynamoDBRequest(t, engine, dynamoRequest{
@@ -115,11 +159,14 @@ func TestDynamoDBNativeRoutesHandleSupportedLocalSubset(t *testing.T) {
 	}
 	var getItemResponse getItemResponse
 	decodeResponse(t, getItem.body, &getItemResponse)
-	if got, want := getItemResponse.Item["title"].S, "archive item"; got != want {
+	if got, want := getItemResponse.Item["title"].S, "updated archive item"; got != want {
 		t.Fatalf("unexpected title: got %q want %q", got, want)
 	}
-	if got, want := getItemResponse.Item["version"].N, "1"; got != want {
+	if got, want := getItemResponse.Item["version"].N, "2"; got != want {
 		t.Fatalf("unexpected version: got %q want %q", got, want)
+	}
+	if _, ok := getItemResponse.Item["obsolete"]; ok {
+		t.Fatal("expected obsolete attribute to be absent after update")
 	}
 
 	deleteItem := doDynamoDBRequest(t, engine, dynamoRequest{
@@ -135,14 +182,6 @@ func TestDynamoDBNativeRoutesHandleSupportedLocalSubset(t *testing.T) {
 	var deleteItemResponse deleteItemResponse
 	decodeResponse(t, deleteItem.body, &deleteItemResponse)
 
-	describeTable := doDynamoDBRequest(t, engine, dynamoRequest{
-		target: "DynamoDB_20120810.DescribeTable",
-		body: `{
-			"TableName":"mildstack-archive"
-		}`,
-	})
-	assertDynamoError(t, describeTable, http.StatusBadRequest, "ResourceNotFoundException")
-
 	time.Sleep(250 * time.Millisecond)
 
 	describeTable = doDynamoDBRequest(t, engine, dynamoRequest{
@@ -154,7 +193,6 @@ func TestDynamoDBNativeRoutesHandleSupportedLocalSubset(t *testing.T) {
 	if got, want := describeTable.code, http.StatusOK; got != want {
 		t.Fatalf("unexpected active describe table status: got %d want %d", got, want)
 	}
-	var describeTableResponse describeTableResponse
 	decodeResponse(t, describeTable.body, &describeTableResponse)
 	if got, want := describeTableResponse.Table.TableStatus, "ACTIVE"; got != want {
 		t.Fatalf("unexpected active table status: got %q want %q", got, want)
@@ -287,11 +325,35 @@ func TestDynamoDBNativeRoutesReturnAWSShapedErrors(t *testing.T) {
 	})
 	assertDynamoError(t, malformed, http.StatusBadRequest, "ValidationException")
 
-	unsupported := doDynamoDBRequest(t, engine, dynamoRequest{
+	unsupportedQuery := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.Query",
+		body: `{
+			"TableName":"mildstack-records",
+			"KeyConditionExpression":"id = :id",
+			"IndexName":"mildstack-index",
+			"ExpressionAttributeValues":{
+				":id":{"S":"example#1"}
+			}
+		}`,
+	})
+	assertDynamoError(t, unsupportedQuery, http.StatusBadRequest, "ValidationException")
+
+	unsupportedScan := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.Scan",
+		body: `{
+			"TableName":"mildstack-records",
+			"ProjectionExpression":"title",
+			"Segment":1,
+			"TotalSegments":2
+		}`,
+	})
+	assertDynamoError(t, unsupportedScan, http.StatusBadRequest, "ValidationException")
+
+	updateValidation := doDynamoDBRequest(t, engine, dynamoRequest{
 		target: "DynamoDB_20120810.UpdateItem",
 		body:   `{}`,
 	})
-	assertDynamoError(t, unsupported, http.StatusNotFound, "UnknownOperationException")
+	assertDynamoError(t, updateValidation, http.StatusBadRequest, "ValidationException")
 
 	duplicateCreate := doDynamoDBRequest(t, engine, dynamoRequest{
 		target: "DynamoDB_20120810.CreateTable",
@@ -320,7 +382,14 @@ func TestDynamoDBNativeRoutesReturnAWSShapedErrors(t *testing.T) {
 			"TableName":"mildstack-duplicate"
 		}`,
 	})
-	assertDynamoError(t, creatingDelete, http.StatusBadRequest, "ResourceInUseException")
+	if got, want := creatingDelete.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected delete-on-creating status: got %d want %d", got, want)
+	}
+	var creatingDeleteResponse deleteTableResponse
+	decodeResponse(t, creatingDelete.body, &creatingDeleteResponse)
+	if got, want := creatingDeleteResponse.TableDescription.TableStatus, "DELETING"; got != want {
+		t.Fatalf("unexpected delete-on-creating table status: got %q want %q", got, want)
+	}
 
 	missingItem := doDynamoDBRequest(t, engine, dynamoRequest{
 		target: "DynamoDB_20120810.DeleteItem",
@@ -330,6 +399,20 @@ func TestDynamoDBNativeRoutesReturnAWSShapedErrors(t *testing.T) {
 		}`,
 	})
 	assertDynamoError(t, missingItem, http.StatusBadRequest, "ResourceNotFoundException")
+
+	conditionalFailure := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.UpdateItem",
+		body: `{
+			"TableName":"mildstack-records",
+			"Key":{"id":{"S":"missing"}},
+			"UpdateExpression":"SET title = :title",
+			"ConditionExpression":"attribute_exists(id)",
+			"ExpressionAttributeValues":{
+				":title":{"S":"updated"}
+			}
+		}`,
+	})
+	assertDynamoError(t, conditionalFailure, http.StatusBadRequest, "ConditionalCheckFailedException")
 
 	missingTable := doDynamoDBRequest(t, engine, dynamoRequest{
 		target: "DynamoDB_20120810.GetItem",
@@ -355,6 +438,174 @@ func TestDynamoDBNativeRoutesReturnAWSShapedErrors(t *testing.T) {
 		}`,
 	})
 	assertDynamoError(t, missingDelete, http.StatusBadRequest, "ResourceNotFoundException")
+}
+
+func TestDynamoDBNativeRoutesHandleQueryAndScanSubset(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+
+	createTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"mildstack-reads",
+			"KeySchema":[
+				{"AttributeName":"id","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions":[
+				{"AttributeName":"id","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"}
+			],
+			"BillingMode":"PAY_PER_REQUEST"
+		}`,
+	})
+	if got, want := createTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create table status: got %d want %d", got, want)
+	}
+
+	for _, item := range []struct {
+		key   string
+		sk    string
+		title string
+	}{
+		{key: "item#1", sk: "001", title: "skip-one"},
+		{key: "item#2", sk: "002", title: "keep-two"},
+		{key: "item#3", sk: "003", title: "keep-three"},
+	} {
+		response := doDynamoDBRequest(t, engine, dynamoRequest{
+			target: "DynamoDB_20120810.PutItem",
+			body: `{
+				"TableName":"mildstack-reads",
+				"Item":{
+					"id":{"S":"series#1"},
+					"sk":{"S":"` + item.sk + `"},
+					"title":{"S":"` + item.title + `"},
+					"row_id":{"S":"` + item.key + `"}
+				}
+			}`,
+		})
+		if got, want := response.code, http.StatusOK; got != want {
+			t.Fatalf("unexpected put item status for %s: got %d want %d", item.sk, got, want)
+		}
+	}
+
+	query := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.Query",
+		body: `{
+			"TableName":"mildstack-reads",
+			"KeyConditionExpression":"id = :id AND sk BETWEEN :start AND :end",
+			"ExpressionAttributeValues":{
+				":id":{"S":"series#1"},
+				":start":{"S":"001"},
+				":end":{"S":"003"}
+			},
+			"ScanIndexForward":false,
+			"Limit":2
+		}`,
+	})
+	if got, want := query.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected query status: got %d want %d", got, want)
+	}
+	var queryResponse queryResponse
+	decodeResponse(t, query.body, &queryResponse)
+	if got, want := queryResponse.Count, 2; got != want {
+		t.Fatalf("unexpected query count: got %d want %d", got, want)
+	}
+	if got, want := queryResponse.ScannedCount, 2; got != want {
+		t.Fatalf("unexpected query scanned count: got %d want %d", got, want)
+	}
+	if got, want := queryResponse.Items[0]["sk"].S, "003"; got != want {
+		t.Fatalf("unexpected first query item: got %q want %q", got, want)
+	}
+	if got, want := queryResponse.Items[1]["sk"].S, "002"; got != want {
+		t.Fatalf("unexpected second query item: got %q want %q", got, want)
+	}
+	if got, want := queryResponse.LastEvaluatedKey["sk"].S, "002"; got != want {
+		t.Fatalf("unexpected query last evaluated key: got %q want %q", got, want)
+	}
+
+	queryBeginsWith := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.Query",
+		body: `{
+			"TableName":"mildstack-reads",
+			"KeyConditionExpression":"id = :id AND begins_with(sk, :prefix)",
+			"ExpressionAttributeValues":{
+				":id":{"S":"series#1"},
+				":prefix":{"S":"00"}
+			}
+		}`,
+	})
+	if got, want := queryBeginsWith.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected begins_with query status: got %d want %d", got, want)
+	}
+	decodeResponse(t, queryBeginsWith.body, &queryResponse)
+	if got, want := len(queryResponse.Items), 3; got != want {
+		t.Fatalf("unexpected begins_with query item count: got %d want %d", got, want)
+	}
+	if got, want := queryResponse.Items[0]["sk"].S, "001"; got != want {
+		t.Fatalf("unexpected begins_with first item: got %q want %q", got, want)
+	}
+	if got, want := queryResponse.Items[2]["sk"].S, "003"; got != want {
+		t.Fatalf("unexpected begins_with third item: got %q want %q", got, want)
+	}
+
+	scanPage1 := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.Scan",
+		body: `{
+			"TableName":"mildstack-reads",
+			"FilterExpression":"begins_with(title, :prefix)",
+			"ExpressionAttributeValues":{
+				":prefix":{"S":"keep"}
+			},
+			"Limit":1
+		}`,
+	})
+	if got, want := scanPage1.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected scan page 1 status: got %d want %d", got, want)
+	}
+	var scanResponse scanResponse
+	decodeResponse(t, scanPage1.body, &scanResponse)
+	if got, want := scanResponse.Count, 0; got != want {
+		t.Fatalf("unexpected scan page 1 count: got %d want %d", got, want)
+	}
+	if got, want := scanResponse.ScannedCount, 1; got != want {
+		t.Fatalf("unexpected scan page 1 scanned count: got %d want %d", got, want)
+	}
+	if len(scanResponse.Items) != 0 {
+		t.Fatalf("expected first scan page to be empty, got %#v", scanResponse.Items)
+	}
+	if got, want := scanResponse.LastEvaluatedKey["sk"].S, "001"; got != want {
+		t.Fatalf("unexpected scan page 1 cursor: got %q want %q", got, want)
+	}
+
+	scanPage2 := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.Scan",
+		body: `{
+			"TableName":"mildstack-reads",
+			"FilterExpression":"begins_with(title, :prefix)",
+			"ExpressionAttributeValues":{
+				":prefix":{"S":"keep"}
+			},
+			"Limit":1,
+			"ExclusiveStartKey":{
+				"id":{"S":"series#1"},
+				"sk":{"S":"001"}
+			}
+		}`,
+	})
+	if got, want := scanPage2.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected scan page 2 status: got %d want %d", got, want)
+	}
+	decodeResponse(t, scanPage2.body, &scanResponse)
+	if got, want := scanResponse.Count, 1; got != want {
+		t.Fatalf("unexpected scan page 2 count: got %d want %d", got, want)
+	}
+	if got, want := scanResponse.Items[0]["title"].S, "keep-two"; got != want {
+		t.Fatalf("unexpected scan page 2 item: got %q want %q", got, want)
+	}
 }
 
 type dynamoRequest struct {

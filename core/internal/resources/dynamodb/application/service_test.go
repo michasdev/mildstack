@@ -37,7 +37,7 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := policy.ErrorPrefix, "dynamodb"; got != want {
 		t.Fatalf("unexpected policy error prefix: got %q want %q", got, want)
 	}
-	if got, want := len(policy.Supported), 7; got != want {
+	if got, want := len(policy.Supported), 8; got != want {
 		t.Fatalf("unexpected supported count: got %d want %d", got, want)
 	}
 	if got, want := len(policy.Unsupported), 2; got != want {
@@ -130,11 +130,19 @@ func TestServicePersistsAcrossRestart(t *testing.T) {
 	if _, err := service.CreateTable("mildstack-archive", "pk", "sk", "PAY_PER_REQUEST"); err != nil {
 		t.Fatalf("create table: %v", err)
 	}
-	if _, err := service.PutItem("mildstack-archive", "item#1", map[string]string{
-		"id":    "item#1",
-		"title": "archive item",
+	if _, err := service.PutItem("mildstack-archive", "item#1", map[string]domain.AttributeValue{
+		"id":       domain.StringValue("item#1"),
+		"title":    domain.StringValue("archive item"),
+		"version":  domain.NumberValue("1"),
+		"obsolete": domain.StringValue("remove me"),
 	}); err != nil {
 		t.Fatalf("put item: %v", err)
+	}
+	if _, err := service.UpdateItem("mildstack-archive", "item#1", "SET title = :title ADD version :inc REMOVE obsolete", "", nil, map[string]domain.AttributeValue{
+		":title": domain.StringValue("updated archive item"),
+		":inc":   domain.NumberValue("1"),
+	}); err != nil {
+		t.Fatalf("update item: %v", err)
 	}
 	if err := service.Stop(context.Background()); err != nil {
 		t.Fatalf("stop: %v", err)
@@ -159,8 +167,14 @@ func TestServicePersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get item after restart: %v", err)
 	}
-	if got, want := fetched.Attributes["title"], "archive item"; got != want {
+	if got, want := fetched.Attributes["title"].Any(), "updated archive item"; got != want {
 		t.Fatalf("unexpected item attribute after restart: got %q want %q", got, want)
+	}
+	if got, want := fetched.Attributes["version"].Any(), "2"; got != want {
+		t.Fatalf("unexpected numeric item attribute after restart: got %q want %q", got, want)
+	}
+	if _, ok := fetched.Attributes["obsolete"]; ok {
+		t.Fatal("expected removed attribute to stay removed after restart")
 	}
 
 	hook := runtime.NewStateHook()
@@ -195,27 +209,23 @@ func TestServiceTableLifecycleTransitions(t *testing.T) {
 		t.Fatalf("unexpected create status: got %q want %q", got, want)
 	}
 
-	if _, err := service.DescribeTable("mildstack-archive"); err == nil {
-		t.Fatal("expected describe on a newly creating table to be temporarily unavailable")
+	described, err := service.DescribeTable("mildstack-archive")
+	if err != nil {
+		t.Fatalf("describe creating table: %v", err)
+	}
+	if got, want := described.Status, domain.TableStatusCreating; got != want {
+		t.Fatalf("unexpected creating status: got %q want %q", got, want)
+	}
+
+	deletedWhileCreating, err := service.DeleteTable("mildstack-archive")
+	if err != nil {
+		t.Fatalf("delete creating table: %v", err)
+	}
+	if got, want := deletedWhileCreating.Status, domain.TableStatusDeleting; got != want {
+		t.Fatalf("unexpected deleting status: got %q want %q", got, want)
 	}
 
 	current = current.Add(250 * time.Millisecond)
-	described, err := service.DescribeTable("mildstack-archive")
-	if err != nil {
-		t.Fatalf("describe active table: %v", err)
-	}
-	if got, want := described.Status, domain.TableStatusActive; got != want {
-		t.Fatalf("unexpected active status: got %q want %q", got, want)
-	}
-
-	deleted, err := service.DeleteTable("mildstack-archive")
-	if err != nil {
-		t.Fatalf("delete table: %v", err)
-	}
-	if got, want := deleted.Status, domain.TableStatusDeleting; got != want {
-		t.Fatalf("unexpected deleted status: got %q want %q", got, want)
-	}
-
 	if _, err := service.DescribeTable("mildstack-archive"); err == nil {
 		t.Fatal("expected describe on deleted table to fail")
 	}
@@ -256,11 +266,21 @@ func TestServiceRejectsInvalidAndMissingRequests(t *testing.T) {
 	if _, err := service.GetItem("missing", "item#1"); err == nil {
 		t.Fatal("expected missing table lookup to fail")
 	}
-	if _, err := service.PutItem("missing", "item#1", map[string]string{"id": "item#1"}); err == nil {
+	if _, err := service.PutItem("missing", "item#1", map[string]domain.AttributeValue{"id": domain.StringValue("item#1")}); err == nil {
 		t.Fatal("expected put on missing table to fail")
 	}
 	if err := service.DeleteItem("mildstack-records", "missing"); err == nil {
 		t.Fatal("expected delete on missing item to fail")
+	}
+	if _, err := service.UpdateItem("mildstack-records", "missing", "SET title = :title", "attribute_exists(id)", nil, map[string]domain.AttributeValue{
+		":title": domain.StringValue("updated"),
+	}); err == nil {
+		t.Fatal("expected failing condition to return an error")
+	}
+	if _, err := service.UpdateItem("mildstack-records", "example#1", "SET nested.path = :title", "", nil, map[string]domain.AttributeValue{
+		":title": domain.StringValue("updated"),
+	}); err == nil {
+		t.Fatal("expected nested update paths to fail")
 	}
 }
 

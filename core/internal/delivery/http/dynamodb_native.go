@@ -21,7 +21,10 @@ type DynamoDBNativeService interface {
 	DescribeTable(name string) (dynamodbdomain.Table, error)
 	DeleteTable(name string) (dynamodbdomain.Table, error)
 	GetItem(table, key string) (dynamodbdomain.Item, error)
-	PutItem(table, key string, attributes map[string]string) (dynamodbdomain.Item, error)
+	PutItem(table, key string, attributes map[string]dynamodbdomain.AttributeValue) (dynamodbdomain.Item, error)
+	UpdateItem(table, key, updateExpression, conditionExpression string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]dynamodbdomain.AttributeValue) (dynamodbdomain.Item, error)
+	Query(table, keyConditionExpression, filterExpression string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]dynamodbdomain.AttributeValue, limit *int, exclusiveStartKey map[string]dynamodbdomain.AttributeValue, scanIndexForward *bool) (dynamodbdomain.ReadPage, error)
+	Scan(table, filterExpression string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]dynamodbdomain.AttributeValue, limit *int, exclusiveStartKey map[string]dynamodbdomain.AttributeValue) (dynamodbdomain.ReadPage, error)
 	DeleteItem(table, key string) error
 }
 
@@ -89,14 +92,23 @@ func newDynamoDBTargetRegistry() map[string]dynamoTargetSpec {
 			supported: true,
 			execute:   (*dynamoDBNativeHandler).handlePutItem,
 		},
+		"UpdateItem": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleUpdateItem,
+		},
+		"Query": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleQuery,
+		},
+		"Scan": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleScan,
+		},
 		"DeleteItem": {
 			supported: true,
 			execute:   (*dynamoDBNativeHandler).handleDeleteItem,
 		},
 		"UpdateTable":        {supported: false},
-		"UpdateItem":         {supported: false},
-		"Query":              {supported: false},
-		"Scan":               {supported: false},
 		"BatchGetItem":       {supported: false},
 		"BatchWriteItem":     {supported: false},
 		"TransactGetItems":   {supported: false},
@@ -328,6 +340,173 @@ func (h *dynamoDBNativeHandler) handleDeleteItem(c *gin.Context, body []byte) er
 	return nil
 }
 
+func (h *dynamoDBNativeHandler) handleUpdateItem(c *gin.Context, body []byte) error {
+	request := updateItemRequest{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid UpdateItem request: %w", err)
+	}
+
+	tableName := strings.TrimSpace(request.TableName)
+	if tableName == "" {
+		return fmt.Errorf("dynamodb: table name is required")
+	}
+
+	key, err := keyFromAttributeValueMap(request.Key)
+	if err != nil {
+		return err
+	}
+
+	if rv := strings.ToUpper(strings.TrimSpace(request.ReturnValues)); rv != "" && rv != "NONE" && rv != "ALL_NEW" {
+		return fmt.Errorf("dynamodb: unsupported return values %q", request.ReturnValues)
+	}
+
+	expressionAttributeValues := make(map[string]dynamodbdomain.AttributeValue, len(request.ExpressionAttributeValues))
+	for name, value := range request.ExpressionAttributeValues {
+		converted, err := attributeValueToDomain(value)
+		if err != nil {
+			return err
+		}
+		expressionAttributeValues[name] = converted
+	}
+
+	item, err := h.service.UpdateItem(
+		tableName,
+		key,
+		request.UpdateExpression,
+		request.ConditionExpression,
+		request.ExpressionAttributeNames,
+		expressionAttributeValues,
+	)
+	if err != nil {
+		return err
+	}
+
+	response := updateItemResponse{}
+	if strings.EqualFold(strings.TrimSpace(request.ReturnValues), "ALL_NEW") {
+		response.Attributes = attributeValueMapFromDomain(item.Attributes)
+	}
+	writeDynamoDBJSON(c, http.StatusOK, response)
+	return nil
+}
+
+func (h *dynamoDBNativeHandler) handleQuery(c *gin.Context, body []byte) error {
+	request := queryRequest{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid Query request: %w", err)
+	}
+
+	tableName := strings.TrimSpace(request.TableName)
+	if tableName == "" {
+		return fmt.Errorf("dynamodb: table name is required")
+	}
+	if strings.TrimSpace(request.KeyConditionExpression) == "" {
+		return fmt.Errorf("dynamodb: key condition expression is required")
+	}
+	if strings.TrimSpace(request.IndexName) != "" {
+		return fmt.Errorf("dynamodb: index queries are not supported")
+	}
+	if strings.TrimSpace(request.ProjectionExpression) != "" {
+		return fmt.Errorf("dynamodb: projection expressions are not supported")
+	}
+	if selectValue := strings.ToUpper(strings.TrimSpace(request.Select)); selectValue != "" && selectValue != "ALL_ATTRIBUTES" {
+		return fmt.Errorf("dynamodb: unsupported select value %q", request.Select)
+	}
+
+	expressionAttributeValues := make(map[string]dynamodbdomain.AttributeValue, len(request.ExpressionAttributeValues))
+	for name, value := range request.ExpressionAttributeValues {
+		converted, err := attributeValueToDomain(value)
+		if err != nil {
+			return err
+		}
+		expressionAttributeValues[name] = converted
+	}
+
+	exclusiveStartKey, err := attributeValueMapToDomain(request.ExclusiveStartKey)
+	if err != nil {
+		return err
+	}
+
+	result, err := h.service.Query(
+		tableName,
+		request.KeyConditionExpression,
+		request.FilterExpression,
+		request.ExpressionAttributeNames,
+		expressionAttributeValues,
+		request.Limit,
+		exclusiveStartKey,
+		request.ScanIndexForward,
+	)
+	if err != nil {
+		return err
+	}
+
+	writeDynamoDBJSON(c, http.StatusOK, queryResponse{
+		Items:            attributeValueListFromDomain(result.Items),
+		Count:            result.Count,
+		ScannedCount:     result.ScannedCount,
+		LastEvaluatedKey: attributeValueMapFromDomain(result.LastEvaluatedKey),
+	})
+	return nil
+}
+
+func (h *dynamoDBNativeHandler) handleScan(c *gin.Context, body []byte) error {
+	request := scanRequest{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid Scan request: %w", err)
+	}
+
+	tableName := strings.TrimSpace(request.TableName)
+	if tableName == "" {
+		return fmt.Errorf("dynamodb: table name is required")
+	}
+	if strings.TrimSpace(request.IndexName) != "" {
+		return fmt.Errorf("dynamodb: index scans are not supported")
+	}
+	if strings.TrimSpace(request.ProjectionExpression) != "" {
+		return fmt.Errorf("dynamodb: projection expressions are not supported")
+	}
+	if selectValue := strings.ToUpper(strings.TrimSpace(request.Select)); selectValue != "" && selectValue != "ALL_ATTRIBUTES" {
+		return fmt.Errorf("dynamodb: unsupported select value %q", request.Select)
+	}
+	if request.Segment != nil || request.TotalSegments != nil {
+		return fmt.Errorf("dynamodb: parallel scan segments are not supported")
+	}
+
+	expressionAttributeValues := make(map[string]dynamodbdomain.AttributeValue, len(request.ExpressionAttributeValues))
+	for name, value := range request.ExpressionAttributeValues {
+		converted, err := attributeValueToDomain(value)
+		if err != nil {
+			return err
+		}
+		expressionAttributeValues[name] = converted
+	}
+
+	exclusiveStartKey, err := attributeValueMapToDomain(request.ExclusiveStartKey)
+	if err != nil {
+		return err
+	}
+
+	result, err := h.service.Scan(
+		tableName,
+		request.FilterExpression,
+		request.ExpressionAttributeNames,
+		expressionAttributeValues,
+		request.Limit,
+		exclusiveStartKey,
+	)
+	if err != nil {
+		return err
+	}
+
+	writeDynamoDBJSON(c, http.StatusOK, scanResponse{
+		Items:            attributeValueListFromDomain(result.Items),
+		Count:            result.Count,
+		ScannedCount:     result.ScannedCount,
+		LastEvaluatedKey: attributeValueMapFromDomain(result.LastEvaluatedKey),
+	})
+	return nil
+}
+
 func isDynamoDBJSONRequest(contentType string) bool {
 	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(contentType))
 	if err != nil {
@@ -389,9 +568,15 @@ func dynamoDBErrorCode(err error) string {
 		return "ResourceInUseException"
 	case strings.Contains(message, "not found"):
 		return "ResourceNotFoundException"
+	case strings.Contains(message, "conditional check failed"):
+		return "ConditionalCheckFailedException"
 	case strings.Contains(message, "required"):
 		return "ValidationException"
 	case strings.Contains(message, "invalid"):
+		return "ValidationException"
+	case strings.Contains(message, "unsupported"):
+		return "ValidationException"
+	case strings.Contains(message, "not supported"):
 		return "ValidationException"
 	default:
 		return "InternalServerError"
@@ -463,13 +648,71 @@ type deleteItemRequest struct {
 	Key       map[string]dynamoAttributeValue `json:"Key"`
 }
 
+type updateItemRequest struct {
+	TableName                 string                          `json:"TableName"`
+	Key                       map[string]dynamoAttributeValue `json:"Key"`
+	UpdateExpression          string                          `json:"UpdateExpression"`
+	ConditionExpression       string                          `json:"ConditionExpression,omitempty"`
+	ExpressionAttributeNames  map[string]string               `json:"ExpressionAttributeNames,omitempty"`
+	ExpressionAttributeValues map[string]dynamoAttributeValue `json:"ExpressionAttributeValues,omitempty"`
+	ReturnValues              string                          `json:"ReturnValues,omitempty"`
+}
+
 type deleteItemResponse struct{}
 
+type updateItemResponse struct {
+	Attributes map[string]dynamoAttributeValue `json:"Attributes,omitempty"`
+}
+
+type queryRequest struct {
+	TableName                 string                          `json:"TableName"`
+	KeyConditionExpression    string                          `json:"KeyConditionExpression"`
+	FilterExpression          string                          `json:"FilterExpression,omitempty"`
+	ExpressionAttributeNames  map[string]string               `json:"ExpressionAttributeNames,omitempty"`
+	ExpressionAttributeValues map[string]dynamoAttributeValue `json:"ExpressionAttributeValues,omitempty"`
+	Limit                     *int                            `json:"Limit,omitempty"`
+	ExclusiveStartKey         map[string]dynamoAttributeValue `json:"ExclusiveStartKey,omitempty"`
+	ScanIndexForward          *bool                           `json:"ScanIndexForward,omitempty"`
+	IndexName                 string                          `json:"IndexName,omitempty"`
+	ProjectionExpression      string                          `json:"ProjectionExpression,omitempty"`
+	Select                    string                          `json:"Select,omitempty"`
+}
+
+type scanRequest struct {
+	TableName                 string                          `json:"TableName"`
+	FilterExpression          string                          `json:"FilterExpression,omitempty"`
+	ExpressionAttributeNames  map[string]string               `json:"ExpressionAttributeNames,omitempty"`
+	ExpressionAttributeValues map[string]dynamoAttributeValue `json:"ExpressionAttributeValues,omitempty"`
+	Limit                     *int                            `json:"Limit,omitempty"`
+	ExclusiveStartKey         map[string]dynamoAttributeValue `json:"ExclusiveStartKey,omitempty"`
+	IndexName                 string                          `json:"IndexName,omitempty"`
+	ProjectionExpression      string                          `json:"ProjectionExpression,omitempty"`
+	Select                    string                          `json:"Select,omitempty"`
+	Segment                   *int                            `json:"Segment,omitempty"`
+	TotalSegments             *int                            `json:"TotalSegments,omitempty"`
+}
+
+type queryResponse struct {
+	Items            []map[string]dynamoAttributeValue `json:"Items,omitempty"`
+	Count            int                               `json:"Count,omitempty"`
+	ScannedCount     int                               `json:"ScannedCount,omitempty"`
+	LastEvaluatedKey map[string]dynamoAttributeValue   `json:"LastEvaluatedKey,omitempty"`
+}
+
+type scanResponse struct {
+	Items            []map[string]dynamoAttributeValue `json:"Items,omitempty"`
+	Count            int                               `json:"Count,omitempty"`
+	ScannedCount     int                               `json:"ScannedCount,omitempty"`
+	LastEvaluatedKey map[string]dynamoAttributeValue   `json:"LastEvaluatedKey,omitempty"`
+}
+
 type dynamoAttributeValue struct {
-	S    string `json:"S,omitempty"`
-	N    string `json:"N,omitempty"`
-	BOOL *bool  `json:"BOOL,omitempty"`
-	NULL bool   `json:"NULL,omitempty"`
+	S    string                          `json:"S,omitempty"`
+	N    string                          `json:"N,omitempty"`
+	BOOL *bool                           `json:"BOOL,omitempty"`
+	NULL bool                            `json:"NULL,omitempty"`
+	M    map[string]dynamoAttributeValue `json:"M,omitempty"`
+	L    []dynamoAttributeValue          `json:"L,omitempty"`
 }
 
 type dynamoKeySchemaElement struct {
@@ -578,8 +821,8 @@ func keyFromAttributeValueMap(values map[string]dynamoAttributeValue) (string, e
 		return "", fmt.Errorf("dynamodb: key is required")
 	}
 
-	if value, ok := values["id"]; ok {
-		return attributeValueToString(value)
+	if key, ok, err := syntheticItemKey(values); ok || err != nil {
+		return key, err
 	}
 
 	if len(values) == 1 {
@@ -595,40 +838,67 @@ func keyFromAttributeValueMap(values map[string]dynamoAttributeValue) (string, e
 	return "", fmt.Errorf("dynamodb: unsupported key attributes %q", strings.Join(keys, ", "))
 }
 
-func itemFromAttributeValueMap(values map[string]dynamoAttributeValue) (string, map[string]string, error) {
+func itemFromAttributeValueMap(values map[string]dynamoAttributeValue) (string, map[string]dynamodbdomain.AttributeValue, error) {
 	if len(values) == 0 {
 		return "", nil, fmt.Errorf("dynamodb: item is required")
 	}
 
-	attributes := make(map[string]string, len(values))
+	attributes := make(map[string]dynamodbdomain.AttributeValue, len(values))
 	key := ""
+	var err error
 	for name, value := range values {
-		copied, err := attributeValueToString(value)
+		copied, err := attributeValueToDomain(value)
 		if err != nil {
 			return "", nil, err
 		}
 		attributes[name] = copied
-		if key == "" && strings.EqualFold(name, "id") {
-			key = copied
-		}
 	}
 
-	if key == "" {
-		if copied, ok := attributes["id"]; ok {
-			key = copied
-		}
-	}
-	if key == "" {
-		for _, copied := range attributes {
-			key = copied
-			break
-		}
+	key, _, err = syntheticItemKey(values)
+	if err != nil {
+		return "", nil, err
 	}
 	if strings.TrimSpace(key) == "" {
 		return "", nil, fmt.Errorf("dynamodb: item key is required")
 	}
 
 	return key, attributes, nil
+}
+
+func syntheticItemKey(values map[string]dynamoAttributeValue) (string, bool, error) {
+	if len(values) == 0 {
+		return "", false, nil
+	}
+
+	if idValue, ok := values["id"]; ok {
+		id, err := attributeValueToString(idValue)
+		if err != nil {
+			return "", false, err
+		}
+		if skValue, ok := values["sk"]; ok {
+			sk, err := attributeValueToString(skValue)
+			if err != nil {
+				return "", false, err
+			}
+			if strings.TrimSpace(sk) != "" {
+				return id + "|" + sk, true, nil
+			}
+		}
+		return id, true, nil
+	}
+
+	if len(values) == 1 {
+		for _, value := range values {
+			key, err := attributeValueToString(value)
+			return key, true, err
+		}
+	}
+
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return "", false, fmt.Errorf("dynamodb: unsupported key attributes %q", strings.Join(keys, ", "))
 }
 
 func attributeValueToString(value dynamoAttributeValue) (string, error) {
@@ -646,28 +916,106 @@ func attributeValueToString(value dynamoAttributeValue) (string, error) {
 	}
 }
 
-func attributeValueMapFromDomain(attributes map[string]string) map[string]dynamoAttributeValue {
+func attributeValueToDomain(value dynamoAttributeValue) (dynamodbdomain.AttributeValue, error) {
+	switch {
+	case value.S != "":
+		return dynamodbdomain.StringValue(value.S), nil
+	case value.N != "":
+		return dynamodbdomain.NumberValue(value.N), nil
+	case value.BOOL != nil:
+		return dynamodbdomain.BoolValue(*value.BOOL), nil
+	case value.NULL:
+		return dynamodbdomain.NullValue(), nil
+	case value.M != nil:
+		copied := make(map[string]dynamodbdomain.AttributeValue, len(value.M))
+		for name, child := range value.M {
+			converted, err := attributeValueToDomain(child)
+			if err != nil {
+				return dynamodbdomain.AttributeValue{}, err
+			}
+			copied[name] = converted
+		}
+		return dynamodbdomain.MapValue(copied), nil
+	case value.L != nil:
+		copied := make([]dynamodbdomain.AttributeValue, len(value.L))
+		for i, child := range value.L {
+			converted, err := attributeValueToDomain(child)
+			if err != nil {
+				return dynamodbdomain.AttributeValue{}, err
+			}
+			copied[i] = converted
+		}
+		return dynamodbdomain.ListValue(copied), nil
+	default:
+		return dynamodbdomain.AttributeValue{}, fmt.Errorf("dynamodb: only string, number, bool, null, map, and list attribute values are supported in the local subset")
+	}
+}
+
+func attributeValueMapFromDomain(attributes map[string]dynamodbdomain.AttributeValue) map[string]dynamoAttributeValue {
 	if attributes == nil {
 		return nil
 	}
 
 	copied := make(map[string]dynamoAttributeValue, len(attributes))
 	for name, value := range attributes {
-		copied[name] = dynamoAttributeValueFromString(value)
+		copied[name] = dynamoAttributeValueFromDomain(value)
 	}
 	return copied
 }
 
-func dynamoAttributeValueFromString(value string) dynamoAttributeValue {
-	if strings.TrimSpace(value) == "" {
-		return dynamoAttributeValue{S: value}
+func dynamoAttributeValueFromDomain(value dynamodbdomain.AttributeValue) dynamoAttributeValue {
+	switch {
+	case value.S != nil:
+		return dynamoAttributeValue{S: *value.S}
+	case value.N != nil:
+		return dynamoAttributeValue{N: *value.N}
+	case value.BOOL != nil:
+		return dynamoAttributeValue{BOOL: value.BOOL}
+	case value.NULL:
+		return dynamoAttributeValue{NULL: true}
+	case value.M != nil:
+		copied := make(map[string]dynamoAttributeValue, len(*value.M))
+		for name, child := range *value.M {
+			copied[name] = dynamoAttributeValueFromDomain(child)
+		}
+		return dynamoAttributeValue{M: copied}
+	case value.L != nil:
+		copied := make([]dynamoAttributeValue, len(*value.L))
+		for i, child := range *value.L {
+			copied[i] = dynamoAttributeValueFromDomain(child)
+		}
+		return dynamoAttributeValue{L: copied}
+	default:
+		return dynamoAttributeValue{S: ""}
+	}
+}
+
+func attributeValueListFromDomain(items []dynamodbdomain.Item) []map[string]dynamoAttributeValue {
+	if len(items) == 0 {
+		return nil
 	}
 
-	if _, err := strconv.ParseFloat(value, 64); err == nil {
-		return dynamoAttributeValue{N: value}
+	copied := make([]map[string]dynamoAttributeValue, len(items))
+	for i, item := range items {
+		copied[i] = attributeValueMapFromDomain(item.Attributes)
+	}
+	return copied
+}
+
+func attributeValueMapToDomain(values map[string]dynamoAttributeValue) (map[string]dynamodbdomain.AttributeValue, error) {
+	if len(values) == 0 {
+		return nil, nil
 	}
 
-	return dynamoAttributeValue{S: value}
+	converted := make(map[string]dynamodbdomain.AttributeValue, len(values))
+	for name, value := range values {
+		parsed, err := attributeValueToDomain(value)
+		if err != nil {
+			return nil, err
+		}
+		converted[name] = parsed
+	}
+	return converted, nil
 }
 
 func paginateTableNames(names []string, limit *int, exclusiveStart string) ([]string, string) {
