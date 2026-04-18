@@ -8,7 +8,8 @@ import {
 } from "@renderer/components/ui/breadcrumb";
 import { Fragment } from "react";
 import { Link, useLocation } from "react-router";
-
+import mildstackLightLogo from "@renderer/assets/logos/mildstack-logo-full-white.svg"
+import { Separator } from "@renderer/components/ui/separator";
 const Header = () => {
     const currentPath = useLocation();
     const segments = currentPath.pathname.split('/').filter(Boolean);
@@ -31,8 +32,9 @@ const Header = () => {
     });
 
     return (
-        <header className="flex flex-row items-center gap-2">
-            <h1 className="font-bold text-lg">MildStack</h1>
+        <header className="flex flex-row items-center gap-4 px-6">
+            <img className="h-8 w-auto" src={mildstackLightLogo} alt="MildStack Logo" />
+            <Separator orientation="vertical" className="h-6" />
             <Breadcrumb>
                 <BreadcrumbList>
                     {breadcrumbTree.map((item, index) => {
