@@ -258,7 +258,7 @@ func TestFSRepositoryLoadRejectsInvalidState(t *testing.T) {
 	}
 }
 
-func TestResolveStoragePathUsesmildstackInstanceLayout(t *testing.T) {
+func TestResolveStoragePathUsesMildstackInstanceLayout(t *testing.T) {
 	t.Helper()
 
 	path, err := ResolveStoragePath(StorageConfig{
