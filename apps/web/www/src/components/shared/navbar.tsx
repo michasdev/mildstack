@@ -35,8 +35,7 @@ export const Navbar: React.FC = () => {
             <img src={logoFullWhite} className='h-10 w-auto' alt="Logo" />
           </div>
           <div className="hidden md:flex items-center space-x-6 ml-8">
-            <button className="px-4 py-2 bg-gray-800/50 hover:bg-gray-700/50 rounded-full text-sm transition-colors">Start</button>
-            <button className="px-4 py-2 text-sm hover:text-gray-300 transition-colors">Features</button>
+            <button className="px-4 py-2 bg-gray-800/50 hover:bg-gray-700/50 rounded-full text-sm transition-colors">Home</button>
             <button className="px-4 py-2 text-sm hover:text-gray-300 transition-colors">Services</button>
             <button className="px-4 py-2 text-sm hover:text-gray-300 transition-colors">Docs</button>
             <button className="px-4 py-2 text-sm hover:text-gray-300 transition-colors">Community</button>
@@ -91,7 +90,7 @@ export const Navbar: React.FC = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
-              <button className="px-6 py-3 bg-gray-800/50 rounded-full">Start</button>
+              <button className="px-6 py-3 bg-gray-800/50 rounded-full">Home</button>
               <button className="px-6 py-3">Features</button>
               <button className="px-6 py-3">Services</button>
               <button className="px-6 py-3">Docs</button>

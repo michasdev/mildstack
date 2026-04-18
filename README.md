@@ -8,7 +8,7 @@
 
 # MildStack
 
-> A lightweight, local-first AWS emulator built for developers.
+> A lightweight, local-first AWS emulator built for developers. The best localstack alternative.
 
 MildStack is an open-source project that helps you run and test AWS-like services locally with a focus on speed, simplicity, and low resource usage.
 
