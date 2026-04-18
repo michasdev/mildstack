@@ -394,6 +394,172 @@ func TestRegisterNativeDynamoDBRoutesExposesAwsCompatibleSmokeSurface(t *testing
 		t.Fatalf("unexpected second scan title: got %q want %q", got, want)
 	}
 
+	const batchTableName = "native-smoke-batch-table"
+	batchCreateOut, err := client.CreateTable(ctx, &dynamodb.CreateTableInput{
+		TableName: aws.String(batchTableName),
+		KeySchema: []types.KeySchemaElement{
+			{
+				AttributeName: aws.String("id"),
+				KeyType:       types.KeyTypeHash,
+			},
+		},
+		AttributeDefinitions: []types.AttributeDefinition{
+			{
+				AttributeName: aws.String("id"),
+				AttributeType: types.ScalarAttributeTypeS,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create batch table via sdk: %v", err)
+	}
+	if batchCreateOut.TableDescription == nil {
+		t.Fatal("expected batch table create response to include table description")
+	}
+	waitForTableStatus(t, ctx, client, batchTableName, types.TableStatusActive)
+
+	batchWriteItems := make(map[string][]types.WriteRequest, 1)
+	putRequests := make([]types.WriteRequest, 0, 26)
+	for i := 1; i <= 26; i++ {
+		id := fmt.Sprintf("item#%02d", i)
+		putRequests = append(putRequests, types.WriteRequest{
+			PutRequest: &types.PutRequest{
+				Item: map[string]types.AttributeValue{
+					"id":    &types.AttributeValueMemberS{Value: id},
+					"title": &types.AttributeValueMemberS{Value: fmt.Sprintf("title-%02d", i)},
+				},
+			},
+		})
+	}
+	batchWriteItems[batchTableName] = putRequests
+
+	batchWriteOut, err := client.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+		RequestItems: batchWriteItems,
+	})
+	if err != nil {
+		t.Fatalf("batch write via sdk: %v", err)
+	}
+	if got, want := len(batchWriteOut.UnprocessedItems[batchTableName]), 1; got != want {
+		t.Fatalf("unexpected batch write unprocessed count: got %d want %d", got, want)
+	}
+	if got, want := attrValueString(t, batchWriteOut.UnprocessedItems[batchTableName][0].PutRequest.Item["id"]), "item#26"; got != want {
+		t.Fatalf("unexpected unprocessed batch write id: got %q want %q", got, want)
+	}
+
+	batchGetOut, err := client.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{
+		RequestItems: map[string]types.KeysAndAttributes{
+			batchTableName: {
+				Keys: []map[string]types.AttributeValue{
+					{"id": &types.AttributeValueMemberS{Value: "item#01"}},
+					{"id": &types.AttributeValueMemberS{Value: "item#25"}},
+					{"id": &types.AttributeValueMemberS{Value: "item#26"}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("batch get via sdk: %v", err)
+	}
+	if got, want := len(batchGetOut.Responses[batchTableName]), 2; got != want {
+		t.Fatalf("unexpected batch get response count: got %d want %d", got, want)
+	}
+	if got, want := attrValueString(t, batchGetOut.Responses[batchTableName][0]["id"]), "item#01"; got != want {
+		t.Fatalf("unexpected first batch get id: got %q want %q", got, want)
+	}
+	if got, want := attrValueString(t, batchGetOut.Responses[batchTableName][1]["id"]), "item#25"; got != want {
+		t.Fatalf("unexpected second batch get id: got %q want %q", got, want)
+	}
+
+	transactWriteOut, err := client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{
+			{
+				Put: &types.Put{
+					TableName: aws.String(batchTableName),
+					Item: map[string]types.AttributeValue{
+						"id":    &types.AttributeValueMemberS{Value: "item#27"},
+						"title": &types.AttributeValueMemberS{Value: "title-27"},
+					},
+				},
+			},
+			{
+				Delete: &types.Delete{
+					TableName: aws.String(batchTableName),
+					Key: map[string]types.AttributeValue{
+						"id": &types.AttributeValueMemberS{Value: "item#01"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("transact write via sdk: %v", err)
+	}
+	if transactWriteOut == nil {
+		t.Fatal("expected transact write response")
+	}
+
+	transactGetOut, err := client.TransactGetItems(ctx, &dynamodb.TransactGetItemsInput{
+		TransactItems: []types.TransactGetItem{
+			{
+				Get: &types.Get{
+					TableName: aws.String(batchTableName),
+					Key: map[string]types.AttributeValue{
+						"id": &types.AttributeValueMemberS{Value: "item#27"},
+					},
+				},
+			},
+			{
+				Get: &types.Get{
+					TableName: aws.String(batchTableName),
+					Key: map[string]types.AttributeValue{
+						"id": &types.AttributeValueMemberS{Value: "item#02"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("transact get via sdk: %v", err)
+	}
+	if got, want := len(transactGetOut.Responses), 2; got != want {
+		t.Fatalf("unexpected transact get response count: got %d want %d", got, want)
+	}
+	if got, want := attrValueString(t, transactGetOut.Responses[0].Item["id"]), "item#27"; got != want {
+		t.Fatalf("unexpected first transact get id: got %q want %q", got, want)
+	}
+	if got, want := attrValueString(t, transactGetOut.Responses[1].Item["id"]), "item#02"; got != want {
+		t.Fatalf("unexpected second transact get id: got %q want %q", got, want)
+	}
+
+	_, err = client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{
+			{
+				Put: &types.Put{
+					TableName: aws.String(batchTableName),
+					Item: map[string]types.AttributeValue{
+						"id":    &types.AttributeValueMemberS{Value: "item#28"},
+						"title": &types.AttributeValueMemberS{Value: "title-28"},
+					},
+				},
+			},
+			{
+				Delete: &types.Delete{
+					TableName: aws.String(batchTableName),
+					Key: map[string]types.AttributeValue{
+						"id": &types.AttributeValueMemberS{Value: "item#28"},
+					},
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected conflicting transaction to fail")
+	}
+	var canceled *types.TransactionCanceledException
+	if !errors.As(err, &canceled) {
+		t.Fatalf("expected transaction canceled error, got %T: %v", err, err)
+	}
+
 	paginator := dynamodb.NewListTablesPaginator(client, &dynamodb.ListTablesInput{Limit: aws.Int32(1)})
 	var listed []string
 	for paginator.HasMorePages() {
@@ -403,7 +569,7 @@ func TestRegisterNativeDynamoDBRoutesExposesAwsCompatibleSmokeSurface(t *testing
 		}
 		listed = append(listed, page.TableNames...)
 	}
-	if got, want := listed, []string{"mildstack-records", readTableName, tableName}; !equalStringSlices(got, want) {
+	if got, want := listed, []string{"mildstack-records", batchTableName, readTableName, tableName}; !equalStringSlices(got, want) {
 		t.Fatalf("unexpected paginated table list: got %v want %v", got, want)
 	}
 

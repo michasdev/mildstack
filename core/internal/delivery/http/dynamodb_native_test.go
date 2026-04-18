@@ -27,14 +27,20 @@ func TestDynamoDBTargetRegistryDistinguishesSupportedAndUnsupportedOperations(t 
 		}
 	}
 
-	for _, target := range []string{"BatchGetItem", "TransactWriteItems"} {
+	for _, target := range []string{"BatchGetItem", "BatchWriteItem", "TransactGetItems", "TransactWriteItems"} {
 		spec, ok := handler.registry[target]
 		if !ok {
 			t.Fatalf("expected target %q to be registered", target)
 		}
-		if spec.supported {
-			t.Fatalf("expected target %q to be marked unsupported", target)
+		if !spec.supported {
+			t.Fatalf("expected target %q to be supported", target)
 		}
+	}
+
+	if spec, ok := handler.registry["UpdateTable"]; !ok {
+		t.Fatal("expected target UpdateTable to be registered")
+	} else if spec.supported {
+		t.Fatal("expected target UpdateTable to remain unsupported")
 	}
 }
 
@@ -225,6 +231,159 @@ func TestDynamoDBNativeRoutesHandleSupportedLocalSubset(t *testing.T) {
 		if tableName == "mildstack-archive" {
 			t.Fatalf("expected deleted table to disappear from ListTables, got %v", listTablesResponse.TableNames)
 		}
+	}
+}
+
+func TestDynamoDBNativeRoutesHandleBatchAndTransactionSurface(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+
+	createTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"mildstack-batch",
+			"KeySchema":[{"AttributeName":"id","KeyType":"HASH"}],
+			"AttributeDefinitions":[{"AttributeName":"id","AttributeType":"S"}],
+			"BillingMode":"PAY_PER_REQUEST"
+		}`,
+	})
+	if got, want := createTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create table status: got %d want %d", got, want)
+	}
+
+	batchWrite := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.BatchWriteItem",
+		body: `{
+			"RequestItems":{
+				"mildstack-batch":[
+					{"PutRequest":{"Item":{"id":{"S":"item#01"},"title":{"S":"title-01"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#02"},"title":{"S":"title-02"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#03"},"title":{"S":"title-03"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#04"},"title":{"S":"title-04"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#05"},"title":{"S":"title-05"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#06"},"title":{"S":"title-06"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#07"},"title":{"S":"title-07"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#08"},"title":{"S":"title-08"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#09"},"title":{"S":"title-09"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#10"},"title":{"S":"title-10"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#11"},"title":{"S":"title-11"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#12"},"title":{"S":"title-12"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#13"},"title":{"S":"title-13"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#14"},"title":{"S":"title-14"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#15"},"title":{"S":"title-15"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#16"},"title":{"S":"title-16"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#17"},"title":{"S":"title-17"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#18"},"title":{"S":"title-18"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#19"},"title":{"S":"title-19"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#20"},"title":{"S":"title-20"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#21"},"title":{"S":"title-21"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#22"},"title":{"S":"title-22"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#23"},"title":{"S":"title-23"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#24"},"title":{"S":"title-24"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#25"},"title":{"S":"title-25"}}}},
+					{"PutRequest":{"Item":{"id":{"S":"item#26"},"title":{"S":"title-26"}}}}
+				]
+			}
+		}`,
+	})
+	if got, want := batchWrite.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected batch write status: got %d want %d", got, want)
+	}
+	var batchWriteResponse batchWriteItemResponse
+	decodeResponse(t, batchWrite.body, &batchWriteResponse)
+	if got, want := len(batchWriteResponse.UnprocessedItems["mildstack-batch"]), 1; got != want {
+		t.Fatalf("unexpected unprocessed batch write count: got %d want %d", got, want)
+	}
+	if got, want := batchWriteResponse.UnprocessedItems["mildstack-batch"][0].PutRequest.Item["id"].S, "item#26"; got != want {
+		t.Fatalf("unexpected unprocessed batch write id: got %q want %q", got, want)
+	}
+
+	batchGet := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.BatchGetItem",
+		body: `{
+			"RequestItems":{
+				"mildstack-batch":{
+					"Keys":[
+						{"id":{"S":"item#01"}},
+						{"id":{"S":"item#25"}},
+						{"id":{"S":"item#26"}}
+					]
+				}
+			}
+		}`,
+	})
+	if got, want := batchGet.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected batch get status: got %d want %d", got, want)
+	}
+	var batchGetResponse batchGetItemResponse
+	decodeResponse(t, batchGet.body, &batchGetResponse)
+	if got, want := len(batchGetResponse.Responses["mildstack-batch"]), 2; got != want {
+		t.Fatalf("unexpected batch get response count: got %d want %d", got, want)
+	}
+	if got, want := batchGetResponse.Responses["mildstack-batch"][0]["id"].S, "item#01"; got != want {
+		t.Fatalf("unexpected first batch get id: got %q want %q", got, want)
+	}
+	if got, want := batchGetResponse.Responses["mildstack-batch"][1]["id"].S, "item#25"; got != want {
+		t.Fatalf("unexpected second batch get id: got %q want %q", got, want)
+	}
+
+	transactWrite := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.TransactWriteItems",
+		body: `{
+			"TransactItems":[
+				{"Put":{"TableName":"mildstack-batch","Item":{"id":{"S":"item#27"},"title":{"S":"title-27"}}}},
+				{"Delete":{"TableName":"mildstack-batch","Key":{"id":{"S":"item#01"}}}}
+			]
+		}`,
+	})
+	if got, want := transactWrite.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected transact write status: got %d want %d", got, want)
+	}
+
+	transactGet := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.TransactGetItems",
+		body: `{
+			"TransactItems":[
+				{"Get":{"TableName":"mildstack-batch","Key":{"id":{"S":"item#27"}}}},
+				{"Get":{"TableName":"mildstack-batch","Key":{"id":{"S":"item#02"}}}}
+			]
+		}`,
+	})
+	if got, want := transactGet.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected transact get status: got %d want %d", got, want)
+	}
+	var transactGetResponse transactGetItemsResponse
+	decodeResponse(t, transactGet.body, &transactGetResponse)
+	if got, want := len(transactGetResponse.Responses), 2; got != want {
+		t.Fatalf("unexpected transact get response count: got %d want %d", got, want)
+	}
+	if got, want := transactGetResponse.Responses[0].Item["id"].S, "item#27"; got != want {
+		t.Fatalf("unexpected first transact get id: got %q want %q", got, want)
+	}
+	if got, want := transactGetResponse.Responses[1].Item["id"].S, "item#02"; got != want {
+		t.Fatalf("unexpected second transact get id: got %q want %q", got, want)
+	}
+
+	transactConflict := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.TransactWriteItems",
+		body: `{
+			"TransactItems":[
+				{"Put":{"TableName":"mildstack-batch","Item":{"id":{"S":"item#28"},"title":{"S":"title-28"}}}},
+				{"Delete":{"TableName":"mildstack-batch","Key":{"id":{"S":"item#28"}}}}
+			]
+		}`,
+	})
+	assertDynamoError(t, transactConflict, http.StatusBadRequest, "TransactionCanceledException")
+	var transactConflictResponse dynamoDBTransactionCanceledErrorResponse
+	decodeResponse(t, transactConflict.body, &transactConflictResponse)
+	if got, want := len(transactConflictResponse.CancellationReasons), 2; got != want {
+		t.Fatalf("unexpected cancellation reason count: got %d want %d", got, want)
+	}
+	if got, want := transactConflictResponse.CancellationReasons[0].Code, "TransactionConflict"; got != want {
+		t.Fatalf("unexpected cancellation reason code: got %q want %q", got, want)
 	}
 }
 

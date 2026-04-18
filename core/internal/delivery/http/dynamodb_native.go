@@ -7,11 +7,13 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	ddbcontracts "github.com/michasdev/mildstack/core/internal/resources/dynamodb/contracts"
 	dynamodbdomain "github.com/michasdev/mildstack/core/internal/resources/dynamodb/domain"
 )
 
@@ -26,6 +28,10 @@ type DynamoDBNativeService interface {
 	Query(table, keyConditionExpression, filterExpression string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]dynamodbdomain.AttributeValue, limit *int, exclusiveStartKey map[string]dynamodbdomain.AttributeValue, scanIndexForward *bool) (dynamodbdomain.ReadPage, error)
 	Scan(table, filterExpression string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]dynamodbdomain.AttributeValue, limit *int, exclusiveStartKey map[string]dynamodbdomain.AttributeValue) (dynamodbdomain.ReadPage, error)
 	DeleteItem(table, key string) error
+	BatchWriteItem(request ddbcontracts.BatchWriteItemRequest) (ddbcontracts.BatchWriteItemResult, error)
+	BatchGetItem(request ddbcontracts.BatchGetItemRequest) (ddbcontracts.BatchGetItemResult, error)
+	TransactWriteItems(request ddbcontracts.TransactWriteItemsRequest) error
+	TransactGetItems(request ddbcontracts.TransactGetItemsRequest) (ddbcontracts.TransactGetItemsResult, error)
 }
 
 const (
@@ -108,11 +114,23 @@ func newDynamoDBTargetRegistry() map[string]dynamoTargetSpec {
 			supported: true,
 			execute:   (*dynamoDBNativeHandler).handleDeleteItem,
 		},
-		"UpdateTable":        {supported: false},
-		"BatchGetItem":       {supported: false},
-		"BatchWriteItem":     {supported: false},
-		"TransactGetItems":   {supported: false},
-		"TransactWriteItems": {supported: false},
+		"BatchGetItem": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleBatchGetItem,
+		},
+		"BatchWriteItem": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleBatchWriteItem,
+		},
+		"TransactGetItems": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleTransactGetItems,
+		},
+		"TransactWriteItems": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleTransactWriteItems,
+		},
+		"UpdateTable": {supported: false},
 	}
 }
 
@@ -507,6 +525,249 @@ func (h *dynamoDBNativeHandler) handleScan(c *gin.Context, body []byte) error {
 	return nil
 }
 
+func (h *dynamoDBNativeHandler) handleBatchWriteItem(c *gin.Context, body []byte) error {
+	request := batchWriteItemRequest{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid BatchWriteItem request: %w", err)
+	}
+	if strings.TrimSpace(request.ReturnConsumedCapacity) != "" {
+		return fmt.Errorf("dynamodb: return consumed capacity is not supported")
+	}
+	if strings.TrimSpace(request.ReturnItemCollectionMetrics) != "" {
+		return fmt.Errorf("dynamodb: return item collection metrics is not supported")
+	}
+	if len(request.RequestItems) == 0 {
+		return fmt.Errorf("dynamodb: request items are required")
+	}
+
+	tableNames := make([]string, 0, len(request.RequestItems))
+	for tableName := range request.RequestItems {
+		tableNames = append(tableNames, tableName)
+	}
+	sort.Strings(tableNames)
+
+	appRequest := ddbcontracts.BatchWriteItemRequest{Tables: make([]ddbcontracts.BatchWriteTableRequest, 0, len(tableNames))}
+	for _, tableName := range tableNames {
+		writeRequests := request.RequestItems[tableName]
+		tableRequest := ddbcontracts.BatchWriteTableRequest{
+			Table:    tableName,
+			Requests: make([]ddbcontracts.BatchWriteRequestItem, 0, len(writeRequests)),
+		}
+		for _, writeRequest := range writeRequests {
+			putSet := writeRequest.PutRequest != nil
+			deleteSet := writeRequest.DeleteRequest != nil
+			if putSet == deleteSet {
+				return fmt.Errorf("dynamodb: each batch write item must contain exactly one PutRequest or DeleteRequest")
+			}
+
+			if putSet {
+				item, err := attributeValueMapToDomain(writeRequest.PutRequest.Item)
+				if err != nil {
+					return err
+				}
+				tableRequest.Requests = append(tableRequest.Requests, ddbcontracts.BatchWriteRequestItem{
+					PutItem: item,
+				})
+				continue
+			}
+
+			key, err := attributeValueMapToDomain(writeRequest.DeleteRequest.Key)
+			if err != nil {
+				return err
+			}
+			tableRequest.Requests = append(tableRequest.Requests, ddbcontracts.BatchWriteRequestItem{
+				DeleteKey: key,
+			})
+		}
+		appRequest.Tables = append(appRequest.Tables, tableRequest)
+	}
+
+	result, err := h.service.BatchWriteItem(appRequest)
+	if err != nil {
+		return err
+	}
+
+	writeDynamoDBJSON(c, http.StatusOK, batchWriteItemResponse{
+		UnprocessedItems: batchWriteUnprocessedItemsFromDomain(result.Unprocessed),
+	})
+	return nil
+}
+
+func (h *dynamoDBNativeHandler) handleBatchGetItem(c *gin.Context, body []byte) error {
+	request := batchGetItemRequest{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid BatchGetItem request: %w", err)
+	}
+	if strings.TrimSpace(request.ReturnConsumedCapacity) != "" {
+		return fmt.Errorf("dynamodb: return consumed capacity is not supported")
+	}
+	if len(request.RequestItems) == 0 {
+		return fmt.Errorf("dynamodb: request items are required")
+	}
+
+	tableNames := make([]string, 0, len(request.RequestItems))
+	for tableName := range request.RequestItems {
+		tableNames = append(tableNames, tableName)
+	}
+	sort.Strings(tableNames)
+
+	appRequest := ddbcontracts.BatchGetItemRequest{Tables: make([]ddbcontracts.BatchGetTableRequest, 0, len(tableNames))}
+	for _, tableName := range tableNames {
+		tableRequest := request.RequestItems[tableName]
+		if strings.TrimSpace(tableRequest.ProjectionExpression) != "" {
+			return fmt.Errorf("dynamodb: projection expressions are not supported")
+		}
+		if len(tableRequest.ExpressionAttributeNames) > 0 {
+			return fmt.Errorf("dynamodb: expression attribute names are not supported")
+		}
+		keys := make([]map[string]dynamodbdomain.AttributeValue, 0, len(tableRequest.Keys))
+		for _, keyDocument := range tableRequest.Keys {
+			key, err := attributeValueMapToDomain(keyDocument)
+			if err != nil {
+				return err
+			}
+			keys = append(keys, key)
+		}
+		appRequest.Tables = append(appRequest.Tables, ddbcontracts.BatchGetTableRequest{
+			Table:          tableName,
+			Keys:           keys,
+			ConsistentRead: tableRequest.ConsistentRead,
+		})
+	}
+
+	result, err := h.service.BatchGetItem(appRequest)
+	if err != nil {
+		return err
+	}
+
+	writeDynamoDBJSON(c, http.StatusOK, batchGetItemResponse{
+		Responses:       batchGetResponsesFromDomain(result.Responses),
+		UnprocessedKeys: batchGetUnprocessedKeysFromDomain(result.Unprocessed),
+	})
+	return nil
+}
+
+func (h *dynamoDBNativeHandler) handleTransactWriteItems(c *gin.Context, body []byte) error {
+	request := transactWriteItemsRequest{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid TransactWriteItems request: %w", err)
+	}
+	if strings.TrimSpace(request.ReturnConsumedCapacity) != "" {
+		return fmt.Errorf("dynamodb: return consumed capacity is not supported")
+	}
+	if strings.TrimSpace(request.ReturnItemCollectionMetrics) != "" {
+		return fmt.Errorf("dynamodb: return item collection metrics is not supported")
+	}
+	if len(request.TransactItems) == 0 {
+		return fmt.Errorf("dynamodb: transaction items are required")
+	}
+
+	appRequest := ddbcontracts.TransactWriteItemsRequest{Items: make([]ddbcontracts.TransactWriteItem, 0, len(request.TransactItems))}
+	for _, item := range request.TransactItems {
+		switch {
+		case item.Put != nil:
+			if item.Delete != nil || item.Update != nil || item.ConditionCheck != nil {
+				return fmt.Errorf("dynamodb: each transaction item must contain exactly one operation")
+			}
+			if strings.TrimSpace(item.Put.ConditionExpression) != "" || len(item.Put.ExpressionAttributeNames) > 0 || len(item.Put.ExpressionAttributeValues) > 0 || strings.TrimSpace(item.Put.ReturnValuesOnConditionCheckFailure) != "" {
+				return fmt.Errorf("dynamodb: condition expressions and return values on check failure are not supported")
+			}
+			if strings.TrimSpace(item.Put.TableName) == "" {
+				return fmt.Errorf("dynamodb: table name is required")
+			}
+			putItem, err := attributeValueMapToDomain(item.Put.Item)
+			if err != nil {
+				return err
+			}
+			appRequest.Items = append(appRequest.Items, ddbcontracts.TransactWriteItem{
+				Table:   item.Put.TableName,
+				PutItem: putItem,
+			})
+		case item.Delete != nil:
+			if item.Put != nil || item.Update != nil || item.ConditionCheck != nil {
+				return fmt.Errorf("dynamodb: each transaction item must contain exactly one operation")
+			}
+			if strings.TrimSpace(item.Delete.ConditionExpression) != "" || len(item.Delete.ExpressionAttributeNames) > 0 || len(item.Delete.ExpressionAttributeValues) > 0 || strings.TrimSpace(item.Delete.ReturnValuesOnConditionCheckFailure) != "" {
+				return fmt.Errorf("dynamodb: condition expressions and return values on check failure are not supported")
+			}
+			if strings.TrimSpace(item.Delete.TableName) == "" {
+				return fmt.Errorf("dynamodb: table name is required")
+			}
+			deleteKey, err := attributeValueMapToDomain(item.Delete.Key)
+			if err != nil {
+				return err
+			}
+			appRequest.Items = append(appRequest.Items, ddbcontracts.TransactWriteItem{
+				Table:     item.Delete.TableName,
+				DeleteKey: deleteKey,
+			})
+		case item.Update != nil || item.ConditionCheck != nil:
+			return fmt.Errorf("dynamodb: update and condition check transaction items are not supported")
+		default:
+			return fmt.Errorf("dynamodb: each transaction item must contain exactly one operation")
+		}
+	}
+
+	err := h.service.TransactWriteItems(appRequest)
+	if err != nil {
+		var canceled interface {
+			CancellationReasons() []ddbcontracts.TransactionCanceledReason
+		}
+		if errors.As(err, &canceled) {
+			writeDynamoDBTransactionCanceledError(c, err)
+			return nil
+		}
+		return err
+	}
+
+	writeDynamoDBJSON(c, http.StatusOK, transactWriteItemsResponse{})
+	return nil
+}
+
+func (h *dynamoDBNativeHandler) handleTransactGetItems(c *gin.Context, body []byte) error {
+	request := transactGetItemsRequest{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid TransactGetItems request: %w", err)
+	}
+	if strings.TrimSpace(request.ReturnConsumedCapacity) != "" {
+		return fmt.Errorf("dynamodb: return consumed capacity is not supported")
+	}
+	if len(request.TransactItems) == 0 {
+		return fmt.Errorf("dynamodb: transaction items are required")
+	}
+
+	appRequest := ddbcontracts.TransactGetItemsRequest{Items: make([]ddbcontracts.TransactGetItem, 0, len(request.TransactItems))}
+	for _, item := range request.TransactItems {
+		if item.Get == nil {
+			return fmt.Errorf("dynamodb: each transact get item must contain a Get operation")
+		}
+		if strings.TrimSpace(item.Get.TableName) == "" {
+			return fmt.Errorf("dynamodb: table name is required")
+		}
+		if strings.TrimSpace(item.Get.ProjectionExpression) != "" || len(item.Get.ExpressionAttributeNames) > 0 {
+			return fmt.Errorf("dynamodb: projection expressions are not supported")
+		}
+		key, err := attributeValueMapToDomain(item.Get.Key)
+		if err != nil {
+			return err
+		}
+		appRequest.Items = append(appRequest.Items, ddbcontracts.TransactGetItem{
+			Table: item.Get.TableName,
+			Key:   key,
+		})
+	}
+
+	result, err := h.service.TransactGetItems(appRequest)
+	if err != nil {
+		return err
+	}
+
+	writeDynamoDBJSON(c, http.StatusOK, transactGetItemsResponse{
+		Responses: transactGetResponsesFromDomain(result.Items),
+	})
+	return nil
+}
+
 func isDynamoDBJSONRequest(contentType string) bool {
 	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(contentType))
 	if err != nil {
@@ -562,6 +823,8 @@ func dynamoDBErrorCode(err error) string {
 
 	message := err.Error()
 	switch {
+	case strings.Contains(message, "transaction canceled"):
+		return "TransactionCanceledException"
 	case strings.Contains(message, "already exists"):
 		return "ResourceInUseException"
 	case strings.Contains(message, "still creating"):
@@ -583,9 +846,56 @@ func dynamoDBErrorCode(err error) string {
 	}
 }
 
+func writeDynamoDBTransactionCanceledError(c *gin.Context, err error) {
+	var canceled interface {
+		CancellationReasons() []ddbcontracts.TransactionCanceledReason
+	}
+	if !errors.As(err, &canceled) {
+		writeDynamoDBError(c, http.StatusBadRequest, dynamoDBErrorCode(err), err.Error())
+		return
+	}
+
+	reasons := canceled.CancellationReasons()
+	payload := dynamoDBTransactionCanceledErrorResponse{
+		Type:    dynamoDBErrorPrefix + "TransactionCanceledException",
+		Message: err.Error(),
+	}
+	if len(reasons) > 0 {
+		payload.CancellationReasons = make([]dynamoCancellationReason, len(reasons))
+		for i, reason := range reasons {
+			payload.CancellationReasons[i] = dynamoCancellationReason{
+				Code:    reason.Code,
+				Message: reason.Message,
+				Item:    attributeValueMapFromDomain(reason.Item),
+			}
+		}
+	}
+
+	c.Header("x-amzn-errortype", "TransactionCanceledException")
+	data, marshalErr := json.Marshal(payload)
+	if marshalErr != nil {
+		writeDynamoDBError(c, http.StatusInternalServerError, "InternalServerError", fmt.Sprintf("dynamodb: marshal error response: %v", marshalErr))
+		return
+	}
+
+	c.Data(http.StatusBadRequest, dynamoDBJSONContentType, data)
+}
+
 type dynamoDBErrorResponse struct {
 	Type    string `json:"__type"`
 	Message string `json:"message"`
+}
+
+type dynamoDBTransactionCanceledErrorResponse struct {
+	Type                string                     `json:"__type"`
+	Message             string                     `json:"message"`
+	CancellationReasons []dynamoCancellationReason `json:"CancellationReasons,omitempty"`
+}
+
+type dynamoCancellationReason struct {
+	Code    string                          `json:"Code,omitempty"`
+	Message string                          `json:"Message,omitempty"`
+	Item    map[string]dynamoAttributeValue `json:"Item,omitempty"`
 }
 
 type listTablesRequest struct {
@@ -704,6 +1014,112 @@ type scanResponse struct {
 	Count            int                               `json:"Count,omitempty"`
 	ScannedCount     int                               `json:"ScannedCount,omitempty"`
 	LastEvaluatedKey map[string]dynamoAttributeValue   `json:"LastEvaluatedKey,omitempty"`
+}
+
+type batchWriteItemRequest struct {
+	RequestItems                map[string][]batchWriteRequest `json:"RequestItems"`
+	ReturnConsumedCapacity      string                         `json:"ReturnConsumedCapacity,omitempty"`
+	ReturnItemCollectionMetrics string                         `json:"ReturnItemCollectionMetrics,omitempty"`
+}
+
+type batchWriteRequest struct {
+	PutRequest    *batchWritePutRequest    `json:"PutRequest,omitempty"`
+	DeleteRequest *batchWriteDeleteRequest `json:"DeleteRequest,omitempty"`
+}
+
+type batchWritePutRequest struct {
+	Item map[string]dynamoAttributeValue `json:"Item"`
+}
+
+type batchWriteDeleteRequest struct {
+	Key map[string]dynamoAttributeValue `json:"Key"`
+}
+
+type batchWriteItemResponse struct {
+	UnprocessedItems map[string][]batchWriteRequest `json:"UnprocessedItems,omitempty"`
+}
+
+type batchGetItemRequest struct {
+	RequestItems           map[string]batchGetTableRequest `json:"RequestItems"`
+	ReturnConsumedCapacity string                          `json:"ReturnConsumedCapacity,omitempty"`
+}
+
+type batchGetTableRequest struct {
+	Keys                     []map[string]dynamoAttributeValue `json:"Keys"`
+	ConsistentRead           *bool                             `json:"ConsistentRead,omitempty"`
+	ProjectionExpression     string                            `json:"ProjectionExpression,omitempty"`
+	ExpressionAttributeNames map[string]string                 `json:"ExpressionAttributeNames,omitempty"`
+}
+
+type batchGetItemResponse struct {
+	Responses       map[string][]map[string]dynamoAttributeValue `json:"Responses,omitempty"`
+	UnprocessedKeys map[string]batchGetTableRequest              `json:"UnprocessedKeys,omitempty"`
+}
+
+type transactWriteItemsRequest struct {
+	TransactItems               []transactWriteItem `json:"TransactItems"`
+	ClientRequestToken          string              `json:"ClientRequestToken,omitempty"`
+	ReturnConsumedCapacity      string              `json:"ReturnConsumedCapacity,omitempty"`
+	ReturnItemCollectionMetrics string              `json:"ReturnItemCollectionMetrics,omitempty"`
+}
+
+type transactWriteItem struct {
+	Put            *transactWritePutRequest            `json:"Put,omitempty"`
+	Delete         *transactWriteDeleteRequest         `json:"Delete,omitempty"`
+	Update         *transactWriteUpdateRequest         `json:"Update,omitempty"`
+	ConditionCheck *transactWriteConditionCheckRequest `json:"ConditionCheck,omitempty"`
+}
+
+type transactWritePutRequest struct {
+	TableName                           string                          `json:"TableName"`
+	Item                                map[string]dynamoAttributeValue `json:"Item"`
+	ConditionExpression                 string                          `json:"ConditionExpression,omitempty"`
+	ExpressionAttributeNames            map[string]string               `json:"ExpressionAttributeNames,omitempty"`
+	ExpressionAttributeValues           map[string]dynamoAttributeValue `json:"ExpressionAttributeValues,omitempty"`
+	ReturnValuesOnConditionCheckFailure string                          `json:"ReturnValuesOnConditionCheckFailure,omitempty"`
+}
+
+type transactWriteDeleteRequest struct {
+	TableName                           string                          `json:"TableName"`
+	Key                                 map[string]dynamoAttributeValue `json:"Key"`
+	ConditionExpression                 string                          `json:"ConditionExpression,omitempty"`
+	ExpressionAttributeNames            map[string]string               `json:"ExpressionAttributeNames,omitempty"`
+	ExpressionAttributeValues           map[string]dynamoAttributeValue `json:"ExpressionAttributeValues,omitempty"`
+	ReturnValuesOnConditionCheckFailure string                          `json:"ReturnValuesOnConditionCheckFailure,omitempty"`
+}
+
+type transactWriteUpdateRequest struct {
+	TableName string `json:"TableName"`
+}
+
+type transactWriteConditionCheckRequest struct {
+	TableName string `json:"TableName"`
+}
+
+type transactWriteItemsResponse struct{}
+
+type transactGetItemsRequest struct {
+	TransactItems          []transactGetItem `json:"TransactItems"`
+	ReturnConsumedCapacity string            `json:"ReturnConsumedCapacity,omitempty"`
+}
+
+type transactGetItem struct {
+	Get *transactGetGetRequest `json:"Get,omitempty"`
+}
+
+type transactGetGetRequest struct {
+	TableName                string                          `json:"TableName"`
+	Key                      map[string]dynamoAttributeValue `json:"Key"`
+	ProjectionExpression     string                          `json:"ProjectionExpression,omitempty"`
+	ExpressionAttributeNames map[string]string               `json:"ExpressionAttributeNames,omitempty"`
+}
+
+type transactGetItemsResponse struct {
+	Responses []transactGetItemResponse `json:"Responses,omitempty"`
+}
+
+type transactGetItemResponse struct {
+	Item map[string]dynamoAttributeValue `json:"Item,omitempty"`
 }
 
 type dynamoAttributeValue struct {
@@ -1016,6 +1432,89 @@ func attributeValueMapToDomain(values map[string]dynamoAttributeValue) (map[stri
 		converted[name] = parsed
 	}
 	return converted, nil
+}
+
+func batchWriteUnprocessedItemsFromDomain(unprocessed []ddbcontracts.BatchWriteTableRequest) map[string][]batchWriteRequest {
+	if len(unprocessed) == 0 {
+		return nil
+	}
+
+	copied := make(map[string][]batchWriteRequest, len(unprocessed))
+	for _, tableRequest := range unprocessed {
+		requests := make([]batchWriteRequest, 0, len(tableRequest.Requests))
+		for _, itemRequest := range tableRequest.Requests {
+			requests = append(requests, batchWriteRequestFromDomain(itemRequest))
+		}
+		copied[tableRequest.Table] = requests
+	}
+	return copied
+}
+
+func batchWriteRequestFromDomain(request ddbcontracts.BatchWriteRequestItem) batchWriteRequest {
+	if len(request.PutItem) > 0 {
+		return batchWriteRequest{
+			PutRequest: &batchWritePutRequest{Item: attributeValueMapFromDomain(request.PutItem)},
+		}
+	}
+	return batchWriteRequest{
+		DeleteRequest: &batchWriteDeleteRequest{Key: attributeValueMapFromDomain(request.DeleteKey)},
+	}
+}
+
+func batchGetResponsesFromDomain(responses []ddbcontracts.BatchGetTableResponse) map[string][]map[string]dynamoAttributeValue {
+	if len(responses) == 0 {
+		return nil
+	}
+
+	copied := make(map[string][]map[string]dynamoAttributeValue, len(responses))
+	for _, tableResponse := range responses {
+		copied[tableResponse.Table] = attributeValueListFromDomain(tableResponse.Items)
+	}
+	return copied
+}
+
+func batchGetUnprocessedKeysFromDomain(unprocessed []ddbcontracts.BatchGetTableRequest) map[string]batchGetTableRequest {
+	if len(unprocessed) == 0 {
+		return nil
+	}
+
+	copied := make(map[string]batchGetTableRequest, len(unprocessed))
+	for _, tableRequest := range unprocessed {
+		copied[tableRequest.Table] = batchGetTableRequest{
+			Keys:           cloneDynamoAttributeDocuments(tableRequest.Keys),
+			ConsistentRead: tableRequest.ConsistentRead,
+		}
+	}
+	return copied
+}
+
+func transactGetResponsesFromDomain(items []ddbcontracts.TransactGetItemResult) []transactGetItemResponse {
+	if len(items) == 0 {
+		return nil
+	}
+
+	responses := make([]transactGetItemResponse, len(items))
+	for i, item := range items {
+		if item.Item == nil {
+			continue
+		}
+		responses[i] = transactGetItemResponse{
+			Item: attributeValueMapFromDomain(item.Item.Attributes),
+		}
+	}
+	return responses
+}
+
+func cloneDynamoAttributeDocuments(keys []map[string]dynamodbdomain.AttributeValue) []map[string]dynamoAttributeValue {
+	if len(keys) == 0 {
+		return nil
+	}
+
+	copied := make([]map[string]dynamoAttributeValue, len(keys))
+	for i, key := range keys {
+		copied[i] = attributeValueMapFromDomain(key)
+	}
+	return copied
 }
 
 func paginateTableNames(names []string, limit *int, exclusiveStart string) ([]string, string) {
