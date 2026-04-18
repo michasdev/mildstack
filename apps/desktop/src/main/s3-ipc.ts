@@ -106,9 +106,9 @@ export function registerS3IpcHandlers(): void {
     const folderKeys = new Set(folders.map((f) => f.Key))
 
     const files = (response.Contents ?? [])
-      .filter((object) => object.Key !== args.prefix && !folderKeys.has(object.Key))
+      .filter((object) => object.Key && object.Key !== args.prefix && !folderKeys.has(object.Key))
       .map((object) => ({
-        Key: object.Key,
+        Key: object.Key!,
         LastModified: object.LastModified?.toISOString(),
         ETag: object.ETag,
         Size: object.Size,
