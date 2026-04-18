@@ -21,10 +21,14 @@ type State struct {
 	BucketCORS          map[string][]byte
 	BucketACL           map[string][]byte
 	BucketTagging       map[string][]byte
+	BucketOwnership     map[string][]byte
+	BucketPublicAccess  map[string][]byte
 	BucketNotifications map[string][]byte
 	BucketLogging       map[string][]byte
 	BucketReplication   map[string]BucketReplicationConfig
 	BucketObjectLock    map[string]ObjectLockConfiguration
+	ObjectACLs          map[string]map[string][]byte
+	ObjectTaggings      map[string]map[string][]byte
 	ObjectRetention     map[string]map[string]ObjectRetention
 	ObjectLegalHold     map[string]map[string]ObjectLegalHold
 }
@@ -357,11 +361,15 @@ func (s *State) DeleteObject(bucket, key string) bool {
 			s.Objects = append(s.Objects[:i], s.Objects[i+1:]...)
 			s.DeleteObjectRetention(bucket, key)
 			s.DeleteObjectLegalHold(bucket, key)
+			s.DeleteObjectACL(bucket, key)
+			s.DeleteObjectTagging(bucket, key)
 			return true
 		}
 	}
 	s.DeleteObjectRetention(bucket, key)
 	s.DeleteObjectLegalHold(bucket, key)
+	s.DeleteObjectACL(bucket, key)
+	s.DeleteObjectTagging(bucket, key)
 	return false
 }
 
@@ -438,10 +446,14 @@ func (s State) Snapshot() map[string]any {
 	cors := bucketBodySnapshot(s.BucketCORS)
 	acl := bucketBodySnapshot(s.BucketACL)
 	tagging := bucketBodySnapshot(s.BucketTagging)
+	ownership := bucketBodySnapshot(s.BucketOwnership)
+	publicAccess := bucketBodySnapshot(s.BucketPublicAccess)
 	notifications := bucketBodySnapshot(s.BucketNotifications)
 	logging := bucketBodySnapshot(s.BucketLogging)
 	replication := bucketReplicationSnapshot(s.BucketReplication)
 	objectLock := bucketObjectLockSnapshot(s.BucketObjectLock)
+	objectACL := nestedBucketBodySnapshot(s.ObjectACLs)
+	objectTagging := nestedBucketBodySnapshot(s.ObjectTaggings)
 	objectRetention := objectRetentionSnapshot(s.ObjectRetention)
 	objectLegalHold := objectLegalHoldSnapshot(s.ObjectLegalHold)
 
@@ -457,10 +469,14 @@ func (s State) Snapshot() map[string]any {
 		"bucket_cors":          cors,
 		"bucket_acl":           acl,
 		"bucket_tagging":       tagging,
+		"bucket_ownership":     ownership,
+		"bucket_public_access": publicAccess,
 		"bucket_notifications": notifications,
 		"bucket_logging":       logging,
 		"bucket_replication":   replication,
 		"bucket_object_lock":   objectLock,
+		"object_acl":           objectACL,
+		"object_tagging":       objectTagging,
 		"object_retention":     objectRetention,
 		"object_legal_hold":    objectLegalHold,
 	}
@@ -558,6 +574,22 @@ func (s State) BucketTaggingConfig(bucket string) ([]byte, bool) {
 	return bucketBodyValue(s.BucketTagging, bucket)
 }
 
+func (s State) BucketOwnershipControls(bucket string) ([]byte, bool) {
+	return bucketBodyValue(s.BucketOwnership, bucket)
+}
+
+func (s State) BucketPublicAccessBlock(bucket string) ([]byte, bool) {
+	return bucketBodyValue(s.BucketPublicAccess, bucket)
+}
+
+func (s State) ObjectACL(bucket, key string) ([]byte, bool) {
+	return nestedBucketBodyValue(s.ObjectACLs, bucket, key)
+}
+
+func (s State) ObjectTagging(bucket, key string) ([]byte, bool) {
+	return nestedBucketBodyValue(s.ObjectTaggings, bucket, key)
+}
+
 func (s State) BucketObjectLockConfig(bucket string) (ObjectLockConfiguration, bool) {
 	config, ok := s.BucketObjectLock[bucket]
 	if !ok {
@@ -617,6 +649,26 @@ func (s *State) SetBucketACLConfig(bucket string, body []byte) []byte {
 
 func (s *State) SetBucketTaggingConfig(bucket string, body []byte) []byte {
 	s.BucketTagging = upsertBucketBodyMap(s.BucketTagging, bucket, body)
+	return cloneBytes(body)
+}
+
+func (s *State) SetBucketOwnershipControls(bucket string, body []byte) []byte {
+	s.BucketOwnership = upsertBucketBodyMap(s.BucketOwnership, bucket, body)
+	return cloneBytes(body)
+}
+
+func (s *State) SetBucketPublicAccessBlock(bucket string, body []byte) []byte {
+	s.BucketPublicAccess = upsertBucketBodyMap(s.BucketPublicAccess, bucket, body)
+	return cloneBytes(body)
+}
+
+func (s *State) SetObjectACL(bucket, key string, body []byte) []byte {
+	s.ObjectACLs = upsertNestedBucketBodyMap(s.ObjectACLs, bucket, key, body)
+	return cloneBytes(body)
+}
+
+func (s *State) SetObjectTagging(bucket, key string, body []byte) []byte {
+	s.ObjectTaggings = upsertNestedBucketBodyMap(s.ObjectTaggings, bucket, key, body)
 	return cloneBytes(body)
 }
 
@@ -712,6 +764,14 @@ func (s *State) DeleteBucketTaggingConfig(bucket string) bool {
 	return deleteBucketBodyMap(&s.BucketTagging, bucket)
 }
 
+func (s *State) DeleteBucketOwnershipControls(bucket string) bool {
+	return deleteBucketBodyMap(&s.BucketOwnership, bucket)
+}
+
+func (s *State) DeleteBucketPublicAccessBlock(bucket string) bool {
+	return deleteBucketBodyMap(&s.BucketPublicAccess, bucket)
+}
+
 func (s *State) DeleteBucketNotification(bucket string) bool {
 	return deleteBucketBodyMap(&s.BucketNotifications, bucket)
 }
@@ -736,6 +796,14 @@ func (s *State) DeleteObjectLegalHold(bucket, key string) bool {
 	return deleteNestedObjectMapHold(&s.ObjectLegalHold, bucket, key)
 }
 
+func (s *State) DeleteObjectACL(bucket, key string) bool {
+	return deleteNestedBucketBodyMap(&s.ObjectACLs, bucket, key)
+}
+
+func (s *State) DeleteObjectTagging(bucket, key string) bool {
+	return deleteNestedBucketBodyMap(&s.ObjectTaggings, bucket, key)
+}
+
 func (s *State) removeBucketGovernance(bucket string) {
 	s.DeleteBucketPolicy(bucket)
 	s.DeleteBucketEncryptionConfig(bucket)
@@ -743,10 +811,14 @@ func (s *State) removeBucketGovernance(bucket string) {
 	s.DeleteBucketCORSConfig(bucket)
 	s.DeleteBucketACLConfig(bucket)
 	s.DeleteBucketTaggingConfig(bucket)
+	s.DeleteBucketOwnershipControls(bucket)
+	s.DeleteBucketPublicAccessBlock(bucket)
 	s.DeleteBucketNotification(bucket)
 	s.DeleteBucketLoggingConfig(bucket)
 	s.DeleteBucketReplicationConfig(bucket)
 	s.DeleteBucketObjectLockConfig(bucket)
+	deleteBucketNestedBodyMap(&s.ObjectACLs, bucket)
+	deleteBucketNestedBodyMap(&s.ObjectTaggings, bucket)
 	deleteBucketNestedObjectMap(&s.ObjectRetention, bucket)
 	deleteBucketNestedObjectMapHold(&s.ObjectLegalHold, bucket)
 }
@@ -768,6 +840,35 @@ func bucketBodySnapshot(values map[string][]byte) []any {
 			"bucket": bucket,
 			"body":   string(values[bucket]),
 		})
+	}
+	return snapshot
+}
+
+func nestedBucketBodySnapshot(values map[string]map[string][]byte) []any {
+	if len(values) == 0 {
+		return nil
+	}
+
+	buckets := make([]string, 0, len(values))
+	for bucket := range values {
+		buckets = append(buckets, bucket)
+	}
+	sort.Strings(buckets)
+
+	snapshot := make([]any, 0)
+	for _, bucket := range buckets {
+		keys := make([]string, 0, len(values[bucket]))
+		for key := range values[bucket] {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			snapshot = append(snapshot, map[string]any{
+				"bucket": bucket,
+				"key":    key,
+				"body":   string(values[bucket][key]),
+			})
+		}
 	}
 	return snapshot
 }
@@ -851,9 +952,9 @@ func objectRetentionSnapshot(values map[string]map[string]ObjectRetention) []any
 		for _, key := range keys {
 			retention := values[bucket][key]
 			snapshot = append(snapshot, map[string]any{
-				"bucket":             bucket,
-				"key":                key,
-				"mode":               retention.Mode,
+				"bucket":            bucket,
+				"key":               key,
+				"mode":              retention.Mode,
 				"retain_until_date": retention.RetainUntilDate,
 			})
 		}
@@ -928,6 +1029,18 @@ func bucketBodyValue(values map[string][]byte, bucket string) ([]byte, bool) {
 	return cloneBytes(body), true
 }
 
+func nestedBucketBodyValue(values map[string]map[string][]byte, bucket, key string) ([]byte, bool) {
+	objects, ok := values[bucket]
+	if !ok {
+		return nil, false
+	}
+	body, ok := objects[key]
+	if !ok {
+		return nil, false
+	}
+	return cloneBytes(body), true
+}
+
 func upsertBucketBodyMap(values map[string][]byte, bucket string, body []byte) map[string][]byte {
 	if values == nil {
 		values = make(map[string][]byte)
@@ -936,7 +1049,57 @@ func upsertBucketBodyMap(values map[string][]byte, bucket string, body []byte) m
 	return values
 }
 
+func upsertNestedBucketBodyMap(values map[string]map[string][]byte, bucket, key string, body []byte) map[string]map[string][]byte {
+	if values == nil {
+		values = make(map[string]map[string][]byte)
+	}
+	if values[bucket] == nil {
+		values[bucket] = make(map[string][]byte)
+	}
+	values[bucket][key] = cloneBytes(body)
+	return values
+}
+
 func deleteBucketBodyMap(values *map[string][]byte, bucket string) bool {
+	if values == nil || *values == nil {
+		return false
+	}
+	store := *values
+	if _, ok := store[bucket]; !ok {
+		return false
+	}
+	delete(store, bucket)
+	if len(store) == 0 {
+		*values = nil
+	}
+	return true
+}
+
+func deleteNestedBucketBodyMap(values *map[string]map[string][]byte, bucket, key string) bool {
+	if values == nil || *values == nil {
+		return false
+	}
+	store := *values
+	objects, ok := store[bucket]
+	if !ok {
+		return false
+	}
+	if _, ok := objects[key]; !ok {
+		return false
+	}
+	delete(objects, key)
+	if len(objects) == 0 {
+		delete(store, bucket)
+	} else {
+		store[bucket] = objects
+	}
+	if len(store) == 0 {
+		*values = nil
+	}
+	return true
+}
+
+func deleteBucketNestedBodyMap(values *map[string]map[string][]byte, bucket string) bool {
 	if values == nil || *values == nil {
 		return false
 	}

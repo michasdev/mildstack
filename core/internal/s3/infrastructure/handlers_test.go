@@ -1,6 +1,7 @@
 package infrastructure_test
 
 import (
+	"encoding/xml"
 	"testing"
 
 	"github.com/michasdev/mildstack/core/internal/s3/application"
@@ -46,6 +47,16 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	}
 	if got, want := headResp.Bucket.Region, "us-west-2"; got != want {
 		t.Fatalf("unexpected head bucket region: got %q want %q", got, want)
+	}
+
+	locationResp, err := handlers.GetBucketLocation(infrastructure.GetBucketLocationRequest{
+		Bucket: createResp.Bucket.Name,
+	})
+	if err != nil {
+		t.Fatalf("get bucket location: %v", err)
+	}
+	if got, want := locationResp.Location.LocationConstraint, "us-west-2"; got != want {
+		t.Fatalf("unexpected location constraint: got %q want %q", got, want)
 	}
 
 	putResp, err := handlers.PutObject(infrastructure.PutObjectRequest{
@@ -106,14 +117,11 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("copy object: %v", err)
 	}
-	if got, want := copyResp.Object.Key, "archive-copy.txt"; got != want {
-		t.Fatalf("unexpected copied key: got %q want %q", got, want)
-	}
-	if got, want := copyResp.Object.ETag, putResp.Object.ETag; got != want {
+	if got, want := copyResp.CopyResult.ETag, putResp.Object.ETag; got != want {
 		t.Fatalf("unexpected copied etag: got %q want %q", got, want)
 	}
-	if got, want := string(copyResp.Object.Body), "archive payload"; got != want {
-		t.Fatalf("unexpected copied body: got %q want %q", got, want)
+	if copyResp.CopyResult.LastModified.IsZero() {
+		t.Fatal("expected copied result to include last_modified")
 	}
 
 	deleteResp, err := handlers.DeleteObject(infrastructure.DeleteObjectRequest{
@@ -140,7 +148,7 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	}
 	if _, err := handlers.DeleteObject(infrastructure.DeleteObjectRequest{
 		Bucket: createResp.Bucket.Name,
-		Key:    copyResp.Object.Key,
+		Key:    "archive-copy.txt",
 	}); err != nil {
 		t.Fatalf("delete copied object: %v", err)
 	}
@@ -169,8 +177,23 @@ func TestHandlersSurfaceServiceErrors(t *testing.T) {
 	if _, err := handlers.HeadBucket(infrastructure.HeadBucketRequest{Name: "missing"}); err == nil {
 		t.Fatal("expected missing bucket head to fail")
 	}
+	if _, err := handlers.GetBucketLocation(infrastructure.GetBucketLocationRequest{Bucket: "missing"}); err == nil {
+		t.Fatal("expected missing bucket location lookup to fail")
+	}
 	if _, err := handlers.DeleteBucket(infrastructure.DeleteBucketRequest{Name: "missing"}); err == nil {
 		t.Fatal("expected missing bucket delete to fail")
+	}
+	if _, err := handlers.GetBucketOwnershipControls(infrastructure.GetBucketOwnershipControlsRequest{Bucket: "missing"}); err == nil {
+		t.Fatal("expected missing bucket ownership controls lookup to fail")
+	}
+	if _, err := handlers.PutBucketOwnershipControls(infrastructure.PutBucketOwnershipControlsRequest{Bucket: "missing", Body: []byte("<OwnershipControls/>")}); err == nil {
+		t.Fatal("expected missing bucket ownership controls update to fail")
+	}
+	if _, err := handlers.GetPublicAccessBlock(infrastructure.GetPublicAccessBlockRequest{Bucket: "missing"}); err == nil {
+		t.Fatal("expected missing public access block lookup to fail")
+	}
+	if _, err := handlers.PutPublicAccessBlock(infrastructure.PutPublicAccessBlockRequest{Bucket: "missing", Body: []byte("<PublicAccessBlockConfiguration/>")}); err == nil {
+		t.Fatal("expected missing public access block update to fail")
 	}
 	if _, err := handlers.GetBucketNotification(infrastructure.GetBucketNotificationRequest{Bucket: "missing"}); err == nil {
 		t.Fatal("expected missing bucket notification lookup to fail")
@@ -207,6 +230,21 @@ func TestHandlersSurfaceServiceErrors(t *testing.T) {
 	}
 	if _, err := handlers.HeadObject(infrastructure.HeadObjectRequest{Bucket: "missing", Key: "key"}); err == nil {
 		t.Fatal("expected missing object head to fail")
+	}
+	if _, err := handlers.GetObjectAcl(infrastructure.GetObjectAclRequest{Bucket: "missing", Key: "key"}); err == nil {
+		t.Fatal("expected missing object acl lookup to fail")
+	}
+	if _, err := handlers.PutObjectAcl(infrastructure.PutObjectAclRequest{Bucket: "missing", Key: "key", Body: []byte("<AccessControlPolicy/>")}); err == nil {
+		t.Fatal("expected missing object acl update to fail")
+	}
+	if _, err := handlers.GetObjectTagging(infrastructure.GetObjectTaggingRequest{Bucket: "missing", Key: "key"}); err == nil {
+		t.Fatal("expected missing object tagging lookup to fail")
+	}
+	if _, err := handlers.PutObjectTagging(infrastructure.PutObjectTaggingRequest{Bucket: "missing", Key: "key", Body: []byte("<Tagging/>")}); err == nil {
+		t.Fatal("expected missing object tagging update to fail")
+	}
+	if _, err := handlers.DeleteObjectTagging(infrastructure.DeleteObjectTaggingRequest{Bucket: "missing", Key: "key"}); err == nil {
+		t.Fatal("expected missing object tagging delete to fail")
 	}
 	if _, err := handlers.CopyObject(infrastructure.CopyObjectRequest{
 		Bucket: "missing", Key: "copy", SourceBucket: "missing", SourceObjectKey: "key",
@@ -265,7 +303,9 @@ func TestHandlersCopyResponsesDoNotAliasStoredBodies(t *testing.T) {
 		t.Fatalf("copy object: %v", err)
 	}
 
-	copyResp.Object.Body[0] = 'A'
+	if copyResp.CopyResult.LastModified.IsZero() {
+		t.Fatal("expected copy result to include last_modified")
+	}
 
 	again, err := handlers.GetObject(infrastructure.GetObjectRequest{
 		Bucket: createResp.Bucket.Name,
@@ -556,6 +596,114 @@ func TestHandlersMultipartLifecycleIsCopySafe(t *testing.T) {
 	}
 }
 
+func TestHandlersMultipartListContractsAreCopySafe(t *testing.T) {
+	t.Helper()
+
+	service := application.New()
+	handlers := infrastructure.NewHandlers(service)
+
+	createResp, err := handlers.CreateBucket(infrastructure.CreateBucketRequest{
+		Name:   "mildstack-multipart-contract",
+		Region: "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+
+	alpha, err := handlers.CreateMultipartUpload(infrastructure.CreateMultipartUploadRequest{
+		Bucket:      createResp.Bucket.Name,
+		Key:         "alpha.bin",
+		ContentType: "application/octet-stream",
+	})
+	if err != nil {
+		t.Fatalf("create alpha upload: %v", err)
+	}
+	beta, err := handlers.CreateMultipartUpload(infrastructure.CreateMultipartUploadRequest{
+		Bucket:      createResp.Bucket.Name,
+		Key:         "beta.bin",
+		ContentType: "application/octet-stream",
+	})
+	if err != nil {
+		t.Fatalf("create beta upload: %v", err)
+	}
+
+	if _, err := handlers.UploadPart(infrastructure.UploadPartRequest{
+		UploadID:   beta.Upload.UploadID,
+		PartNumber: 2,
+		Body:       []byte("beta-two"),
+	}); err != nil {
+		t.Fatalf("upload beta part 2: %v", err)
+	}
+	betaPartOne, err := handlers.UploadPart(infrastructure.UploadPartRequest{
+		UploadID:   beta.Upload.UploadID,
+		PartNumber: 1,
+		Body:       []byte("beta-one"),
+	})
+	if err != nil {
+		t.Fatalf("upload beta part 1: %v", err)
+	}
+	if _, err := handlers.UploadPart(infrastructure.UploadPartRequest{
+		UploadID:   alpha.Upload.UploadID,
+		PartNumber: 1,
+		Body:       []byte("alpha-one"),
+	}); err != nil {
+		t.Fatalf("upload alpha part: %v", err)
+	}
+
+	uploads, err := handlers.ListMultipartUploads(infrastructure.ListMultipartUploadsRequest{
+		Bucket: createResp.Bucket.Name,
+	})
+	if err != nil {
+		t.Fatalf("list multipart uploads: %v", err)
+	}
+	if got, want := len(uploads.Uploads), 2; got != want {
+		t.Fatalf("unexpected multipart upload count: got %d want %d", got, want)
+	}
+	if got, want := uploads.Uploads[0].Key, "alpha.bin"; got != want {
+		t.Fatalf("unexpected first upload key: got %q want %q", got, want)
+	}
+	uploads.Uploads[0].Key = "mutated"
+
+	parts, err := handlers.ListParts(infrastructure.ListPartsRequest{
+		Bucket:   createResp.Bucket.Name,
+		UploadID: beta.Upload.UploadID,
+	})
+	if err != nil {
+		t.Fatalf("list multipart parts: %v", err)
+	}
+	if got, want := len(parts.Parts), 2; got != want {
+		t.Fatalf("unexpected multipart parts count: got %d want %d", got, want)
+	}
+	if got, want := parts.Parts[0].PartNumber, 1; got != want {
+		t.Fatalf("unexpected first part number: got %d want %d", got, want)
+	}
+	parts.Parts[0].ETag = "mutated"
+
+	uploadsAgain, err := handlers.ListMultipartUploads(infrastructure.ListMultipartUploadsRequest{
+		Bucket: createResp.Bucket.Name,
+	})
+	if err != nil {
+		t.Fatalf("list multipart uploads again: %v", err)
+	}
+	if got, want := uploadsAgain.Uploads[0].Key, "alpha.bin"; got != want {
+		t.Fatalf("multipart upload payload was not copied: got %q want %q", got, want)
+	}
+	if got, want := uploadsAgain.Uploads[1].PartCount, 2; got != want {
+		t.Fatalf("multipart upload summary was not copied: got %d want %d", got, want)
+	}
+
+	partsAgain, err := handlers.ListParts(infrastructure.ListPartsRequest{
+		Bucket:   createResp.Bucket.Name,
+		UploadID: beta.Upload.UploadID,
+	})
+	if err != nil {
+		t.Fatalf("list multipart parts again: %v", err)
+	}
+	if got, want := partsAgain.Parts[0].ETag, betaPartOne.Part.ETag; got != want {
+		t.Fatalf("multipart part payload was not copied: got %q want %q", got, want)
+	}
+}
+
 func TestHandlersBucketGovernanceLifecycleIsCopySafe(t *testing.T) {
 	t.Helper()
 
@@ -675,6 +823,127 @@ func TestHandlersBucketGovernanceLifecycleIsCopySafe(t *testing.T) {
 		},
 		"<Tagging><TagSet><Tag><Key>env</Key><Value>dev</Value></Tag></TagSet></Tagging>",
 	)
+	assertRoundTrip("ownership-controls",
+		func(body []byte) ([]byte, error) {
+			resp, err := handlers.PutBucketOwnershipControls(infrastructure.PutBucketOwnershipControlsRequest{Bucket: createResp.Bucket.Name, Body: body})
+			if err != nil {
+				return nil, err
+			}
+			return resp.OwnershipControls.Body, nil
+		},
+		func() ([]byte, error) {
+			resp, err := handlers.GetBucketOwnershipControls(infrastructure.GetBucketOwnershipControlsRequest{Bucket: createResp.Bucket.Name})
+			if err != nil {
+				return nil, err
+			}
+			return resp.OwnershipControls.Body, nil
+		},
+		xml.Header+`<OwnershipControls xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><ObjectOwnership>BucketOwnerPreferred</ObjectOwnership></Rule></OwnershipControls>`,
+	)
+	assertRoundTrip("public-access-block",
+		func(body []byte) ([]byte, error) {
+			resp, err := handlers.PutPublicAccessBlock(infrastructure.PutPublicAccessBlockRequest{Bucket: createResp.Bucket.Name, Body: body})
+			if err != nil {
+				return nil, err
+			}
+			return resp.PublicAccessBlock.Body, nil
+		},
+		func() ([]byte, error) {
+			resp, err := handlers.GetPublicAccessBlock(infrastructure.GetPublicAccessBlockRequest{Bucket: createResp.Bucket.Name})
+			if err != nil {
+				return nil, err
+			}
+			return resp.PublicAccessBlock.Body, nil
+		},
+		xml.Header+`<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><BlockPublicAcls>false</BlockPublicAcls><IgnorePublicAcls>false</IgnorePublicAcls><BlockPublicPolicy>false</BlockPublicPolicy><RestrictPublicBuckets>false</RestrictPublicBuckets></PublicAccessBlockConfiguration>`,
+	)
+	if _, err := handlers.DeleteBucketOwnershipControls(infrastructure.DeleteBucketOwnershipControlsRequest{Bucket: createResp.Bucket.Name}); err != nil {
+		t.Fatalf("delete ownership controls: %v", err)
+	}
+	if resp, err := handlers.GetBucketOwnershipControls(infrastructure.GetBucketOwnershipControlsRequest{Bucket: createResp.Bucket.Name}); err != nil {
+		t.Fatalf("get default ownership controls after delete: %v", err)
+	} else if got, want := string(resp.OwnershipControls.Body), xml.Header+`<OwnershipControls xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><ObjectOwnership>BucketOwnerEnforced</ObjectOwnership></Rule></OwnershipControls>`; got != want {
+		t.Fatalf("unexpected ownership controls default after delete: got %q want %q", got, want)
+	}
+	if _, err := handlers.DeletePublicAccessBlock(infrastructure.DeletePublicAccessBlockRequest{Bucket: createResp.Bucket.Name}); err != nil {
+		t.Fatalf("delete public access block: %v", err)
+	}
+	if resp, err := handlers.GetPublicAccessBlock(infrastructure.GetPublicAccessBlockRequest{Bucket: createResp.Bucket.Name}); err != nil {
+		t.Fatalf("get default public access block after delete: %v", err)
+	} else if got, want := string(resp.PublicAccessBlock.Body), xml.Header+`<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>true</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>`; got != want {
+		t.Fatalf("unexpected public access block default after delete: got %q want %q", got, want)
+	}
+
+	governedObjectKey := "governed-object.txt"
+	if _, err := handlers.PutObject(infrastructure.PutObjectRequest{
+		Bucket:      createResp.Bucket.Name,
+		Key:         governedObjectKey,
+		Body:        []byte("governed payload"),
+		ContentType: "text/plain",
+	}); err != nil {
+		t.Fatalf("put governed object: %v", err)
+	}
+	if resp, err := handlers.GetObjectAcl(infrastructure.GetObjectAclRequest{Bucket: createResp.Bucket.Name, Key: governedObjectKey}); err != nil {
+		t.Fatalf("get default object acl: %v", err)
+	} else if got, want := string(resp.ACL.Body), xml.Header+`<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Owner><ID>owner-id</ID><DisplayName>mildstack</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>owner-id</ID><DisplayName>mildstack</DisplayName></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>`; got != want {
+		t.Fatalf("unexpected default object acl body: got %q want %q", got, want)
+	}
+	if resp, err := handlers.GetObjectTagging(infrastructure.GetObjectTaggingRequest{Bucket: createResp.Bucket.Name, Key: governedObjectKey}); err != nil {
+		t.Fatalf("get default object tagging: %v", err)
+	} else if got, want := string(resp.Tagging.Body), xml.Header+`<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet></TagSet></Tagging>`; got != want {
+		t.Fatalf("unexpected default object tagging body: got %q want %q", got, want)
+	}
+	assertRoundTrip("object-acl",
+		func(body []byte) ([]byte, error) {
+			resp, err := handlers.PutObjectAcl(infrastructure.PutObjectAclRequest{Bucket: createResp.Bucket.Name, Key: governedObjectKey, Body: body})
+			if err != nil {
+				return nil, err
+			}
+			return resp.ACL.Body, nil
+		},
+		func() ([]byte, error) {
+			resp, err := handlers.GetObjectAcl(infrastructure.GetObjectAclRequest{Bucket: createResp.Bucket.Name, Key: governedObjectKey})
+			if err != nil {
+				return nil, err
+			}
+			return resp.ACL.Body, nil
+		},
+		`<AccessControlPolicy><Owner><ID>object-owner</ID></Owner></AccessControlPolicy>`,
+	)
+	assertRoundTrip("object-tagging",
+		func(body []byte) ([]byte, error) {
+			resp, err := handlers.PutObjectTagging(infrastructure.PutObjectTaggingRequest{Bucket: createResp.Bucket.Name, Key: governedObjectKey, Body: body})
+			if err != nil {
+				return nil, err
+			}
+			return resp.Tagging.Body, nil
+		},
+		func() ([]byte, error) {
+			resp, err := handlers.GetObjectTagging(infrastructure.GetObjectTaggingRequest{Bucket: createResp.Bucket.Name, Key: governedObjectKey})
+			if err != nil {
+				return nil, err
+			}
+			return resp.Tagging.Body, nil
+		},
+		`<Tagging><TagSet><Tag><Key>env</Key><Value>stage</Value></Tag></TagSet></Tagging>`,
+	)
+	if _, err := handlers.DeleteObjectTagging(infrastructure.DeleteObjectTaggingRequest{Bucket: createResp.Bucket.Name, Key: governedObjectKey}); err != nil {
+		t.Fatalf("delete object tagging: %v", err)
+	}
+	if resp, err := handlers.GetObjectTagging(infrastructure.GetObjectTaggingRequest{Bucket: createResp.Bucket.Name, Key: governedObjectKey}); err != nil {
+		t.Fatalf("get object tagging after delete: %v", err)
+	} else if got, want := string(resp.Tagging.Body), xml.Header+`<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet></TagSet></Tagging>`; got != want {
+		t.Fatalf("unexpected object tagging default after delete: got %q want %q", got, want)
+	}
+	if _, err := handlers.DeleteObject(infrastructure.DeleteObjectRequest{Bucket: createResp.Bucket.Name, Key: governedObjectKey}); err != nil {
+		t.Fatalf("delete governed object: %v", err)
+	}
+	if _, err := handlers.GetObjectAcl(infrastructure.GetObjectAclRequest{Bucket: createResp.Bucket.Name, Key: governedObjectKey}); err == nil {
+		t.Fatal("expected deleted object acl lookup to fail")
+	}
+	if _, err := handlers.GetObjectTagging(infrastructure.GetObjectTaggingRequest{Bucket: createResp.Bucket.Name, Key: governedObjectKey}); err == nil {
+		t.Fatal("expected deleted object tagging lookup to fail")
+	}
 
 	aclDefault, err := handlers.GetBucketACL(infrastructure.GetBucketACLRequest{Bucket: createResp.Bucket.Name})
 	if err != nil {
@@ -731,6 +1000,12 @@ func TestHandlersBucketGovernanceLifecycleIsCopySafe(t *testing.T) {
 	}
 	if _, err := handlers.DeleteBucketTagging(infrastructure.DeleteBucketTaggingRequest{Bucket: createResp.Bucket.Name}); err != nil {
 		t.Fatalf("delete tagging: %v", err)
+	}
+	if _, err := handlers.DeleteBucketOwnershipControls(infrastructure.DeleteBucketOwnershipControlsRequest{Bucket: createResp.Bucket.Name}); err != nil {
+		t.Fatalf("delete ownership controls: %v", err)
+	}
+	if _, err := handlers.DeletePublicAccessBlock(infrastructure.DeletePublicAccessBlockRequest{Bucket: createResp.Bucket.Name}); err != nil {
+		t.Fatalf("delete public access block: %v", err)
 	}
 
 	if _, err := handlers.DeleteBucket(infrastructure.DeleteBucketRequest{Name: createResp.Bucket.Name}); err != nil {

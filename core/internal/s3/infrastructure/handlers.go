@@ -10,6 +10,7 @@ type Service interface {
 	ListBuckets() []domain.Bucket
 	CreateBucket(name, region string) (domain.Bucket, error)
 	HeadBucket(name string) (domain.Bucket, error)
+	GetBucketLocation(name string) (string, error)
 	DeleteBucket(name string) error
 	GetBucketVersioning(bucket string) (domain.BucketVersioning, error)
 	PutBucketVersioning(bucket, status string) (domain.BucketVersioning, error)
@@ -31,6 +32,12 @@ type Service interface {
 	GetBucketTagging(bucket string) ([]byte, error)
 	PutBucketTagging(bucket string, body []byte) ([]byte, error)
 	DeleteBucketTagging(bucket string) error
+	GetBucketOwnershipControls(bucket string) ([]byte, error)
+	PutBucketOwnershipControls(bucket string, body []byte) ([]byte, error)
+	DeleteBucketOwnershipControls(bucket string) error
+	GetPublicAccessBlock(bucket string) ([]byte, error)
+	PutPublicAccessBlock(bucket string, body []byte) ([]byte, error)
+	DeletePublicAccessBlock(bucket string) error
 	GetBucketNotification(bucket string) ([]byte, error)
 	PutBucketNotification(bucket string, body []byte) ([]byte, error)
 	GetBucketLogging(bucket string) ([]byte, error)
@@ -40,6 +47,11 @@ type Service interface {
 	DeleteBucketReplication(bucket string) error
 	GetObjectLockConfiguration(bucket string) ([]byte, error)
 	PutObjectLockConfiguration(bucket string, body []byte) ([]byte, error)
+	GetObjectAcl(bucket, key string) ([]byte, error)
+	PutObjectAcl(bucket, key string, body []byte) ([]byte, error)
+	GetObjectTagging(bucket, key string) ([]byte, error)
+	PutObjectTagging(bucket, key string, body []byte) ([]byte, error)
+	DeleteObjectTagging(bucket, key string) error
 	GetObjectRetention(bucket, key string) ([]byte, error)
 	PutObjectRetention(bucket, key string, body []byte) ([]byte, error)
 	GetObjectLegalHold(bucket, key string) ([]byte, error)
@@ -54,7 +66,9 @@ type Service interface {
 	DeleteObject(bucket, key string) error
 	DeleteObjects(request domain.DeleteObjectsRequest) (domain.DeleteObjectsResult, error)
 	CreateMultipartUpload(bucket, key, contentType string, metadata, preservedHeaders map[string]string) (domain.MultipartUpload, error)
+	ListMultipartUploads(bucket string) (domain.ListMultipartUploadsResult, error)
 	UploadPart(uploadID string, partNumber int, body []byte) (domain.MultipartPart, error)
+	ListParts(bucket, uploadID string) (domain.ListPartsResult, error)
 	CompleteMultipartUpload(uploadID string) (domain.Object, error)
 	AbortMultipartUpload(uploadID string) error
 }
@@ -108,6 +122,14 @@ type DeleteBucketResponse struct {
 	Deleted bool `json:"deleted"`
 }
 
+type GetBucketLocationRequest struct {
+	Bucket string
+}
+
+type GetBucketLocationResponse struct {
+	Location BucketLocationPayload `json:"location"`
+}
+
 type BucketVersioningPayload struct {
 	Bucket string `json:"bucket"`
 	Status string `json:"status"`
@@ -129,6 +151,11 @@ type VersionPayload struct {
 type BucketBodyPayload struct {
 	Bucket string `json:"bucket"`
 	Body   []byte `json:"body,omitempty"`
+}
+
+type BucketLocationPayload struct {
+	Bucket             string `json:"bucket"`
+	LocationConstraint string `json:"location_constraint,omitempty"`
 }
 
 type GetBucketVersioningRequest struct {
@@ -312,6 +339,22 @@ type MultipartPartPayload struct {
 	Size       int64  `json:"size"`
 }
 
+type MultipartUploadSummaryPayload struct {
+	UploadID    string    `json:"upload_id"`
+	Bucket      string    `json:"bucket"`
+	Key         string    `json:"key"`
+	ContentType string    `json:"content_type"`
+	PartCount   int       `json:"part_count"`
+	CreatedAt   time.Time `json:"created_at,omitempty"`
+}
+
+type MultipartPartSummaryPayload struct {
+	PartNumber int       `json:"part_number"`
+	ETag       string    `json:"etag,omitempty"`
+	Size       int64     `json:"size"`
+	CreatedAt  time.Time `json:"created_at,omitempty"`
+}
+
 type CreateMultipartUploadRequest struct {
 	Bucket           string
 	Key              string
@@ -324,6 +367,15 @@ type CreateMultipartUploadResponse struct {
 	Upload MultipartUploadPayload `json:"upload"`
 }
 
+type ListMultipartUploadsRequest struct {
+	Bucket string
+}
+
+type ListMultipartUploadsResponse struct {
+	Bucket  string                          `json:"bucket"`
+	Uploads []MultipartUploadSummaryPayload `json:"uploads"`
+}
+
 type UploadPartRequest struct {
 	UploadID   string
 	PartNumber int
@@ -332,6 +384,18 @@ type UploadPartRequest struct {
 
 type UploadPartResponse struct {
 	Part MultipartPartPayload `json:"part"`
+}
+
+type ListPartsRequest struct {
+	Bucket   string
+	UploadID string
+}
+
+type ListPartsResponse struct {
+	Bucket   string                        `json:"bucket"`
+	UploadID string                        `json:"upload_id"`
+	Key      string                        `json:"key"`
+	Parts    []MultipartPartSummaryPayload `json:"parts"`
 }
 
 type CompleteMultipartUploadRequest struct {
@@ -468,9 +532,37 @@ type CopyObjectRequest struct {
 }
 
 type CopyObjectResponse struct {
-	Object ObjectPayload `json:"object"`
+	CopyResult CopyObjectResultPayload `json:"copy_result"`
+}
+
+type CopyObjectResultPayload struct {
+	LastModified time.Time `json:"last_modified,omitempty"`
+	ETag         string    `json:"etag,omitempty"`
 }
 
 func NewHandlers(service Service) Handlers {
 	return Handlers{service: service}
+}
+
+func bucketPayloadFromDomain(bucket domain.Bucket) BucketPayload {
+	return BucketPayload{
+		Name:      bucket.Name,
+		Region:    bucket.Region,
+		CreatedAt: bucket.CreatedAt,
+	}
+}
+
+func bucketPayloadsFromDomain(buckets []domain.Bucket) []BucketPayload {
+	payloads := make([]BucketPayload, len(buckets))
+	for i, bucket := range buckets {
+		payloads[i] = bucketPayloadFromDomain(bucket)
+	}
+	return payloads
+}
+
+func bucketLocationPayloadFromRegion(bucket, region string) BucketLocationPayload {
+	return BucketLocationPayload{
+		Bucket:             bucket,
+		LocationConstraint: region,
+	}
 }

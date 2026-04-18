@@ -3,14 +3,7 @@ package infrastructure
 func (h Handlers) ListBuckets() ListBucketsResponse {
 	buckets := h.service.ListBuckets()
 	response := ListBucketsResponse{
-		Buckets: make([]BucketPayload, len(buckets)),
-	}
-	for i, bucket := range buckets {
-		response.Buckets[i] = BucketPayload{
-			Name:      bucket.Name,
-			Region:    bucket.Region,
-			CreatedAt: bucket.CreatedAt,
-		}
+		Buckets: bucketPayloadsFromDomain(buckets),
 	}
 	return response
 }
@@ -21,11 +14,7 @@ func (h Handlers) CreateBucket(request CreateBucketRequest) (CreateBucketRespons
 		return CreateBucketResponse{}, err
 	}
 	return CreateBucketResponse{
-		Bucket: BucketPayload{
-			Name:      bucket.Name,
-			Region:    bucket.Region,
-			CreatedAt: bucket.CreatedAt,
-		},
+		Bucket: bucketPayloadFromDomain(bucket),
 	}, nil
 }
 
@@ -35,11 +24,17 @@ func (h Handlers) HeadBucket(request HeadBucketRequest) (HeadBucketResponse, err
 		return HeadBucketResponse{}, err
 	}
 	return HeadBucketResponse{
-		Bucket: BucketPayload{
-			Name:      bucket.Name,
-			Region:    bucket.Region,
-			CreatedAt: bucket.CreatedAt,
-		},
+		Bucket: bucketPayloadFromDomain(bucket),
+	}, nil
+}
+
+func (h Handlers) GetBucketLocation(request GetBucketLocationRequest) (GetBucketLocationResponse, error) {
+	location, err := h.service.GetBucketLocation(request.Bucket)
+	if err != nil {
+		return GetBucketLocationResponse{}, err
+	}
+	return GetBucketLocationResponse{
+		Location: bucketLocationPayloadFromRegion(request.Bucket, location),
 	}, nil
 }
 

@@ -1,15 +1,12 @@
 package infrastructure
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestRoutesUseS3ServiceSegment(t *testing.T) {
 	t.Helper()
 
 	routes := Routes()
-	if got, want := len(routes), 48; got != want {
+	if got, want := len(routes), 62; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 
@@ -22,6 +19,7 @@ func TestRoutesUseS3ServiceSegment(t *testing.T) {
 		{method: "POST", path: "/s3/buckets", name: "s3.buckets.create"},
 		{method: "HEAD", path: "/s3/buckets/:bucket", name: "s3.buckets.head"},
 		{method: "DELETE", path: "/s3/buckets/:bucket", name: "s3.buckets.delete"},
+		{method: "GET", path: "/s3/buckets/:bucket/location", name: "s3.buckets.location.show"},
 		{method: "GET", path: "/s3/buckets/:bucket/policy", name: "s3.buckets.policy.show"},
 		{method: "PUT", path: "/s3/buckets/:bucket/policy", name: "s3.buckets.policy.update"},
 		{method: "DELETE", path: "/s3/buckets/:bucket/policy", name: "s3.buckets.policy.delete"},
@@ -39,6 +37,12 @@ func TestRoutesUseS3ServiceSegment(t *testing.T) {
 		{method: "GET", path: "/s3/buckets/:bucket/tagging", name: "s3.buckets.tagging.show"},
 		{method: "PUT", path: "/s3/buckets/:bucket/tagging", name: "s3.buckets.tagging.update"},
 		{method: "DELETE", path: "/s3/buckets/:bucket/tagging", name: "s3.buckets.tagging.delete"},
+		{method: "GET", path: "/s3/buckets/:bucket/ownership-controls", name: "s3.buckets.ownership-controls.show"},
+		{method: "PUT", path: "/s3/buckets/:bucket/ownership-controls", name: "s3.buckets.ownership-controls.update"},
+		{method: "DELETE", path: "/s3/buckets/:bucket/ownership-controls", name: "s3.buckets.ownership-controls.delete"},
+		{method: "GET", path: "/s3/buckets/:bucket/public-access-block", name: "s3.buckets.public-access-block.show"},
+		{method: "PUT", path: "/s3/buckets/:bucket/public-access-block", name: "s3.buckets.public-access-block.update"},
+		{method: "DELETE", path: "/s3/buckets/:bucket/public-access-block", name: "s3.buckets.public-access-block.delete"},
 		{method: "GET", path: "/s3/buckets/:bucket/notification", name: "s3.buckets.notification.show"},
 		{method: "PUT", path: "/s3/buckets/:bucket/notification", name: "s3.buckets.notification.update"},
 		{method: "GET", path: "/s3/buckets/:bucket/logging", name: "s3.buckets.logging.show"},
@@ -55,6 +59,11 @@ func TestRoutesUseS3ServiceSegment(t *testing.T) {
 		{method: "PUT", path: "/s3/buckets/:bucket/objects/:object/retention", name: "s3.objects.retention.update"},
 		{method: "GET", path: "/s3/buckets/:bucket/objects/:object/legal-hold", name: "s3.objects.legal-hold.show"},
 		{method: "PUT", path: "/s3/buckets/:bucket/objects/:object/legal-hold", name: "s3.objects.legal-hold.update"},
+		{method: "GET", path: "/s3/buckets/:bucket/objects/:object/acl", name: "s3.objects.acl.show"},
+		{method: "PUT", path: "/s3/buckets/:bucket/objects/:object/acl", name: "s3.objects.acl.update"},
+		{method: "GET", path: "/s3/buckets/:bucket/objects/:object/tagging", name: "s3.objects.tagging.show"},
+		{method: "PUT", path: "/s3/buckets/:bucket/objects/:object/tagging", name: "s3.objects.tagging.update"},
+		{method: "DELETE", path: "/s3/buckets/:bucket/objects/:object/tagging", name: "s3.objects.tagging.delete"},
 		{method: "GET", path: "/s3/buckets/:bucket/objects", name: "s3.objects.list-v1"},
 		{method: "GET", path: "/s3/buckets/:bucket/objects/v2", name: "s3.objects.list-v2"},
 		{method: "POST", path: "/s3/buckets/:bucket/objects/delete", name: "s3.objects.delete-batch"},
@@ -62,6 +71,8 @@ func TestRoutesUseS3ServiceSegment(t *testing.T) {
 		{method: "HEAD", path: "/s3/buckets/:bucket/objects/:object", name: "s3.objects.head"},
 		{method: "PUT", path: "/s3/buckets/:bucket/objects/:object", name: "s3.objects.update"},
 		{method: "DELETE", path: "/s3/buckets/:bucket/objects/:object", name: "s3.objects.delete"},
+		{method: "GET", path: "/s3/buckets/:bucket/uploads", name: "s3.multipart.uploads.index"},
+		{method: "GET", path: "/s3/buckets/:bucket/uploads/:upload/parts", name: "s3.multipart.uploads.parts.index"},
 		{method: "POST", path: "/s3/buckets/:bucket/objects/:object/uploads", name: "s3.multipart.uploads.create"},
 		{method: "PUT", path: "/s3/buckets/:bucket/objects/:object/uploads/:upload/parts/:part", name: "s3.multipart.uploads.part"},
 		{method: "POST", path: "/s3/buckets/:bucket/objects/:object/uploads/:upload/complete", name: "s3.multipart.uploads.complete"},
@@ -80,9 +91,18 @@ func TestRoutesUseS3ServiceSegment(t *testing.T) {
 		}
 	}
 
+	expectedNames := map[string]bool{
+		"s3.multipart.uploads.index":       false,
+		"s3.multipart.uploads.parts.index": false,
+	}
 	for _, route := range routes {
-		if strings.Contains(route.Name, "list-multipart") || strings.Contains(route.Name, "list-parts") {
-			t.Fatalf("unexpected multipart listing route registered: %s", route.Name)
+		if _, ok := expectedNames[route.Name]; ok {
+			expectedNames[route.Name] = true
+		}
+	}
+	for name, seen := range expectedNames {
+		if !seen {
+			t.Fatalf("expected multipart listing route to be registered: %s", name)
 		}
 	}
 }

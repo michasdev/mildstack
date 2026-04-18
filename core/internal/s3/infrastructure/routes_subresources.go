@@ -6,6 +6,11 @@ func bucketSubresourceRoutes() []orchestrator.Route {
 	return []orchestrator.Route{
 		{
 			Method: "GET",
+			Path:   "/s3/buckets/:bucket/location",
+			Name:   "s3.buckets.location.show",
+		},
+		{
+			Method: "GET",
 			Path:   "/s3/buckets/:bucket/policy",
 			Name:   "s3.buckets.policy.show",
 		},

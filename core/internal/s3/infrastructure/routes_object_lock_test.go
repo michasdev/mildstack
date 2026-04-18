@@ -6,7 +6,7 @@ func TestObjectLockRoutesAreRegisteredOnce(t *testing.T) {
 	t.Helper()
 
 	routes := Routes()
-	if got, want := len(routes), 48; got != want {
+	if got, want := len(routes), 62; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 
@@ -23,25 +23,25 @@ func TestObjectLockRoutesAreRegisteredOnce(t *testing.T) {
 		{method: "PUT", path: "/s3/buckets/:bucket/objects/:object/legal-hold", name: "s3.objects.legal-hold.update"},
 	}
 
-	if got, want := routes[30].Name, "s3.objects.versions"; got != want {
-		t.Fatalf("unexpected versioning route at 30: got %q want %q", got, want)
+	if got, want := routes[37].Name, "s3.objects.versions"; got != want {
+		t.Fatalf("unexpected versioning route at 37: got %q want %q", got, want)
 	}
-	if got, want := routes[31].Name, expected[0].name; got != want {
-		t.Fatalf("unexpected object lock route at 31: got %q want %q", got, want)
+	if got, want := routes[38].Name, expected[0].name; got != want {
+		t.Fatalf("unexpected object lock route at 38: got %q want %q", got, want)
 	}
-	if got, want := routes[32].Name, expected[1].name; got != want {
-		t.Fatalf("unexpected object lock route at 32: got %q want %q", got, want)
+	if got, want := routes[39].Name, expected[1].name; got != want {
+		t.Fatalf("unexpected object lock route at 39: got %q want %q", got, want)
 	}
-	if got, want := routes[33].Name, expected[2].name; got != want {
-		t.Fatalf("unexpected object lock route at 33: got %q want %q", got, want)
+	if got, want := routes[40].Name, expected[2].name; got != want {
+		t.Fatalf("unexpected object lock route at 40: got %q want %q", got, want)
 	}
-	if got, want := routes[34].Name, expected[3].name; got != want {
-		t.Fatalf("unexpected object lock route at 34: got %q want %q", got, want)
+	if got, want := routes[41].Name, expected[3].name; got != want {
+		t.Fatalf("unexpected object lock route at 41: got %q want %q", got, want)
 	}
-	if got, want := routes[35].Name, expected[4].name; got != want {
-		t.Fatalf("unexpected object lock route at 35: got %q want %q", got, want)
+	if got, want := routes[42].Name, expected[4].name; got != want {
+		t.Fatalf("unexpected object lock route at 42: got %q want %q", got, want)
 	}
-	if got, want := routes[36].Name, expected[5].name; got != want {
-		t.Fatalf("unexpected object lock route at 36: got %q want %q", got, want)
+	if got, want := routes[43].Name, expected[5].name; got != want {
+		t.Fatalf("unexpected object lock route at 43: got %q want %q", got, want)
 	}
 }

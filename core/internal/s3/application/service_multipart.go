@@ -42,6 +42,30 @@ func (s *Service) CreateMultipartUpload(bucket, key, contentType string, metadat
 	return domain.CloneMultipartUpload(upload), nil
 }
 
+func (s *Service) ListMultipartUploads(bucket string) (domain.ListMultipartUploadsResult, error) {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return domain.ListMultipartUploadsResult{}, fmt.Errorf("s3: bucket name is required")
+	}
+	if !s.state.HasBucket(bucket) {
+		return domain.ListMultipartUploadsResult{}, fmt.Errorf("s3: NoSuchBucket: bucket %q not found", bucket)
+	}
+
+	uploads := make([]domain.MultipartUploadSummary, 0, len(s.multipartUploads))
+	for _, upload := range s.multipartUploads {
+		if upload.Bucket != bucket {
+			continue
+		}
+		uploads = append(uploads, multipartUploadSummaryFromDomain(upload))
+	}
+	domain.SortMultipartUploadSummaries(uploads)
+
+	return domain.ListMultipartUploadsResult{
+		Bucket:  bucket,
+		Uploads: domain.CloneMultipartUploadSummaries(uploads),
+	}, nil
+}
+
 func (s *Service) UploadPart(uploadID string, partNumber int, body []byte) (domain.MultipartPart, error) {
 	uploadID = strings.TrimSpace(uploadID)
 	if uploadID == "" {
@@ -66,6 +90,38 @@ func (s *Service) UploadPart(uploadID string, partNumber int, body []byte) (doma
 	upload.Parts = upsertMultipartPart(upload.Parts, part)
 	s.multipartUploads[uploadID] = domain.CloneMultipartUpload(upload)
 	return domain.CloneMultipartPart(part), nil
+}
+
+func (s *Service) ListParts(bucket, uploadID string) (domain.ListPartsResult, error) {
+	bucket = strings.TrimSpace(bucket)
+	uploadID = strings.TrimSpace(uploadID)
+	if bucket == "" {
+		return domain.ListPartsResult{}, fmt.Errorf("s3: bucket name is required")
+	}
+	if uploadID == "" {
+		return domain.ListPartsResult{}, fmt.Errorf("s3: upload id is required")
+	}
+	if !s.state.HasBucket(bucket) {
+		return domain.ListPartsResult{}, fmt.Errorf("s3: NoSuchBucket: bucket %q not found", bucket)
+	}
+
+	upload, ok := s.multipartUploads[uploadID]
+	if !ok || upload.Bucket != bucket {
+		return domain.ListPartsResult{}, fmt.Errorf("s3: NoSuchUpload: multipart upload %q not found", uploadID)
+	}
+
+	parts := make([]domain.MultipartPartSummary, len(upload.Parts))
+	for i, part := range upload.Parts {
+		parts[i] = multipartPartSummaryFromDomain(part)
+	}
+	domain.SortMultipartPartSummaries(parts)
+
+	return domain.ListPartsResult{
+		Bucket:   bucket,
+		UploadID: uploadID,
+		Key:      upload.Key,
+		Parts:    domain.CloneMultipartPartSummaries(parts),
+	}, nil
 }
 
 func (s *Service) CompleteMultipartUpload(uploadID string) (domain.Object, error) {
@@ -176,4 +232,24 @@ func sortedMultipartParts(parts []domain.MultipartPart) []domain.MultipartPart {
 func multipartETag(body []byte) string {
 	sum := md5.Sum(body)
 	return `"` + hex.EncodeToString(sum[:]) + `"`
+}
+
+func multipartUploadSummaryFromDomain(upload domain.MultipartUpload) domain.MultipartUploadSummary {
+	return domain.MultipartUploadSummary{
+		UploadID:    upload.UploadID,
+		Bucket:      upload.Bucket,
+		Key:         upload.Key,
+		ContentType: upload.ContentType,
+		PartCount:   len(upload.Parts),
+		CreatedAt:   upload.CreatedAt,
+	}
+}
+
+func multipartPartSummaryFromDomain(part domain.MultipartPart) domain.MultipartPartSummary {
+	return domain.MultipartPartSummary{
+		PartNumber: part.PartNumber,
+		ETag:       part.ETag,
+		Size:       part.Size,
+		CreatedAt:  part.CreatedAt,
+	}
 }

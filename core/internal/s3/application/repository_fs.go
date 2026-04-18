@@ -167,6 +167,8 @@ func validateState(state domain.State) error {
 		{name: "bucket cors", value: state.BucketCORS},
 		{name: "bucket acl", value: state.BucketACL},
 		{name: "bucket tagging", value: state.BucketTagging},
+		{name: "bucket ownership controls", value: state.BucketOwnership},
+		{name: "bucket public access block", value: state.BucketPublicAccess},
 		{name: "bucket notifications", value: state.BucketNotifications},
 		{name: "bucket logging", value: state.BucketLogging},
 	} {
@@ -176,6 +178,31 @@ func validateState(state domain.State) error {
 			}
 			if _, ok := buckets[bucket]; !ok {
 				return fmt.Errorf("invalid %s %q: bucket not found", entry.name, bucket)
+			}
+		}
+	}
+
+	for _, entry := range []struct {
+		name  string
+		value map[string]map[string][]byte
+	}{
+		{name: "object acl", value: state.ObjectACLs},
+		{name: "object tagging", value: state.ObjectTaggings},
+	} {
+		for bucket, objects := range entry.value {
+			if bucket == "" {
+				return fmt.Errorf("invalid %s entry: empty bucket", entry.name)
+			}
+			if _, ok := buckets[bucket]; !ok {
+				return fmt.Errorf("invalid %s %q: bucket not found", entry.name, bucket)
+			}
+			for key := range objects {
+				if key == "" {
+					return fmt.Errorf("invalid %s %q: empty key", entry.name, bucket)
+				}
+				if _, ok := objectKeys[bucket][key]; !ok {
+					return fmt.Errorf("invalid %s %s/%s: object not found", entry.name, bucket, key)
+				}
 			}
 		}
 	}
@@ -283,10 +310,14 @@ func normalizeState(state domain.State) domain.State {
 		BucketCORS:          cloneBucketBodies(state.BucketCORS),
 		BucketACL:           cloneBucketBodies(state.BucketACL),
 		BucketTagging:       cloneBucketBodies(state.BucketTagging),
+		BucketOwnership:     cloneBucketBodies(state.BucketOwnership),
+		BucketPublicAccess:  cloneBucketBodies(state.BucketPublicAccess),
 		BucketNotifications: cloneBucketBodies(state.BucketNotifications),
 		BucketLogging:       cloneBucketBodies(state.BucketLogging),
 		BucketReplication:   cloneBucketReplicationConfigs(state.BucketReplication),
 		BucketObjectLock:    cloneObjectLockConfigs(state.BucketObjectLock),
+		ObjectACLs:          cloneNestedBucketBodies(state.ObjectACLs),
+		ObjectTaggings:      cloneNestedBucketBodies(state.ObjectTaggings),
 		ObjectRetention:     cloneObjectRetentionMap(state.ObjectRetention),
 		ObjectLegalHold:     cloneObjectLegalHoldMap(state.ObjectLegalHold),
 	}
@@ -409,10 +440,14 @@ func normalizeState(state domain.State) domain.State {
 	normalized.BucketCORS = pruneOrphanedBucketBodies(normalized.BucketCORS, normalized.Buckets)
 	normalized.BucketACL = pruneOrphanedBucketBodies(normalized.BucketACL, normalized.Buckets)
 	normalized.BucketTagging = pruneOrphanedBucketBodies(normalized.BucketTagging, normalized.Buckets)
+	normalized.BucketOwnership = pruneOrphanedBucketBodies(normalized.BucketOwnership, normalized.Buckets)
+	normalized.BucketPublicAccess = pruneOrphanedBucketBodies(normalized.BucketPublicAccess, normalized.Buckets)
 	normalized.BucketNotifications = pruneOrphanedBucketBodies(normalized.BucketNotifications, normalized.Buckets)
 	normalized.BucketLogging = pruneOrphanedBucketBodies(normalized.BucketLogging, normalized.Buckets)
 	normalized.BucketReplication = pruneOrphanedBucketReplication(normalized.BucketReplication, normalized.Buckets)
 	normalized.BucketObjectLock = pruneOrphanedBucketObjectLock(normalized.BucketObjectLock, normalized.Buckets)
+	normalized.ObjectACLs = pruneOrphanedNestedBucketBodies(normalized.ObjectACLs, normalized.Buckets, normalized.Objects)
+	normalized.ObjectTaggings = pruneOrphanedNestedBucketBodies(normalized.ObjectTaggings, normalized.Buckets, normalized.Objects)
 	normalized.ObjectRetention = pruneOrphanedObjectRetention(normalized.ObjectRetention, normalized.Buckets, normalized.Objects)
 	normalized.ObjectLegalHold = pruneOrphanedObjectLegalHold(normalized.ObjectLegalHold, normalized.Buckets, normalized.Objects)
 
@@ -444,6 +479,27 @@ func cloneBucketBodies(values map[string][]byte) map[string][]byte {
 	return cloned
 }
 
+func cloneNestedBucketBodies(values map[string]map[string][]byte) map[string]map[string][]byte {
+	if len(values) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]map[string][]byte, len(values))
+	for bucket, objects := range values {
+		if len(objects) == 0 {
+			continue
+		}
+		cloned[bucket] = make(map[string][]byte, len(objects))
+		for key, body := range objects {
+			cloned[bucket][key] = append([]byte(nil), body...)
+		}
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
+}
+
 func pruneOrphanedBucketBodies(values map[string][]byte, buckets []domain.Bucket) map[string][]byte {
 	if len(values) == 0 {
 		return nil
@@ -460,6 +516,44 @@ func pruneOrphanedBucketBodies(values map[string][]byte, buckets []domain.Bucket
 			continue
 		}
 		pruned[bucket] = append([]byte(nil), body...)
+	}
+	if len(pruned) == 0 {
+		return nil
+	}
+	return pruned
+}
+
+func pruneOrphanedNestedBucketBodies(values map[string]map[string][]byte, buckets []domain.Bucket, objects []domain.Object) map[string]map[string][]byte {
+	if len(values) == 0 {
+		return nil
+	}
+
+	knownBuckets := make(map[string]struct{}, len(buckets))
+	for _, bucket := range buckets {
+		knownBuckets[bucket.Name] = struct{}{}
+	}
+	knownObjects := make(map[string]map[string]struct{}, len(objects))
+	for _, object := range objects {
+		if knownObjects[object.Bucket] == nil {
+			knownObjects[object.Bucket] = make(map[string]struct{})
+		}
+		knownObjects[object.Bucket][object.Key] = struct{}{}
+	}
+
+	pruned := make(map[string]map[string][]byte, len(values))
+	for bucket, objectsByKey := range values {
+		if _, ok := knownBuckets[bucket]; !ok {
+			continue
+		}
+		for key, body := range objectsByKey {
+			if _, ok := knownObjects[bucket][key]; !ok {
+				continue
+			}
+			if pruned[bucket] == nil {
+				pruned[bucket] = make(map[string][]byte)
+			}
+			pruned[bucket][key] = append([]byte(nil), body...)
+		}
 	}
 	if len(pruned) == 0 {
 		return nil

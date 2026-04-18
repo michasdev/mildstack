@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,7 +45,7 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := policy.ErrorPrefix, "s3"; got != want {
 		t.Fatalf("unexpected policy error prefix: got %q want %q", got, want)
 	}
-	if got, want := len(policy.Supported), 24; got != want {
+	if got, want := len(policy.Supported), 31; got != want {
 		t.Fatalf("unexpected supported count: got %d want %d", got, want)
 	}
 	if got, want := len(policy.Unsupported), 0; got != want {
@@ -55,20 +56,41 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if got, want := again.Supported[0], "list buckets"; got != want {
 		t.Fatalf("policy supported slice was not copied: got %q want %q", got, want)
 	}
-	if got, want := again.Supported[4], "bucket policy"; got != want {
+	if got, want := again.Supported[5], "bucket policy"; got != want {
 		t.Fatalf("expected policy to move into supported capabilities: got %q want %q", got, want)
 	}
-	if got, want := again.Supported[9], "bucket tagging"; got != want {
+	if got, want := again.Supported[10], "bucket tagging"; got != want {
 		t.Fatalf("expected tagging to move into supported capabilities: got %q want %q", got, want)
 	}
-	if got, want := again.Supported[18], "bucket versioning"; got != want {
+	if got, want := again.Supported[19], "bucket versioning"; got != want {
 		t.Fatalf("expected versioning to move into supported capabilities: got %q want %q", got, want)
 	}
-	if got, want := again.Supported[19], "multipart upload"; got != want {
+	if got, want := again.Supported[20], "multipart upload"; got != want {
 		t.Fatalf("expected multipart to move into supported capabilities: got %q want %q", got, want)
 	}
-	if got, want := again.Supported[23], "object locking"; got != want {
+	if got, want := again.Supported[21], "list multipart uploads"; got != want {
+		t.Fatalf("expected multipart uploads listing to move into supported capabilities: got %q want %q", got, want)
+	}
+	if got, want := again.Supported[22], "list parts"; got != want {
+		t.Fatalf("expected multipart parts listing to move into supported capabilities: got %q want %q", got, want)
+	}
+	if got, want := again.Supported[26], "object locking"; got != want {
 		t.Fatalf("expected object locking to move into supported capabilities: got %q want %q", got, want)
+	}
+	if got, want := again.Supported[27], "bucket ownership controls"; got != want {
+		t.Fatalf("expected bucket ownership controls to move into supported capabilities: got %q want %q", got, want)
+	}
+	if got, want := again.Supported[28], "public access block"; got != want {
+		t.Fatalf("expected public access block to move into supported capabilities: got %q want %q", got, want)
+	}
+	if got, want := again.Supported[29], "object acl"; got != want {
+		t.Fatalf("expected object acl to move into supported capabilities: got %q want %q", got, want)
+	}
+	if got, want := again.Supported[30], "object tagging"; got != want {
+		t.Fatalf("expected object tagging to move into supported capabilities: got %q want %q", got, want)
+	}
+	if got, want := again.Supported[3], "get bucket location"; got != want {
+		t.Fatalf("expected bucket location support to be tracked: got %q want %q", got, want)
 	}
 
 	registrar := deliveryhttp.NewRegistrar()
@@ -80,7 +102,7 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 	if !ok {
 		t.Fatal("expected s3 service to be registered")
 	}
-	if got, want := len(entry.Routes), 48; got != want {
+	if got, want := len(entry.Routes), 62; got != want {
 		t.Fatalf("unexpected route count: got %d want %d", got, want)
 	}
 	expectedRoutes := []struct {
@@ -92,6 +114,7 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 		{"POST", "/api/v1/runtime/services/s3/buckets", "s3.buckets.create"},
 		{"HEAD", "/api/v1/runtime/services/s3/buckets/:bucket", "s3.buckets.head"},
 		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket", "s3.buckets.delete"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/location", "s3.buckets.location.show"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/policy", "s3.buckets.policy.show"},
 		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/policy", "s3.buckets.policy.update"},
 		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/policy", "s3.buckets.policy.delete"},
@@ -109,6 +132,12 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/tagging", "s3.buckets.tagging.show"},
 		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/tagging", "s3.buckets.tagging.update"},
 		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/tagging", "s3.buckets.tagging.delete"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/ownership-controls", "s3.buckets.ownership-controls.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/ownership-controls", "s3.buckets.ownership-controls.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/ownership-controls", "s3.buckets.ownership-controls.delete"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/public-access-block", "s3.buckets.public-access-block.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/public-access-block", "s3.buckets.public-access-block.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/public-access-block", "s3.buckets.public-access-block.delete"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/notification", "s3.buckets.notification.show"},
 		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/notification", "s3.buckets.notification.update"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/logging", "s3.buckets.logging.show"},
@@ -118,13 +147,18 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/replication", "s3.buckets.replication.delete"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/versioning", "s3.buckets.versioning.show"},
 		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/versioning", "s3.buckets.versioning.update"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/versions", "s3.objects.versions"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/object-lock", "s3.buckets.object-lock.show"},
 		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/object-lock", "s3.buckets.object-lock.update"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/retention", "s3.objects.retention.show"},
 		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/retention", "s3.objects.retention.update"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/legal-hold", "s3.objects.legal-hold.show"},
 		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/legal-hold", "s3.objects.legal-hold.update"},
-		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/versions", "s3.objects.versions"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/acl", "s3.objects.acl.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/acl", "s3.objects.acl.update"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/tagging", "s3.objects.tagging.show"},
+		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/tagging", "s3.objects.tagging.update"},
+		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/tagging", "s3.objects.tagging.delete"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects", "s3.objects.list-v1"},
 		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/objects/v2", "s3.objects.list-v2"},
 		{"POST", "/api/v1/runtime/services/s3/buckets/:bucket/objects/delete", "s3.objects.delete-batch"},
@@ -132,6 +166,8 @@ func TestServiceMetadataRoutesAndState(t *testing.T) {
 		{"HEAD", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object", "s3.objects.head"},
 		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object", "s3.objects.update"},
 		{"DELETE", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object", "s3.objects.delete"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/uploads", "s3.multipart.uploads.index"},
+		{"GET", "/api/v1/runtime/services/s3/buckets/:bucket/uploads/:upload/parts", "s3.multipart.uploads.parts.index"},
 		{"POST", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads", "s3.multipart.uploads.create"},
 		{"PUT", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads/:upload/parts/:part", "s3.multipart.uploads.part"},
 		{"POST", "/api/v1/runtime/services/s3/buckets/:bucket/objects/:object/uploads/:upload/complete", "s3.multipart.uploads.complete"},
@@ -187,6 +223,13 @@ func TestServiceRealOperationsMutateState(t *testing.T) {
 	}
 	if got, want := bucket.Region, "us-west-2"; got != want {
 		t.Fatalf("unexpected bucket region: got %q want %q", got, want)
+	}
+	location, err := service.GetBucketLocation(bucket.Name)
+	if err != nil {
+		t.Fatalf("get bucket location: %v", err)
+	}
+	if got, want := location, "us-west-2"; got != want {
+		t.Fatalf("unexpected non-default location constraint: got %q want %q", got, want)
 	}
 
 	buckets := service.ListBuckets()
@@ -323,6 +366,76 @@ func TestServiceBucketGovernanceSubresourcesRoundTripAndCleanup(t *testing.T) {
 		func() ([]byte, error) { return service.GetBucketTagging(bucket.Name) },
 		"<Tagging><TagSet><Tag><Key>env</Key><Value>dev</Value></Tag></TagSet></Tagging>",
 	)
+	assertRoundTrip("ownership-controls",
+		func(body []byte) ([]byte, error) { return service.PutBucketOwnershipControls(bucket.Name, body) },
+		func() ([]byte, error) { return service.GetBucketOwnershipControls(bucket.Name) },
+		xml.Header+`<OwnershipControls xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><ObjectOwnership>BucketOwnerPreferred</ObjectOwnership></Rule></OwnershipControls>`,
+	)
+	assertRoundTrip("public-access-block",
+		func(body []byte) ([]byte, error) { return service.PutPublicAccessBlock(bucket.Name, body) },
+		func() ([]byte, error) { return service.GetPublicAccessBlock(bucket.Name) },
+		xml.Header+`<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><BlockPublicAcls>false</BlockPublicAcls><IgnorePublicAcls>false</IgnorePublicAcls><BlockPublicPolicy>false</BlockPublicPolicy><RestrictPublicBuckets>false</RestrictPublicBuckets></PublicAccessBlockConfiguration>`,
+	)
+	if err := service.DeleteBucketOwnershipControls(bucket.Name); err != nil {
+		t.Fatalf("delete ownership controls: %v", err)
+	}
+	if got, err := service.GetBucketOwnershipControls(bucket.Name); err != nil {
+		t.Fatalf("get default ownership controls after delete: %v", err)
+	} else if got := string(got); got != string(defaultBucketOwnershipControlsBody()) {
+		t.Fatalf("unexpected ownership controls default after delete: got %q want %q", got, string(defaultBucketOwnershipControlsBody()))
+	}
+	if err := service.DeletePublicAccessBlock(bucket.Name); err != nil {
+		t.Fatalf("delete public access block: %v", err)
+	}
+	if got, err := service.GetPublicAccessBlock(bucket.Name); err != nil {
+		t.Fatalf("get default public access block after delete: %v", err)
+	} else if got := string(got); got != string(defaultPublicAccessBlockBody()) {
+		t.Fatalf("unexpected public access block default after delete: got %q want %q", got, string(defaultPublicAccessBlockBody()))
+	}
+
+	governedObjectKey := "governed-object.txt"
+	if _, err := service.PutObject(bucket.Name, governedObjectKey, []byte("governed payload"), "text/plain"); err != nil {
+		t.Fatalf("put governed object: %v", err)
+	}
+	if got, err := service.GetObjectAcl(bucket.Name, governedObjectKey); err != nil {
+		t.Fatalf("get default object acl: %v", err)
+	} else if got := string(got); got != string(defaultAccessControlPolicyBody()) {
+		t.Fatalf("unexpected default object acl body: got %q want %q", got, string(defaultAccessControlPolicyBody()))
+	}
+	if got, err := service.GetObjectTagging(bucket.Name, governedObjectKey); err != nil {
+		t.Fatalf("get default object tagging: %v", err)
+	} else if got := string(got); got != string(defaultObjectTaggingBody()) {
+		t.Fatalf("unexpected default object tagging body: got %q want %q", got, string(defaultObjectTaggingBody()))
+	}
+	assertRoundTrip("object-acl",
+		func(body []byte) ([]byte, error) { return service.PutObjectAcl(bucket.Name, governedObjectKey, body) },
+		func() ([]byte, error) { return service.GetObjectAcl(bucket.Name, governedObjectKey) },
+		`<AccessControlPolicy><Owner><ID>object-owner</ID></Owner></AccessControlPolicy>`,
+	)
+	assertRoundTrip("object-tagging",
+		func(body []byte) ([]byte, error) {
+			return service.PutObjectTagging(bucket.Name, governedObjectKey, body)
+		},
+		func() ([]byte, error) { return service.GetObjectTagging(bucket.Name, governedObjectKey) },
+		`<Tagging><TagSet><Tag><Key>env</Key><Value>stage</Value></Tag></TagSet></Tagging>`,
+	)
+	if err := service.DeleteObjectTagging(bucket.Name, governedObjectKey); err != nil {
+		t.Fatalf("delete object tagging: %v", err)
+	}
+	if got, err := service.GetObjectTagging(bucket.Name, governedObjectKey); err != nil {
+		t.Fatalf("get default object tagging after delete: %v", err)
+	} else if got := string(got); got != string(defaultObjectTaggingBody()) {
+		t.Fatalf("unexpected object tagging default after delete: got %q want %q", got, string(defaultObjectTaggingBody()))
+	}
+	if err := service.DeleteObject(bucket.Name, governedObjectKey); err != nil {
+		t.Fatalf("delete governed object: %v", err)
+	}
+	if _, err := service.GetObjectAcl(bucket.Name, governedObjectKey); err == nil {
+		t.Fatal("expected deleted object acl lookup to fail")
+	}
+	if _, err := service.GetObjectTagging(bucket.Name, governedObjectKey); err == nil {
+		t.Fatal("expected deleted object tagging lookup to fail")
+	}
 
 	aclDefault, err := service.GetBucketACL(bucket.Name)
 	if err != nil {
@@ -425,6 +538,16 @@ func TestServiceBucketGovernanceSubresourcesRoundTripAndCleanup(t *testing.T) {
 	} else if string(got) != string(loggingDefaultBody()) {
 		t.Fatalf("expected recreated bucket logging to default, got %q", string(got))
 	}
+	if got, err := service.GetBucketOwnershipControls(bucket.Name); err != nil {
+		t.Fatalf("get recreated bucket ownership controls: %v", err)
+	} else if string(got) != string(defaultBucketOwnershipControlsBody()) {
+		t.Fatalf("expected recreated bucket ownership controls to default, got %q", string(got))
+	}
+	if got, err := service.GetPublicAccessBlock(bucket.Name); err != nil {
+		t.Fatalf("get recreated public access block: %v", err)
+	} else if string(got) != string(defaultPublicAccessBlockBody()) {
+		t.Fatalf("expected recreated public access block to default, got %q", string(got))
+	}
 
 	rebuiltACL, err := service.GetBucketACL(bucket.Name)
 	if err != nil {
@@ -504,6 +627,54 @@ func TestServiceVersioningTracksHistoryAndDeleteMarkers(t *testing.T) {
 		t.Fatal("expected versioned bucket delete to fail while history exists")
 	} else if !strings.Contains(err.Error(), "BucketNotEmpty") {
 		t.Fatalf("expected BucketNotEmpty for versioned bucket delete, got %v", err)
+	}
+}
+
+func TestVersioningContractListObjectVersionsIsCopySafe(t *testing.T) {
+	t.Helper()
+
+	service := New()
+
+	bucket, err := service.CreateBucket("mildstack-versioning-contract", "us-east-1")
+	if err != nil {
+		t.Fatalf("create versioning contract bucket: %v", err)
+	}
+	if _, err := service.PutBucketVersioning(bucket.Name, domain.VersioningEnabled); err != nil {
+		t.Fatalf("enable versioning: %v", err)
+	}
+	if _, err := service.PutObject(bucket.Name, "release.txt", []byte("v1"), "text/plain"); err != nil {
+		t.Fatalf("put first version: %v", err)
+	}
+	if _, err := service.PutObject(bucket.Name, "release.txt", []byte("v2"), "text/plain"); err != nil {
+		t.Fatalf("put second version: %v", err)
+	}
+	if err := service.DeleteObject(bucket.Name, "release.txt"); err != nil {
+		t.Fatalf("delete versioned object: %v", err)
+	}
+
+	versions, err := service.ListObjectVersions(bucket.Name)
+	if err != nil {
+		t.Fatalf("list object versions: %v", err)
+	}
+	if got, want := len(versions.Versions), 3; got != want {
+		t.Fatalf("unexpected version count: got %d want %d", got, want)
+	}
+	if !versions.Versions[0].IsDeleteMarker {
+		t.Fatal("expected latest entry to be a delete marker")
+	}
+
+	versions.Versions[0].Key = "mutated"
+	versions.Versions[1].Body[0] = 'X'
+
+	again, err := service.ListObjectVersions(bucket.Name)
+	if err != nil {
+		t.Fatalf("list object versions again: %v", err)
+	}
+	if got, want := again.Versions[0].Key, "release.txt"; got != want {
+		t.Fatalf("version history was not copied: got %q want %q", got, want)
+	}
+	if got, want := string(again.Versions[1].Body), "v2"; got != want {
+		t.Fatalf("version body was aliased: got %q want %q", got, want)
 	}
 }
 
@@ -599,6 +770,96 @@ func TestServiceMultipartLifecycleAssemblesAndAbortsCopySafely(t *testing.T) {
 	}
 }
 
+func TestMultipartContractListOperationsAreCopySafe(t *testing.T) {
+	t.Helper()
+
+	service := New()
+
+	bucket, err := service.CreateBucket("mildstack-multipart-contract", "us-east-1")
+	if err != nil {
+		t.Fatalf("create multipart contract bucket: %v", err)
+	}
+
+	alpha, err := service.CreateMultipartUpload(bucket.Name, "alpha.bin", "application/octet-stream", map[string]string{"purpose": "alpha"}, nil)
+	if err != nil {
+		t.Fatalf("create alpha upload: %v", err)
+	}
+	beta, err := service.CreateMultipartUpload(bucket.Name, "beta.bin", "application/octet-stream", map[string]string{"purpose": "beta"}, nil)
+	if err != nil {
+		t.Fatalf("create beta upload: %v", err)
+	}
+
+	if _, err := service.UploadPart(beta.UploadID, 2, []byte("beta-two")); err != nil {
+		t.Fatalf("upload beta part 2: %v", err)
+	}
+	betaOne, err := service.UploadPart(beta.UploadID, 1, []byte("beta-one"))
+	if err != nil {
+		t.Fatalf("upload beta part 1: %v", err)
+	}
+	if _, err := service.UploadPart(alpha.UploadID, 1, []byte("alpha-one")); err != nil {
+		t.Fatalf("upload alpha part: %v", err)
+	}
+
+	uploads, err := service.ListMultipartUploads(bucket.Name)
+	if err != nil {
+		t.Fatalf("list multipart uploads: %v", err)
+	}
+	if got, want := len(uploads.Uploads), 2; got != want {
+		t.Fatalf("unexpected multipart upload count: got %d want %d", got, want)
+	}
+	if got, want := uploads.Uploads[0].Key, "alpha.bin"; got != want {
+		t.Fatalf("unexpected first upload key: got %q want %q", got, want)
+	}
+	if got, want := uploads.Uploads[1].Key, "beta.bin"; got != want {
+		t.Fatalf("unexpected second upload key: got %q want %q", got, want)
+	}
+	if got, want := uploads.Uploads[1].PartCount, 2; got != want {
+		t.Fatalf("unexpected beta part count: got %d want %d", got, want)
+	}
+
+	uploads.Uploads[0].Key = "mutated"
+	uploads.Uploads[1].PartCount = 99
+
+	parts, err := service.ListParts(bucket.Name, beta.UploadID)
+	if err != nil {
+		t.Fatalf("list multipart parts: %v", err)
+	}
+	if got, want := len(parts.Parts), 2; got != want {
+		t.Fatalf("unexpected multipart part count: got %d want %d", got, want)
+	}
+	if got, want := parts.Parts[0].PartNumber, 1; got != want {
+		t.Fatalf("unexpected first part number: got %d want %d", got, want)
+	}
+	if got, want := parts.Parts[1].PartNumber, 2; got != want {
+		t.Fatalf("unexpected second part number: got %d want %d", got, want)
+	}
+
+	parts.Parts[0].ETag = "mutated"
+	parts.Parts[1].Size = 0
+
+	uploadsAgain, err := service.ListMultipartUploads(bucket.Name)
+	if err != nil {
+		t.Fatalf("list multipart uploads again: %v", err)
+	}
+	if got, want := uploadsAgain.Uploads[0].Key, "alpha.bin"; got != want {
+		t.Fatalf("multipart upload list was not copied: got %q want %q", got, want)
+	}
+	if got, want := uploadsAgain.Uploads[1].PartCount, 2; got != want {
+		t.Fatalf("multipart upload summary was aliased: got %d want %d", got, want)
+	}
+
+	partsAgain, err := service.ListParts(bucket.Name, beta.UploadID)
+	if err != nil {
+		t.Fatalf("list multipart parts again: %v", err)
+	}
+	if got, want := partsAgain.Parts[0].ETag, betaOne.ETag; got != want {
+		t.Fatalf("multipart parts were not copied: got %q want %q", got, want)
+	}
+	if got, want := partsAgain.Parts[1].Size, int64(len("beta-two")); got != want {
+		t.Fatalf("multipart part size was aliased: got %d want %d", got, want)
+	}
+}
+
 func TestServiceBucketCatalogFollowsAWSSemantics(t *testing.T) {
 	t.Helper()
 
@@ -629,6 +890,14 @@ func TestServiceBucketCatalogFollowsAWSSemantics(t *testing.T) {
 	}
 	if got, want := head.Region, "us-east-1"; got != want {
 		t.Fatalf("unexpected head bucket region: got %q want %q", got, want)
+	}
+
+	location, err := service.GetBucketLocation("mildstack-logs")
+	if err != nil {
+		t.Fatalf("get bucket location: %v", err)
+	}
+	if got, want := location, ""; got != want {
+		t.Fatalf("unexpected default location constraint: got %q want %q", got, want)
 	}
 
 	if err := service.DeleteBucket("mildstack-assets"); err == nil {
@@ -672,6 +941,21 @@ func TestServiceRejectsInvalidAndMissingRequests(t *testing.T) {
 	if err := service.DeleteBucket("missing"); err == nil {
 		t.Fatal("expected missing bucket delete to fail")
 	}
+	if _, err := service.GetBucketLocation("missing"); err == nil {
+		t.Fatal("expected missing bucket location lookup to fail")
+	}
+	if _, err := service.GetBucketOwnershipControls("missing"); err == nil {
+		t.Fatal("expected missing bucket ownership controls lookup to fail")
+	}
+	if err := service.DeleteBucketOwnershipControls("missing"); err == nil {
+		t.Fatal("expected missing bucket ownership controls delete to fail")
+	}
+	if _, err := service.GetPublicAccessBlock("missing"); err == nil {
+		t.Fatal("expected missing public access block lookup to fail")
+	}
+	if err := service.DeletePublicAccessBlock("missing"); err == nil {
+		t.Fatal("expected missing public access block delete to fail")
+	}
 	if _, err := service.ListObjects("missing"); err == nil {
 		t.Fatal("expected missing bucket listing to fail")
 	}
@@ -687,6 +971,21 @@ func TestServiceRejectsInvalidAndMissingRequests(t *testing.T) {
 		t.Fatal("expected missing object head to fail")
 	} else if !strings.Contains(err.Error(), "NoSuchKey") {
 		t.Fatalf("expected NoSuchKey head error, got %v", err)
+	}
+	if _, err := service.GetObjectAcl("missing", "key"); err == nil {
+		t.Fatal("expected missing object acl lookup to fail")
+	}
+	if _, err := service.PutObjectAcl("missing", "key", []byte("<AccessControlPolicy/>")); err == nil {
+		t.Fatal("expected missing object acl update to fail")
+	}
+	if _, err := service.GetObjectTagging("missing", "key"); err == nil {
+		t.Fatal("expected missing object tagging lookup to fail")
+	}
+	if _, err := service.PutObjectTagging("missing", "key", []byte("<Tagging/>")); err == nil {
+		t.Fatal("expected missing object tagging update to fail")
+	}
+	if err := service.DeleteObjectTagging("missing", "key"); err == nil {
+		t.Fatal("expected missing object tagging delete to fail")
 	}
 	if _, err := service.CopyObject("mildstack-assets", "copy.txt", "mildstack-assets", "missing"); err == nil {
 		t.Fatal("expected copy from missing object to fail")

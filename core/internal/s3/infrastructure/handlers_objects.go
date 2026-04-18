@@ -142,7 +142,7 @@ func (h Handlers) CopyObject(request CopyObjectRequest) (CopyObjectResponse, err
 		return CopyObjectResponse{}, err
 	}
 	return CopyObjectResponse{
-		Object: objectPayloadFromDomain(object, true),
+		CopyResult: copyObjectResultFromDomain(object),
 	}, nil
 }
 
@@ -167,4 +167,11 @@ func objectPayloadsFromDomain(objects []domain.Object, includeBody bool) []Objec
 		payloads[i] = objectPayloadFromDomain(object, includeBody)
 	}
 	return payloads
+}
+
+func copyObjectResultFromDomain(object domain.Object) CopyObjectResultPayload {
+	return CopyObjectResultPayload{
+		LastModified: object.LastModified,
+		ETag:         object.ETag,
+	}
 }

@@ -61,6 +61,27 @@ func (s *Service) HeadBucket(name string) (domain.Bucket, error) {
 	return bucket, nil
 }
 
+func (s *Service) GetBucketLocation(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("s3: bucket name is required")
+	}
+
+	bucket, ok := s.state.Bucket(name)
+	if !ok {
+		return "", fmt.Errorf("s3: NoSuchBucket: bucket %q not found", name)
+	}
+
+	region := strings.TrimSpace(bucket.Region)
+	if region == "" {
+		region = defaultRegion
+	}
+	if region == defaultRegion {
+		return "", nil
+	}
+	return region, nil
+}
+
 func (s *Service) DeleteBucket(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
