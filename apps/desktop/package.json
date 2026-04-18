@@ -8,6 +8,7 @@
     "format": "prettier --write .",
     "lint": "eslint --cache .",
     "s3:smoke": "node scripts/s3-smoke.cjs",
+    "dynamo:smoke": "node scripts/dynamo-smoke.cjs",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
@@ -22,6 +23,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1032.0",
     "@aws-sdk/client-s3": "^3.1032.0",
     "@base-ui/react": "^1.4.0",
     "@electron-toolkit/preload": "^3.0.2",
@@ -46,6 +48,7 @@
     "clsx": "^2.1.1",
     "electron": "^39.2.6",
     "electron-builder": "^26.0.12",
+    "electron-icon-builder": "^2.0.1",
     "electron-vite": "^5.0.0",
     "eslint": "^9.39.1",
     "eslint-plugin-react": "^7.37.5",
