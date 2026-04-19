@@ -5,7 +5,6 @@ import { HardDrive, Plus, Search, Trash2 } from 'lucide-react'
 
 import { Button } from '@renderer/components/ui/button'
 import {
-  Card,
   CardHeader,
   CardTitle,
   CardDescription,

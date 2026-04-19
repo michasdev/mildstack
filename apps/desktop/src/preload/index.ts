@@ -27,8 +27,48 @@ interface S3BrowserApi {
   getObject(bucket: string, key: string, region?: string): Promise<any>
 }
 
+interface DynamoDBBrowserApi {
+  listTables(region?: string): Promise<any[]>
+  describeTable(tableName: string, region?: string): Promise<any>
+  createTable(
+    tableName: string,
+    keySchema: any[],
+    attributeDefinitions: any[],
+    region?: string
+  ): Promise<void>
+  deleteTable(tableName: string, region?: string): Promise<void>
+  scan(
+    tableName: string,
+    exclusiveStartKey?: any,
+    limit?: number,
+    region?: string,
+    filterExpression?: string,
+    expressionAttributeNames?: Record<string, string>,
+    expressionAttributeValues?: any
+  ): Promise<any>
+  query(
+    tableName: string,
+    keyConditionExpression: string,
+    expressionAttributeNames?: Record<string, string>,
+    expressionAttributeValues?: any,
+    indexName?: string,
+    filterExpression?: string,
+    exclusiveStartKey?: any,
+    limit?: number,
+    scanIndexForward?: boolean,
+    region?: string
+  ): Promise<any>
+  putItem(tableName: string, item: any, region?: string): Promise<void>
+  deleteItem(tableName: string, key: any, region?: string): Promise<void>
+  getItem(tableName: string, key: any, region?: string): Promise<any>
+}
+
+interface InstanceApi {
+  setSelected(port: number): Promise<void>
+}
+
 // Custom APIs for renderer
-const api: { s3: S3BrowserApi } = {
+const api: { s3: S3BrowserApi; dynamodb: DynamoDBBrowserApi; instance: InstanceApi } = {
   s3: {
     listBuckets: (region) => ipcRenderer.invoke('s3:listBuckets', { region }),
     createBucket: (name, region) => ipcRenderer.invoke('s3:createBucket', { name, region }),
@@ -40,6 +80,26 @@ const api: { s3: S3BrowserApi } = {
     deleteObjects: (bucket, keys, region) =>
       ipcRenderer.invoke('s3:deleteObjects', { bucket, keys, region }),
     getObject: (bucket, key, region) => ipcRenderer.invoke('s3:getObject', { bucket, key, region })
+  },
+  dynamodb: {
+    listTables: (region) => ipcRenderer.invoke('dynamodb:listTables', { region }),
+    describeTable: (tableName, region) => ipcRenderer.invoke('dynamodb:describeTable', { tableName, region }),
+    createTable: (tableName, keySchema, attributeDefinitions, region) =>
+      ipcRenderer.invoke('dynamodb:createTable', { tableName, keySchema, attributeDefinitions, region }),
+    deleteTable: (tableName, region) => ipcRenderer.invoke('dynamodb:deleteTable', { tableName, region }),
+    scan: (tableName, exclusiveStartKey, limit, region, filterExpression, expressionAttributeNames, expressionAttributeValues) =>
+      ipcRenderer.invoke('dynamodb:scan', { tableName, exclusiveStartKey, limit, region, filterExpression, expressionAttributeNames, expressionAttributeValues }),
+    query: (tableName, keyConditionExpression, expressionAttributeNames, expressionAttributeValues, indexName, filterExpression, exclusiveStartKey, limit, scanIndexForward, region) =>
+      ipcRenderer.invoke('dynamodb:query', { tableName, keyConditionExpression, expressionAttributeNames, expressionAttributeValues, indexName, filterExpression, exclusiveStartKey, limit, scanIndexForward, region }),
+    putItem: (tableName, item, region) =>
+      ipcRenderer.invoke('dynamodb:putItem', { tableName, item, region }),
+    deleteItem: (tableName, key, region) =>
+      ipcRenderer.invoke('dynamodb:deleteItem', { tableName, key, region }),
+    getItem: (tableName, key, region) =>
+      ipcRenderer.invoke('dynamodb:getItem', { tableName, key, region })
+  },
+  instance: {
+    setSelected: (port) => ipcRenderer.invoke('instance:setSelected', port)
   }
 }
 

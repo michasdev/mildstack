@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+import { getActiveInstancePort } from './instance-state'
 import {
   S3Client,
   ListBucketsCommand,
@@ -211,7 +212,8 @@ function getClient(region = 'us-east-1'): S3Client {
 }
 
 function resolveS3Endpoint(): string {
-  return process.env.MILDSTACK_S3_ENDPOINT || process.env.AWS_S3_ENDPOINT || 'http://127.0.0.1:4566'
+  const port = getActiveInstancePort()
+  return process.env.MILDSTACK_S3_ENDPOINT || process.env.AWS_S3_ENDPOINT || `http://127.0.0.1:${port}`
 }
 
 function normalizeRegion(region?: string): string {

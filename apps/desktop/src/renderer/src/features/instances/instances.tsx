@@ -10,40 +10,25 @@ import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/utils";
 import { PauseIcon, PlayIcon, PlusIcon } from "lucide-react";
-const instances = [
-    {
-        id: "instance-1",
-        name: "Instance #1",
-        status: "running",
-        health: "All systems operational",
-        port: 4566,
-    },
-    {
-        id: "instance-2",
-        name: "Instance #2",
-        status: "errored",
-        health: "Error: Failed to start",
-        port: 3566,
-    },
-    {
-        id: "instance-3",
-        name: "Instance #3",
-        status: "paused",
-        health: "Not running.",
-        port: 2566,
-    }
-]
+import { useInstanceStore } from "@/store/instance-store";
 
 const badgesVariants = {
     running: "success",
     paused: "secondary",
     errored: "error",
-}
+} as const
 
 import { useNavigate } from "react-router";
 
 const InstancesPage = () => {
     const navigate = useNavigate();
+    const { instances, selectInstance } = useInstanceStore();
+
+    const handleInstanceClick = (id: string) => {
+        selectInstance(id);
+        navigate(`/instances/${id}/resources`);
+    };
+
     return (
         <>
             <Frame className="w-full">
@@ -59,7 +44,7 @@ const InstancesPage = () => {
                             "border-destructive": instance.status === "errored",
                         })} 
                         key={instance.id}
-                        onClick={() => navigate(`/instances/${instance.id}/resources`)}
+                        onClick={() => handleInstanceClick(instance.id)}
                     >
                         <div className="flex flex-row gap-2 w-full">
                             <div className="flex flex-col gap-1 w-full">

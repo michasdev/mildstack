@@ -11,34 +11,31 @@ import {
   FramePanel,
   FrameTitle
 } from '@renderer/components/ui/frame'
-import { useS3Client } from './hooks/use-s3-client'
-import type { S3BrowserApi } from './types'
+import { useDynamoDBClient } from './hooks/use-dynamodb-client'
+import type { DynamoDBBrowserApi } from './types'
 import { Select, SelectTrigger, SelectPopup, SelectItem, SelectValue } from '@renderer/components/ui/select'
 import { Tooltip, TooltipTrigger, TooltipPopup } from '@renderer/components/ui/tooltip'
 import { regions } from '@renderer/constants'
 
-export function S3Layout() {
+export function DynamoDBLayout() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { api, region, setRegion } = useS3Client()
+  const { api, region, setRegion } = useDynamoDBClient()
   const [refreshKey, setRefreshKey] = useState(0)
 
   const pathParts = location.pathname.split('/').filter(Boolean)
-  const isS3Root = pathParts[pathParts.length - 1] === 's3'
+  const isDynamoDBRoot = pathParts[pathParts.length - 1] === 'dynamodb'
 
-  let currentBucket = ''
-  let currentPrefix = ''
+  let currentTable = ''
 
-  if (!isS3Root) {
-    const s3Index = pathParts.indexOf('s3')
-    if (s3Index !== -1 && pathParts.length > s3Index + 1) {
-      currentBucket = pathParts[s3Index + 1]
-      currentPrefix = pathParts.slice(s3Index + 2).join('/')
+  if (!isDynamoDBRoot) {
+    const dynamoIndex = pathParts.indexOf('dynamodb')
+    if (dynamoIndex !== -1 && pathParts.length > dynamoIndex + 1) {
+      currentTable = decodeURIComponent(pathParts[dynamoIndex + 1])
     }
   }
 
-  const navigateToS3Root = () => navigate('/resources/s3')
-  const navigateToBucket = () => navigate(`/resources/s3/${currentBucket}`)
+  const navigateToDynamoDBRoot = () => navigate('/resources/dynamodb')
 
   return (
     <Frame className="w-full h-full flex flex-col">
@@ -51,57 +48,25 @@ export function S3Layout() {
             <div className="space-y-2">
               <FrameTitle className="flex items-center gap-2">
                 <Database className="w-5 h-5 text-primary" />
-                S3 Resource Browser
+                DynamoDB Resource Browser
               </FrameTitle>
               <FrameDescription className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  className={`transition-colors hover:text-foreground ${isS3Root ? 'font-medium text-foreground' : ''
+                  className={`transition-colors hover:text-foreground ${isDynamoDBRoot ? 'font-medium text-foreground' : ''
                     }`}
-                  onClick={navigateToS3Root}
+                  onClick={navigateToDynamoDBRoot}
                 >
-                  Buckets
+                  Tables
                 </button>
-                {currentBucket && (
+                {currentTable && (
                   <>
                     <ChevronRight className="w-3 h-3 text-muted-foreground" />
-                    <button
-                      type="button"
-                      className={`transition-colors hover:text-foreground ${!currentPrefix ? 'font-medium text-foreground' : ''
-                        }`}
-                      onClick={navigateToBucket}
-                    >
-                      {currentBucket}
-                    </button>
+                    <span className="font-medium text-foreground truncate max-w-[260px]">
+                      {currentTable}
+                    </span>
                   </>
                 )}
-                {currentPrefix &&
-                  currentPrefix
-                    .split('/')
-                    .filter(Boolean)
-                    .map((part, index, all) => {
-                      const pathSoFar = all.slice(0, index + 1).join('/')
-                      const isLast = index === all.length - 1
-
-                      return (
-                        <div key={pathSoFar} className="flex items-center gap-2">
-                          <ChevronRight className="w-3 h-3 text-muted-foreground" />
-                          {isLast ? (
-                            <span className="font-medium text-foreground truncate max-w-[260px]">
-                              {part}
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              className="transition-colors hover:text-foreground"
-                              onClick={() => navigate(`/resources/s3/${currentBucket}/${pathSoFar}/`)}
-                            >
-                              {part}
-                            </button>
-                          )}
-                        </div>
-                      )
-                    })}
               </FrameDescription>
             </div>
           </div>
@@ -149,7 +114,7 @@ export function S3Layout() {
   )
 }
 
-export type S3BrowserOutletContext = {
-  api: S3BrowserApi
+export type DynamoDBBrowserOutletContext = {
+  api: DynamoDBBrowserApi
   region: string
 }

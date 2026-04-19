@@ -4,6 +4,8 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import icon from '../../build/icon.png?asset'
 import { registerS3IpcHandlers } from './s3-ipc'
+import { registerDynamoDBIpcHandlers } from './dynamodb-ipc'
+import { setActiveInstancePort } from './instance-state'
 
 // Set app name for macOS Dock and Menu Bar as early as possible
 if (process.platform === 'darwin') {
@@ -79,6 +81,11 @@ app.whenReady().then(() => {
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
   registerS3IpcHandlers()
+  registerDynamoDBIpcHandlers()
+  ipcMain.handle('instance:setSelected', (_event, port: number) => {
+    setActiveInstancePort(port)
+    return true
+  })
 
   createWindow()
   checkForUpdates()

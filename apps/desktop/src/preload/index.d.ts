@@ -25,11 +25,53 @@ interface S3BrowserApi {
   getObject(bucket: string, key: string, region?: string): Promise<any>
 }
 
+interface DynamoDBBrowserApi {
+  listTables(region?: string): Promise<any[]>
+  describeTable(tableName: string, region?: string): Promise<any>
+  createTable(
+    tableName: string,
+    keySchema: any[],
+    attributeDefinitions: any[],
+    region?: string
+  ): Promise<void>
+  deleteTable(tableName: string, region?: string): Promise<void>
+  scan(
+    tableName: string,
+    exclusiveStartKey?: any,
+    limit?: number,
+    region?: string,
+    filterExpression?: string,
+    expressionAttributeNames?: Record<string, string>,
+    expressionAttributeValues?: any
+  ): Promise<any>
+  query(
+    tableName: string,
+    keyConditionExpression: string,
+    expressionAttributeNames?: Record<string, string>,
+    expressionAttributeValues?: any,
+    indexName?: string,
+    filterExpression?: string,
+    exclusiveStartKey?: any,
+    limit?: number,
+    scanIndexForward?: boolean,
+    region?: string
+  ): Promise<any>
+  putItem(tableName: string, item: any, region?: string): Promise<void>
+  deleteItem(tableName: string, key: any, region?: string): Promise<void>
+  getItem(tableName: string, key: any, region?: string): Promise<any>
+}
+
+interface InstanceApi {
+  setSelected(port: number): Promise<void>
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI
     api: {
       s3: S3BrowserApi
+      dynamodb: DynamoDBBrowserApi
+      instance: InstanceApi
     }
   }
 }
