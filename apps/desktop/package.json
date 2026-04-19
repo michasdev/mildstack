@@ -1,5 +1,6 @@
 {
-  "name": "mildstack-app",
+  "name": "mildstack-desktop",
+  "productName": "MildStack Desktop",
   "version": "1.0.0",
   "description": "Desktop App for MildStack: resource-browser, multi-platform, electron-based",
   "main": "./out/main/index.js",

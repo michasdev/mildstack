@@ -1,5 +1,5 @@
-appId: com.michasdev.mildstack-app
-productName: mildstack-app
+appId: com.michasdev.mildstack-desktop
+productName: MildStack Desktop
 directories:
   buildResources: build
 files:
@@ -12,7 +12,7 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: mildstack-app
+  executableName: mildstack-desktop
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
@@ -41,7 +41,7 @@ npmRebuild: false
 publish:
   provider: github
   owner: michasdev
-  repo: mildstack-app
+  repo: mildstack
   releaseType: release
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/

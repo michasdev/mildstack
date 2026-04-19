@@ -140,8 +140,9 @@ export function S3Layout() {
                 </SelectPopup>
               </Select>
 
-              <Tooltip delayDuration={1500}>
+              <Tooltip>
                 <TooltipTrigger
+                  delay={1200}
                   render={
                     <Button
                       variant="ghost"

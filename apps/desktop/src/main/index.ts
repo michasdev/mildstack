@@ -2,8 +2,14 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
-import icon from '../../resources/icon.png?asset'
+import icon from '../../build/icon.png?asset'
 import { registerS3IpcHandlers } from './s3-ipc'
+
+// Set app name for macOS Dock and Menu Bar as early as possible
+if (process.platform === 'darwin') {
+  app.name = 'MildStack Desktop'
+  app.setName('MildStack Desktop')
+}
 
 function checkForUpdates(): void {
   if (is.dev) return
@@ -24,7 +30,7 @@ function createWindow(): void {
     height: 670,
     show: false,
     autoHideMenuBar: true,
-    ...(process.platform === 'linux' ? { icon } : {}),
+    icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -53,9 +59,15 @@ function createWindow(): void {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
+
 app.whenReady().then(() => {
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.electron')
+  electronApp.setAppUserModelId('com.michasdev.mildstack-desktop')
+
+  // Set Dock icon for macOS in development
+  if (is.dev && process.platform === 'darwin') {
+    app.dock?.setIcon(icon)
+  }
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
