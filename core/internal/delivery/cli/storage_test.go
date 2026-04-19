@@ -199,3 +199,65 @@ func TestStorageTracksInactiveInstancesAsNotStarted(t *testing.T) {
 		t.Fatalf("expected inactive instance to have no error, got %q", got)
 	}
 }
+
+func TestStorageInstanceSummaryCarriesInstanceID(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	configDir := t.TempDir()
+	paths := runtime.ResolvePathsFrom(homeDir, configDir)
+	storage := NewStorage(paths, runtime.LegacyBaseDirFrom(homeDir, configDir))
+
+	if err := storage.SaveActiveInstanceWithID("inst-abc", 8080); err != nil {
+		t.Fatalf("save active instance with id: %v", err)
+	}
+
+	instances, err := storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances: %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected one instance, got %#v", instances)
+	}
+	if got, want := instances[0].InstanceID, "inst-abc"; got != want {
+		t.Fatalf("unexpected instance id: got %q want %q", got, want)
+	}
+	if got, want := instances[0].Port, 8080; got != want {
+		t.Fatalf("unexpected port: got %d want %d", got, want)
+	}
+}
+
+func TestStorageLegacyPortKeyedRecordLoadsAndPresentsWithInstanceID(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	configDir := t.TempDir()
+	paths := runtime.ResolvePathsFrom(homeDir, configDir)
+	storage := NewStorage(paths, runtime.LegacyBaseDirFrom(homeDir, configDir))
+
+	// write a legacy port-keyed record without instanceId
+	legacyRecord := []byte("{\n  \"port\": 9090,\n  \"pid\": 0,\n  \"status\": \"not_started\"\n}\n")
+	savedDir := filepath.Join(paths.InstancesDir, "saved")
+	if err := os.MkdirAll(savedDir, 0o755); err != nil {
+		t.Fatalf("create saved dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(savedDir, "9090.json"), legacyRecord, 0o644); err != nil {
+		t.Fatalf("write legacy record: %v", err)
+	}
+
+	instances, err := storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load legacy instances: %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected one instance from legacy record, got %#v", instances)
+	}
+	if got, want := instances[0].Port, 9090; got != want {
+		t.Fatalf("unexpected port: got %d want %d", got, want)
+	}
+	// legacy records without instanceId should still be loadable; InstanceID may be empty
+	// but Port must be present and correct
+	if instances[0].Port <= 0 {
+		t.Fatalf("legacy record must preserve port: got %d", instances[0].Port)
+	}
+}

@@ -134,3 +134,49 @@ func TestNewWithPortsSeedsSnapshot(t *testing.T) {
 		t.Fatalf("unexpected restored seeded ports: %v", got)
 	}
 }
+
+func TestManagerInstanceCarriesInstanceID(t *testing.T) {
+	t.Helper()
+
+	manager := New(nil)
+	if err := manager.Serve(context.Background(), 8080); err != nil {
+		t.Fatalf("serve 8080: %v", err)
+	}
+
+	snapshot := manager.Snapshot(context.Background())
+	if len(snapshot.Instances) != 1 {
+		t.Fatalf("expected one instance, got %d", len(snapshot.Instances))
+	}
+	if snapshot.Instances[0].InstanceID == "" {
+		t.Fatal("expected instance to carry a non-empty InstanceID")
+	}
+	if snapshot.Instances[0].Port != 8080 {
+		t.Fatalf("unexpected instance port: got %d want 8080", snapshot.Instances[0].Port)
+	}
+}
+
+func TestNewWithPortsSeedsInstanceIDFromRegisteredIdentity(t *testing.T) {
+	t.Helper()
+
+	manager := NewWithPorts(nil, []int{9090, 8080})
+	manager.SetInstanceID("test-instance-seed")
+	snapshot := manager.Snapshot(context.Background())
+
+	if len(snapshot.Instances) != 2 {
+		t.Fatalf("expected two instances, got %d", len(snapshot.Instances))
+	}
+	for _, instance := range snapshot.Instances {
+		if instance.InstanceID == "" {
+			t.Fatalf("expected instance on port %d to carry InstanceID", instance.Port)
+		}
+	}
+
+	// mutation of snapshot instances must not affect the canonical identity
+	snapshot.Instances[0].InstanceID = "mutated"
+	again := manager.Snapshot(context.Background())
+	for _, instance := range again.Instances {
+		if instance.InstanceID != "test-instance-seed" {
+			t.Fatalf("expected InstanceID to survive mutation, got %q on port %d", instance.InstanceID, instance.Port)
+		}
+	}
+}
