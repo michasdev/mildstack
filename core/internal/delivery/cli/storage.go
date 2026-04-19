@@ -112,6 +112,14 @@ func (s Storage) DeleteActiveInstance(port int) error {
 	return nil
 }
 
+func (s Storage) DeleteSavedInstance(port int) error {
+	path := s.instanceRecordPath(s.SavedInstancesDir(), port)
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 func (s Storage) LoadActivePorts() ([]int, error) {
 	instances, err := s.LoadInstances()
 	if err != nil {

@@ -41,6 +41,8 @@ func main() {
 	commands := cli.Commands{
 		Serve:     cli.NewServeCommand(manager, httpServerFactory),
 		Instances: cli.NewInstancesCommand(manager, storage),
+		Stop:      cli.NewStopCommand(manager, storage),
+		Delete:    cli.NewDeleteCommand(manager, storage),
 		Ports:     cli.NewPortsCommand(manager, storage),
 		UI:        cliui.NewUICommand(manager),
 	}

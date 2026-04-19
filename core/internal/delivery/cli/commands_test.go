@@ -270,6 +270,187 @@ func TestServeExplicitPortSkipsFallback(t *testing.T) {
 	}
 }
 
+func TestServeExplicitPortFailsWhenBusy(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	originalListenTCP := listenTCP
+	defer func() { listenTCP = originalListenTCP }()
+
+	listenTCP = func(network, address string) (net.Listener, error) {
+		if address == ":4566" {
+			return nil, errors.New("address already in use")
+		}
+		t.Fatalf("unexpected probe for %s %s", network, address)
+		return nil, errors.New("unexpected probe")
+	}
+
+	manager := runtime.New(composition.Assemble([]orchestrator.Service{
+		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
+	}).Services)
+
+	factoryCalls := 0
+	cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
+		factoryCalls++
+		t.Fatalf("factory should not be called for a busy explicit port, got %d", port)
+		return nil
+	})
+	cmd.SetArgs([]string{"serve", "--port", "4566"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected busy explicit port error")
+	}
+	if got := err.Error(); !strings.Contains(got, "serve: port 4566 is already in use") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if factoryCalls != 0 {
+		t.Fatalf("expected no server factory calls, got %d", factoryCalls)
+	}
+}
+
+func TestCommandsServeDetachedLifecycle(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	manager := runtime.New(composition.Assemble([]orchestrator.Service{
+		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
+	}).Services)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
+		return &commandServerStub{
+			manager:  manager,
+			storage:  storage,
+			port:     port,
+			started:  started,
+			release:  release,
+			finished: finished,
+		}
+	})
+	cmd.SetArgs([]string{"serve", "--detach", "--port", "9090"})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Execute()
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for detached server startup")
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("detached serve returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("detached serve did not return after startup")
+	}
+
+	instances, err := storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances after detached serve: %v", err)
+	}
+	if len(instances) != 1 || instances[0].Port != 9090 || instances[0].Status != "running" {
+		t.Fatalf("unexpected detached lifecycle state: %#v", instances)
+	}
+
+	ports := manager.Ports(context.Background())
+	if len(ports) != 1 || ports[0] != 9090 {
+		t.Fatalf("unexpected detached manager ports: %#v", ports)
+	}
+
+	close(release)
+
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for detached server shutdown")
+	}
+}
+
+func TestCommandsStopAndDeleteLifecycle(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	manager := runtime.New(composition.Assemble([]orchestrator.Service{
+		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
+	}).Services)
+
+	run := func(args ...string) error {
+		t.Helper()
+
+		cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
+			return &commandServerStub{manager: manager, storage: storage, port: port}
+		})
+		cmd.SetArgs(args)
+		return cmd.Execute()
+	}
+
+	if err := run("serve", "--port", "9090"); err != nil {
+		t.Fatalf("serve lifecycle seed: %v", err)
+	}
+
+	if err := run("stop", "--port", "9090"); err != nil {
+		t.Fatalf("stop lifecycle: %v", err)
+	}
+
+	if ports := manager.Ports(context.Background()); len(ports) != 0 {
+		t.Fatalf("expected manager ports to be cleared after stop, got %#v", ports)
+	}
+
+	instances, err := storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances after stop: %v", err)
+	}
+	if len(instances) != 1 || instances[0].Port != 9090 || instances[0].Status != "not_started" {
+		t.Fatalf("unexpected stop lifecycle state: %#v", instances)
+	}
+
+	if err := run("delete", "--port", "9090"); err != nil {
+		t.Fatalf("delete lifecycle: %v", err)
+	}
+
+	instances, err = storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances after delete: %v", err)
+	}
+	if len(instances) != 0 {
+		t.Fatalf("expected registry to be empty after delete, got %#v", instances)
+	}
+
+	if ports := manager.Ports(context.Background()); len(ports) != 0 {
+		t.Fatalf("expected manager ports to remain empty after delete, got %#v", ports)
+	}
+}
+
+func TestCommandsRejectMissingInstanceLifecycleTargets(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	manager := runtime.New(nil)
+
+	for _, args := range [][]string{{"stop"}, {"delete"}} {
+		cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
+			return &commandServerStub{manager: manager, storage: storage, port: port}
+		})
+		cmd.SetArgs(args)
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("expected error for %v", args)
+		}
+		if got := err.Error(); !strings.Contains(got, "requires --port") {
+			t.Fatalf("unexpected missing target error for %v: %v", args, err)
+		}
+	}
+}
+
 func TestCommandsRenderEmptyRuntimeStatus(t *testing.T) {
 	t.Helper()
 
@@ -338,6 +519,8 @@ func newTestCommand(t *testing.T, manager *runtime.Manager, storage Storage, fac
 	cmd := NewRootCommand(stdout, stderr, Commands{
 		Serve:     NewServeCommand(manager, factory),
 		Instances: NewInstancesCommand(manager, storage),
+		Stop:      NewStopCommand(manager, storage),
+		Delete:    NewDeleteCommand(manager, storage),
 		Ports:     NewPortsCommand(manager, storage),
 	})
 	return cmd, stdout, stderr
