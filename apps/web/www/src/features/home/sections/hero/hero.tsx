@@ -2,11 +2,6 @@ import React, { useRef, useEffect } from 'react';
 import { motion, type Variants } from 'motion/react';
 import { ChevronRight, Database, Zap, Bell, ShieldCheck } from 'lucide-react';
 
-
-
-
-
-
 interface LightningProps {
     hue?: number;
     xOffset?: number;
@@ -225,10 +220,10 @@ const FeatureItem: React.FC<FeatureItemProps> = ({ name, value, position, icon }
         <div className={`relative ${position} z-10 group transition-all duration-500 w-full lg:w-60`}>
             <motion.div
                 whileHover={{ scale: 1.02, y: -2 }}
-                className="relative flex items-center gap-3 p-3 md:p-4 rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 shadow-2xl overflow-hidden"
+                className="relative flex items-center gap-3 p-3 md:p-4 rounded-2xl bg-gradient-to-br from-purple-500/10 to-transparent backdrop-blur-md border border-white/10 shadow-2xl overflow-hidden"
             >
                 {/* Animated Background Gradient on Hover */}
-                <div className="absolute inset-0 bg-gradient-to-br from-purple-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                <div className="absolute inset-0 bg-linear-to-br from-purple-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
 
                 {/* Icon Container */}
                 <div className="relative flex items-center justify-center w-8 h-8 md:w-10 md:h-10 rounded-xl bg-white/10 group-hover:bg-purple-500/20 transition-colors duration-500">
@@ -283,9 +278,9 @@ export const HeroSection: React.FC = () => {
     };
 
     return (
-        <div className="relative w-full bg-black text-white overflow-hidden">
+        <div className="relative w-full bg-background text-foreground overflow-hidden">
             {/* Main container with space for content */}
-            <div className="relative z-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 h-screen">
+            <div className="2xl:mt-14 relative z-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 h-screen">
 
                 {/* Main hero content */}
                 <motion.div
@@ -298,7 +293,7 @@ export const HeroSection: React.FC = () => {
                         variants={itemVariants}
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
-                        className="flex items-center space-x-2 px-4 py-2 bg-white/5 hover:bg-white/10 backdrop-blur-sm rounded-full text-sm mb-6 transition-all duration-300 group" // Reduced mb slightly
+                        className="flex items-center space-x-2 px-4 py-2 bg-primary/5 hover:bg-primary/15 backdrop-blur-sm rounded-full text-sm mb-6 transition-all duration-300 group" // Reduced mb slightly
                     >
                         <span>Download the Desktop App</span>
                         <ChevronRight className='size-4 transform group-hover:translate-x-1 transition-transform duration-300' />
@@ -306,28 +301,25 @@ export const HeroSection: React.FC = () => {
 
                     <motion.h1
                         variants={itemVariants}
-                        className="text-5xl md:text-7xl font-light mb-2"
+                        className="text-5xl md:text-7xl font-light mb-2 tracking-tight"
                     >
-                        The <strong>Best Free</strong> LocalStack Alternative
+                        The Free Drop-in Replacement for LocalStack.
                     </motion.h1>
 
                     <motion.h2
                         variants={itemVariants}
-                        className="text-3xl md:text-5xl pb-3 font-light bg-gradient-to-r from-gray-100 via-gray-200 to-gray-300 bg-clip-text text-transparent"
+                        className="text-3xl md:text-4xl pb-3 font-light bg-gradient-to-r from-gray-100 via-gray-200 to-gray-300 bg-clip-text text-transparent"
                     >
-                        100% local AWS Cloud API
+                        Run AWS services locally for free. <br /> <span className='text-2xl md:text-3xl'>Lightweight. Fast. Open Source.</span>
                     </motion.h2>
 
                     {/* Description */}
                     <motion.p
                         variants={itemVariants}
-                        className="text-gray-400 mb-9 max-w-2xl"
+                        className="text-center text-gray-400 mb-9 max-w-2xl leading-relaxed font-light"
                     >
-                        MildStack emulates the AWS API on your machine. Build and test with S3, DynamoDB, Lambda, SQS, SNS, and EventBridge without cloud complexity or costs.
+                        High-performance and lightweight local AWS emulator for <span className="font-normal text-foreground">S3</span>, <span className="font-normal text-foreground">DynamoDB</span>, <span className="font-normal text-foreground">SQS</span>, and more. Includes an intuitive <span className="font-normal text-foreground">Desktop App</span> to manage and browse your local cloud resources from a single place.
                     </motion.p>
-
-
-
                 </motion.div>
 
                 {/* Floating Widgets / Features */}
@@ -335,19 +327,19 @@ export const HeroSection: React.FC = () => {
                     variants={containerVariants}
                     initial="hidden"
                     animate="visible"
-                    className="flex flex-col lg:flex-row items-center justify-between gap-6 z-[200] relative lg:absolute lg:top-[55%] lg:inset-x-0 mt-14 lg:mt-0 px-4 lg:px-8"
+                    className="flex flex-col lg:flex-row items-center justify-between gap-6 z-[200] relative lg:absolute lg:top-[60%] xl:top-[58%] 2xl:top-[55%] lg:inset-x-0 mt-14 lg:mt-0 px-4 lg:px-8"
                 >
                     <motion.div variants={itemVariants} className="lg:translate-y-20 w-full lg:w-auto">
-                        <FeatureItem icon={<Database className="size-5" />} name="S3 & DynamoDB" value="Fast local storage" position="" />
+                        <FeatureItem icon={<Database className="size-5" />} name="High-speed Storage" value="S3 & DynamoDB" position="" />
                     </motion.div>
                     <motion.div variants={itemVariants} className="lg:translate-y-4 w-full lg:w-auto">
-                        <FeatureItem icon={<Zap className="size-5" />} name="Lambda & SQS" value="Serverless & Queues" position="" />
+                        <FeatureItem icon={<Zap className="size-5" />} name="Serverless Workflows" value="Lambda & SQS" position="" />
                     </motion.div>
                     <motion.div variants={itemVariants} className="lg:translate-y-4 w-full lg:w-auto">
-                        <FeatureItem icon={<Bell className="size-5" />} name="SNS & EventBridge" value="Pub/Sub & Events" position="" />
+                        <FeatureItem icon={<Bell className="size-5" />} name="Event-Driven Logic" value="SNS & EventBridge" position="" />
                     </motion.div>
                     <motion.div variants={itemVariants} className="lg:translate-y-20 w-full lg:w-auto">
-                        <FeatureItem icon={<ShieldCheck className="size-5" />} name="100% Local" value="No cloud costs" position="" />
+                        <FeatureItem icon={<ShieldCheck className="size-5" />} name="Offline & Cost-Free" value="100% Local" position="" />
                     </motion.div>
                 </motion.div>
             </div>
@@ -371,13 +363,13 @@ export const HeroSection: React.FC = () => {
                         hue={lightningHue} // Use the state variable here
                         xOffset={0}
                         speed={1.6}
-                        intensity={0.6}
-                        size={2}
+                        intensity={0.7}
+                        size={2.2}
                     />
                 </div>
 
                 {/* Planet/sphere */}
-                <div className="z-10 absolute top-[55%] left-1/2 transform -translate-x-1/2 w-[600px] h-[600px] backdrop-blur-3xl rounded-full bg-[radial-gradient(circle_at_25%_90%,_#7F00FF_15%,_#000000de_70%,_#000000ed_100%)]"></div>
+                <div className="z-10 absolute top-[55%] left-1/2 transform -translate-x-1/2 w-[600px] h-[600px] backdrop-blur-3xl rounded-full bg-[radial-gradient(circle_at_25%_90%,rgba(127,0,255,0.6)_15%,rgba(0,0,0,0.7)_70%,rgba(0,0,0,0.8)_100%)]"></div>
             </motion.div>
         </div>
     );
