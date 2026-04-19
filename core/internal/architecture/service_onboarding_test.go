@@ -39,6 +39,7 @@ func TestArchitectureDocsMatchCurrentTreeAndTemplate(t *testing.T) {
 		"core/internal/delivery/http/",
 		"core/internal/delivery/cli/",
 		"core/internal/delivery/cli/ui/",
+		"core/internal/resources/instancepath/",
 		"core/internal/resources/s3/application/service_test.go",
 		"core/internal/resources/s3/domain/state_test.go",
 		"core/internal/resources/s3/infrastructure/routes_test.go",
@@ -52,6 +53,8 @@ func TestArchitectureDocsMatchCurrentTreeAndTemplate(t *testing.T) {
 		"TestServiceRealOperationsMutateState",
 		"TestServiceRejectsInvalidAndMissingRequests",
 		"TestServiceStartAndStopAreNoOps",
+		"MILDSTACK_INSTANCE_ID",
+		"instances/<instanceID>/<service>",
 	}
 	for _, want := range requiredOnboardingPaths {
 		if !strings.Contains(onboarding, want) {

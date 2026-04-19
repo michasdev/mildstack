@@ -26,6 +26,20 @@ func TestResolveStoragePath(t *testing.T) {
 	if got, want := path, want; got != want {
 		t.Fatalf("unexpected storage path: got %q want %q", got, want)
 	}
+
+	otherPath, err := ResolveStoragePath(StorageConfig{
+		BaseDir:    baseDir,
+		InstanceID: "instance-b",
+	})
+	if err != nil {
+		t.Fatalf("resolve other storage path: %v", err)
+	}
+	if path == otherPath {
+		t.Fatalf("expected distinct storage paths, got %q", path)
+	}
+	if _, err := ResolveStoragePath(StorageConfig{BaseDir: baseDir, InstanceID: ""}); err == nil {
+		t.Fatal("expected empty instance id to be rejected")
+	}
 }
 
 func TestSQLiteRepositoryBootstrapAndPersistAcrossRestart(t *testing.T) {

@@ -271,4 +271,18 @@ func TestResolveStoragePathUsesMildstackInstanceLayout(t *testing.T) {
 	if got, want := path, filepath.Join("/tmp/mildstack-root", "instances", "instance-42", "s3"); got != want {
 		t.Fatalf("unexpected path: got %q want %q", got, want)
 	}
+
+	otherPath, err := ResolveStoragePath(StorageConfig{
+		BaseDir:    "/tmp/mildstack-root",
+		InstanceID: "instance-43",
+	})
+	if err != nil {
+		t.Fatalf("resolve other storage path: %v", err)
+	}
+	if path == otherPath {
+		t.Fatalf("expected distinct paths, got %q", path)
+	}
+	if _, err := ResolveStoragePath(StorageConfig{BaseDir: "/tmp/mildstack-root", InstanceID: " "}); err == nil {
+		t.Fatal("expected empty instance id to be rejected")
+	}
 }

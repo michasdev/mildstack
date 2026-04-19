@@ -1,10 +1,11 @@
 package application
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/michasdev/mildstack/core/internal/resources/instancepath"
 )
 
 type StorageConfig struct {
@@ -13,18 +14,13 @@ type StorageConfig struct {
 }
 
 func ResolveStoragePath(config StorageConfig) (string, error) {
-	instanceID := strings.TrimSpace(config.InstanceID)
-	if instanceID == "" {
-		return "", fmt.Errorf("s3: instance id is required")
-	}
-
 	baseDir := strings.TrimSpace(config.BaseDir)
 	if baseDir == "" {
 		homeDir, _ := os.UserHomeDir()
 		baseDir = resolveBaseDir(homeDir)
 	}
 
-	return filepath.Join(baseDir, "instances", instanceID, "s3"), nil
+	return instancepath.Resolve(baseDir, config.InstanceID, "s3")
 }
 
 func resolveBaseDir(homeDir string) string {
