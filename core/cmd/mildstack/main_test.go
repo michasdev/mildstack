@@ -618,7 +618,15 @@ func TestInstanceRegistrarPersistsAndReleasesActiveInstance(t *testing.T) {
 		t.Fatalf("unexpected active ports: %#v", ports)
 	}
 
-	savedPath := filepath.Join(paths.InstancesDir, "saved", "9090.json")
+	instances, err := storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances: %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected one instance, got %#v", instances)
+	}
+
+	savedPath := filepath.Join(paths.InstancesDir, "saved", instances[0].InstanceID+".json")
 	if _, err := os.Stat(savedPath); err != nil {
 		t.Fatalf("expected saved instance file: %v", err)
 	}
@@ -666,7 +674,15 @@ func TestInstanceRegistrarServeSkipsDuplicateLoadedPort(t *testing.T) {
 		t.Fatalf("unexpected active ports: %#v", ports)
 	}
 
-	savedPath := filepath.Join(paths.InstancesDir, "saved", "9090.json")
+	instances, err := storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances: %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected one instance, got %#v", instances)
+	}
+
+	savedPath := filepath.Join(paths.InstancesDir, "saved", instances[0].InstanceID+".json")
 	if _, err := os.Stat(savedPath); err != nil {
 		t.Fatalf("expected saved instance file: %v", err)
 	}
@@ -744,19 +760,22 @@ func equalStringSlices(got, want []string) bool {
 	return true
 }
 
-func TestInstanceIDFromPortUsesPortNumber(t *testing.T) {
-	cases := []struct {
-		port int
-		want string
-	}{
-		{4566, "mildstack-4566"},
-		{8080, "mildstack-8080"},
-		{9000, "mildstack-9000"},
+func TestNewInstanceIDUsesRandomNonLegacyValue(t *testing.T) {
+	first, err := cli.NewInstanceID()
+	if err != nil {
+		t.Fatalf("new instance id: %v", err)
 	}
-	for _, tc := range cases {
-		got := instanceIDFromPort(tc.port)
-		if got != tc.want {
-			t.Fatalf("port %d: got %q want %q", tc.port, got, tc.want)
-		}
+	second, err := cli.NewInstanceID()
+	if err != nil {
+		t.Fatalf("new instance id second call: %v", err)
+	}
+	if first == "" || second == "" {
+		t.Fatal("expected non-empty instance ids")
+	}
+	if first == second {
+		t.Fatalf("expected random ids, got duplicated value %q", first)
+	}
+	if strings.HasPrefix(first, "mildstack-") || strings.HasPrefix(second, "mildstack-") {
+		t.Fatalf("expected non-legacy ids, got %q and %q", first, second)
 	}
 }

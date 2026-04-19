@@ -26,7 +26,6 @@ var listenTCP = net.Listen
 var startDetachedServe = defaultStartDetachedServe
 
 func NewServeCommand(manager *runtime.Manager, factories ...HTTPServerFactory) *cobra.Command {
-	var port int
 	var detach bool
 	var factory HTTPServerFactory
 	if len(factories) > 0 {
@@ -34,11 +33,17 @@ func NewServeCommand(manager *runtime.Manager, factories ...HTTPServerFactory) *
 	}
 
 	cmd := &cobra.Command{
-		Use:   "serve",
+		Use:   "serve [port]",
 		Short: "Start the shared HTTP runtime",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			resolvedPort := port
-			if cmd.Flags().Changed("port") {
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedPort := defaultServePort
+			if len(args) == 1 {
+				port, err := strconv.Atoi(args[0])
+				if err != nil {
+					return fmt.Errorf("serve: invalid instance port %q", args[0])
+				}
+				resolvedPort = port
 				if err := ensureServePortAvailable(resolvedPort); err != nil {
 					return err
 				}
@@ -66,7 +71,6 @@ func NewServeCommand(manager *runtime.Manager, factories ...HTTPServerFactory) *
 			return manager.Serve(cmd.Context(), resolvedPort)
 		},
 	}
-	cmd.Flags().IntVar(&port, "port", defaultServePort, "API port")
 	cmd.Flags().BoolVar(&detach, "detach", false, "Return after the instance has started")
 	cmd.Flags().BoolVar(&detach, "d", false, "Alias for --detach")
 
@@ -94,7 +98,7 @@ func defaultStartDetachedServe(ctx context.Context, port int, _ func(context.Con
 	}
 	defer os.Remove(readyPath)
 
-	cmd := exec.CommandContext(ctx, executable, "serve", "--port", strconv.Itoa(port))
+	cmd := exec.CommandContext(ctx, executable, "serve", strconv.Itoa(port))
 	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=%s", detachedReadyFileEnv, readyPath))
 
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)

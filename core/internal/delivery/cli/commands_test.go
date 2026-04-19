@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -56,7 +57,10 @@ func (s *commandServerStub) Start(ctx context.Context) error {
 	if err := s.manager.Serve(ctx, s.port); err != nil {
 		return err
 	}
-	instanceID := instanceIDFromPort(s.port)
+	instanceID, err := s.storage.ResolveInstanceIDForPort(s.port)
+	if err != nil {
+		return err
+	}
 	if err := s.storage.SaveSavedInstanceWithID(instanceID, s.port); err != nil {
 		return err
 	}
@@ -107,8 +111,8 @@ func TestCommandsServeInstances(t *testing.T) {
 		return executeCommand(t, manager, storage, args...)
 	}
 
-	runCommand("serve", "--port", "9090")
-	runCommand("serve", "--port", "8080")
+	runCommand("serve", "9090")
+	runCommand("serve", "8080")
 
 	instancesOutput := stripANSI(runCommand("instances"))
 	if got, want := instancesOutput, "Runtime Status\nState: running\n\nServices\n  alpha v1\n  beta v2\n\nInstances\n  8080 running\n  9090 running\n\nPorts\n  8080\n  9090\n"; got != want {
@@ -132,8 +136,8 @@ func TestCommandsServeInstancesJSON(t *testing.T) {
 		return executeCommand(t, manager, storage, args...)
 	}
 
-	runCommand("serve", "--port", "9090")
-	runCommand("serve", "--port", "8080")
+	runCommand("serve", "9090")
+	runCommand("serve", "8080")
 
 	instancesOutput := runCommand("instances", "--json")
 	var statusPayload struct {
@@ -243,7 +247,7 @@ func TestServeExplicitPortSkipsFallback(t *testing.T) {
 		return executeCommand(t, manager, storage, args...)
 	}
 
-	runCommand("serve", "--port", "4566")
+	runCommand("serve", "4566")
 
 	if got, want := listenCalls, 1; got != want {
 		t.Fatalf("expected exactly one explicit probe, got %d", got)
@@ -280,7 +284,7 @@ func TestServeExplicitPortFailsWhenBusy(t *testing.T) {
 		t.Fatalf("factory should not be called for a busy explicit port, got %d", port)
 		return nil
 	})
-	cmd.SetArgs([]string{"serve", "--port", "4566"})
+	cmd.SetArgs([]string{"serve", "4566"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -340,7 +344,7 @@ func TestCommandsServeDetachedLifecycle(t *testing.T) {
 			finished: finished,
 		}
 	})
-	cmd.SetArgs([]string{"serve", "--detach", "--port", "9090"})
+	cmd.SetArgs([]string{"serve", "--detach", "9090"})
 
 	done := make(chan error, 1)
 	go func() {
@@ -391,6 +395,9 @@ func TestCommandsStopAndDeleteLifecycle(t *testing.T) {
 	manager := runtime.New(composition.Assemble([]orchestrator.Service{
 		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
 	}).Services)
+	originalTerminateProcess := terminateProcessFn
+	defer func() { terminateProcessFn = originalTerminateProcess }()
+	terminateProcessFn = func(int) error { return nil }
 
 	run := func(args ...string) error {
 		t.Helper()
@@ -402,7 +409,7 @@ func TestCommandsStopAndDeleteLifecycle(t *testing.T) {
 		return cmd.Execute()
 	}
 
-	if err := run("serve", "--port", "9090"); err != nil {
+	if err := run("serve", "9090"); err != nil {
 		t.Fatalf("serve lifecycle seed: %v", err)
 	}
 
@@ -422,7 +429,7 @@ func TestCommandsStopAndDeleteLifecycle(t *testing.T) {
 		t.Fatalf("unexpected stop lifecycle state: %#v", instances)
 	}
 
-	if err := run("delete", "--port", "9090"); err != nil {
+	if err := run("delete", "9090"); err != nil {
 		t.Fatalf("delete lifecycle: %v", err)
 	}
 
@@ -439,13 +446,303 @@ func TestCommandsStopAndDeleteLifecycle(t *testing.T) {
 	}
 }
 
+func TestCommandsDeleteStopsRunningInstanceBeforeRemoval(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	manager := runtime.New(composition.Assemble([]orchestrator.Service{
+		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
+	}).Services)
+	originalTerminateProcess := terminateProcessFn
+	defer func() { terminateProcessFn = originalTerminateProcess }()
+
+	var terminated []int
+	terminateProcessFn = func(pid int) error {
+		terminated = append(terminated, pid)
+		return nil
+	}
+
+	run := func(args ...string) error {
+		t.Helper()
+
+		cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
+			return &commandServerStub{manager: manager, storage: storage, port: port}
+		})
+		cmd.SetArgs(args)
+		return cmd.Execute()
+	}
+
+	if err := run("serve", "9090"); err != nil {
+		t.Fatalf("serve lifecycle seed: %v", err)
+	}
+
+	if err := run("delete", "9090"); err != nil {
+		t.Fatalf("delete running instance: %v", err)
+	}
+
+	if got, want := len(terminated), 1; got != want {
+		t.Fatalf("unexpected termination count: got %d want %d", got, want)
+	}
+	if got, want := terminated[0], os.Getpid(); got != want {
+		t.Fatalf("unexpected terminated pid: got %d want %d", got, want)
+	}
+
+	instances, err := storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances after delete: %v", err)
+	}
+	if len(instances) != 0 {
+		t.Fatalf("expected registry to be empty after delete, got %#v", instances)
+	}
+
+	if ports := manager.Ports(context.Background()); len(ports) != 0 {
+		t.Fatalf("expected manager ports to be cleared after delete, got %#v", ports)
+	}
+}
+
+func TestCommandsStopAllStopsEveryRunningInstance(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	manager := runtime.New(composition.Assemble([]orchestrator.Service{
+		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
+	}).Services)
+	originalTerminateProcess := terminateProcessFn
+	defer func() { terminateProcessFn = originalTerminateProcess }()
+
+	var terminated []int
+	terminateProcessFn = func(pid int) error {
+		terminated = append(terminated, pid)
+		return nil
+	}
+
+	run := func(args ...string) error {
+		t.Helper()
+
+		cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
+			return &commandServerStub{manager: manager, storage: storage, port: port}
+		})
+		cmd.SetArgs(args)
+		return cmd.Execute()
+	}
+
+	if err := run("serve", "9090"); err != nil {
+		t.Fatalf("serve first instance: %v", err)
+	}
+	if err := run("serve", "8080"); err != nil {
+		t.Fatalf("serve second instance: %v", err)
+	}
+
+	if err := run("stop", "--all"); err != nil {
+		t.Fatalf("stop all instances: %v", err)
+	}
+
+	if got, want := len(terminated), 2; got != want {
+		t.Fatalf("unexpected termination count: got %d want %d", got, want)
+	}
+
+	ports, err := storage.LoadActivePorts()
+	if err != nil {
+		t.Fatalf("load active ports after stop all: %v", err)
+	}
+	if len(ports) != 0 {
+		t.Fatalf("expected no active ports after stop all, got %#v", ports)
+	}
+
+	instances, err := storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances after stop all: %v", err)
+	}
+	if len(instances) != 2 {
+		t.Fatalf("expected two saved instances after stop all, got %#v", instances)
+	}
+	for _, instance := range instances {
+		if instance.Status != "not_started" {
+			t.Fatalf("expected stopped instances to be not_started, got %#v", instances)
+		}
+	}
+}
+
+func TestCommandsDeleteAllRemovesEveryInstanceAndResources(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	manager := runtime.New(composition.Assemble([]orchestrator.Service{
+		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
+	}).Services)
+	originalTerminateProcess := terminateProcessFn
+	defer func() { terminateProcessFn = originalTerminateProcess }()
+	terminateProcessFn = func(int) error { return nil }
+
+	run := func(args ...string) error {
+		t.Helper()
+
+		cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
+			return &commandServerStub{manager: manager, storage: storage, port: port}
+		})
+		cmd.SetArgs(args)
+		return cmd.Execute()
+	}
+
+	if err := run("serve", "9090"); err != nil {
+		t.Fatalf("serve first instance: %v", err)
+	}
+	if err := run("serve", "8080"); err != nil {
+		t.Fatalf("serve second instance: %v", err)
+	}
+
+	instances, err := storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances after serve: %v", err)
+	}
+	for _, instance := range instances {
+		instanceRoot := filepath.Join(storage.paths.BaseDir, "instances", instance.InstanceID)
+		if err := os.MkdirAll(filepath.Join(instanceRoot, "s3"), 0o755); err != nil {
+			t.Fatalf("create instance resource dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(instanceRoot, "s3", "state.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatalf("write instance resource payload: %v", err)
+		}
+	}
+
+	if err := run("delete", "--all"); err != nil {
+		t.Fatalf("delete all instances: %v", err)
+	}
+
+	instances, err = storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances after delete all: %v", err)
+	}
+	if len(instances) != 0 {
+		t.Fatalf("expected registry to be empty after delete all, got %#v", instances)
+	}
+
+	if ports := manager.Ports(context.Background()); len(ports) != 0 {
+		t.Fatalf("expected manager ports to be empty after delete all, got %#v", ports)
+	}
+	if entries, err := os.ReadDir(storage.paths.InstancesDir); err != nil {
+		t.Fatalf("read instances dir after delete all: %v", err)
+	} else {
+		for _, entry := range entries {
+			if strings.TrimSpace(entry.Name()) == "active" || strings.TrimSpace(entry.Name()) == "saved" {
+				if nested, err := os.ReadDir(filepath.Join(storage.paths.InstancesDir, entry.Name())); err == nil && len(nested) != 0 {
+					t.Fatalf("expected %s to be empty after delete all, got %#v", entry.Name(), nested)
+				}
+			}
+		}
+	}
+}
+
+func TestCommandsServeReusesInstanceIDAfterStop(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	manager := runtime.New(composition.Assemble([]orchestrator.Service{
+		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
+	}).Services)
+	originalTerminateProcess := terminateProcessFn
+	defer func() { terminateProcessFn = originalTerminateProcess }()
+	terminateProcessFn = func(int) error { return nil }
+
+	run := func(args ...string) error {
+		t.Helper()
+
+		cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
+			return &commandServerStub{manager: manager, storage: storage, port: port}
+		})
+		cmd.SetArgs(args)
+		return cmd.Execute()
+	}
+
+	if err := run("serve", "9090"); err != nil {
+		t.Fatalf("serve lifecycle seed: %v", err)
+	}
+
+	instances, err := storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances after first serve: %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected one instance after first serve, got %#v", instances)
+	}
+	firstID := instances[0].InstanceID
+
+	if err := run("stop", "9090"); err != nil {
+		t.Fatalf("stop lifecycle: %v", err)
+	}
+	if err := run("serve", "9090"); err != nil {
+		t.Fatalf("serve lifecycle restart: %v", err)
+	}
+
+	instances, err = storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances after restart: %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected one instance after restart, got %#v", instances)
+	}
+	if got, want := instances[0].InstanceID, firstID; got != want {
+		t.Fatalf("expected serve to reuse instance id: got %q want %q", got, want)
+	}
+}
+
+func TestCommandsDeleteRemovesInstanceResources(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	manager := runtime.New(composition.Assemble([]orchestrator.Service{
+		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
+	}).Services)
+	originalTerminateProcess := terminateProcessFn
+	defer func() { terminateProcessFn = originalTerminateProcess }()
+	terminateProcessFn = func(int) error { return nil }
+
+	run := func(args ...string) error {
+		t.Helper()
+
+		cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
+			return &commandServerStub{manager: manager, storage: storage, port: port}
+		})
+		cmd.SetArgs(args)
+		return cmd.Execute()
+	}
+
+	if err := run("serve", "9090"); err != nil {
+		t.Fatalf("serve lifecycle seed: %v", err)
+	}
+
+	instances, err := storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances after serve: %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected one instance, got %#v", instances)
+	}
+
+	instanceRoot := filepath.Join(storage.paths.BaseDir, "instances", instances[0].InstanceID)
+	if err := os.MkdirAll(filepath.Join(instanceRoot, "s3"), 0o755); err != nil {
+		t.Fatalf("create instance resource dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(instanceRoot, "s3", "state.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write instance resource payload: %v", err)
+	}
+
+	if err := run("delete", "9090"); err != nil {
+		t.Fatalf("delete instance with resources: %v", err)
+	}
+
+	if _, err := os.Stat(instanceRoot); !os.IsNotExist(err) {
+		t.Fatalf("expected instance resources to be deleted, got err=%v", err)
+	}
+}
+
 func TestCommandsRejectMissingInstanceLifecycleTargets(t *testing.T) {
 	t.Helper()
 
 	storage := newTestStorage(t)
 	manager := runtime.New(nil)
 
-	for _, args := range [][]string{{"stop"}} {
+	for _, args := range [][]string{{"stop"}, {"delete"}} {
 		cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
 			return &commandServerStub{manager: manager, storage: storage, port: port}
 		})
@@ -455,8 +752,30 @@ func TestCommandsRejectMissingInstanceLifecycleTargets(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected error for %v", args)
 		}
-		if got := err.Error(); !strings.Contains(got, "accepts 1 arg") {
+		if got := err.Error(); !strings.Contains(got, "requires a port or --all") {
 			t.Fatalf("unexpected missing target error for %v: %v", args, err)
+		}
+	}
+}
+
+func TestCommandsRejectAllWithPortTargets(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	manager := runtime.New(nil)
+
+	for _, args := range [][]string{{"stop", "9090", "--all"}, {"delete", "9090", "--all"}} {
+		cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
+			return &commandServerStub{manager: manager, storage: storage, port: port}
+		})
+		cmd.SetArgs(args)
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("expected error for %v", args)
+		}
+		if got := err.Error(); !strings.Contains(got, "--all cannot be combined with a port") {
+			t.Fatalf("unexpected all-with-port error for %v: %v", args, err)
 		}
 	}
 }
@@ -562,7 +881,7 @@ func TestStatusAliasMatchesInstancesOutput(t *testing.T) {
 		return executeCommand(t, manager, storage, args...)
 	}
 
-	runCommand("serve", "--port", "9090")
+	runCommand("serve", "9090")
 
 	instancesOut := stripANSI(runCommand("instances"))
 	statusOut := stripANSI(runCommand("status"))
@@ -586,7 +905,7 @@ func TestStatusAliasJSONMatchesInstancesJSON(t *testing.T) {
 		return executeCommand(t, manager, storage, args...)
 	}
 
-	runCommand("serve", "--port", "8080")
+	runCommand("serve", "8080")
 
 	instancesJSON := runCommand("instances", "--json")
 	statusJSON := runCommand("status", "--json")
@@ -604,7 +923,7 @@ func TestCommandsServeInstancesJSONIncludesInstanceID(t *testing.T) {
 		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
 	}).Services)
 
-	executeCommand(t, manager, storage, "serve", "--port", "7777")
+	executeCommand(t, manager, storage, "serve", "7777")
 
 	out := executeCommand(t, manager, storage, "instances", "--json")
 
@@ -621,9 +940,11 @@ func TestCommandsServeInstancesJSONIncludesInstanceID(t *testing.T) {
 	if len(payload.Instances) != 1 {
 		t.Fatalf("expected one instance, got %d", len(payload.Instances))
 	}
-	// instanceId is derived from the port: mildstack-{port}
-	if got, want := payload.Instances[0].InstanceID, "mildstack-7777"; got != want {
-		t.Fatalf("unexpected instanceId: got %q want %q", got, want)
+	if payload.Instances[0].InstanceID == "" {
+		t.Fatal("expected non-empty instanceId")
+	}
+	if strings.HasPrefix(payload.Instances[0].InstanceID, "mildstack-") {
+		t.Fatalf("expected non-legacy instanceId, got %q", payload.Instances[0].InstanceID)
 	}
 	if got, want := payload.Instances[0].Port, 7777; got != want {
 		t.Fatalf("unexpected port: got %d want %d", got, want)

@@ -27,23 +27,26 @@ func main() {
 	manager := runtime.NewWithPorts(nil, activePorts)
 
 	httpServerFactory := func(port int) cli.HTTPServer {
-		instanceID := instanceIDFromPort(port)
+		instanceID, err := storage.ResolveInstanceIDForPort(port)
+		if err != nil {
+			return recordingHTTPServer{server: failedHTTPServer{err: fmt.Errorf("resolve instance id: %w", err)}, storage: storage, port: port}
+		}
 		root := composition.DefaultRoot(instanceID)
 		manager.SetInstanceID(instanceID)
 		manager.SetServices(root.Services)
 
 		router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
 		if err := registerServiceRoutes(router.Registrar(), root.Services); err != nil {
-			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port}
+			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port, instanceID: instanceID}
 		}
 		if err := registerNativeDynamoDBRoutes(router, root.Services); err != nil {
-			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port}
+			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port, instanceID: instanceID}
 		}
 		if err := registerNativeS3Routes(router, root.Services); err != nil {
-			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port}
+			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port, instanceID: instanceID}
 		}
 		registrar := instanceRegistrar{manager: manager, storage: storage, instanceID: instanceID}
-		return recordingHTTPServer{server: deliveryhttp.NewServer(registrar, router, port), storage: storage, port: port}
+		return recordingHTTPServer{server: deliveryhttp.NewServer(registrar, router, port), storage: storage, port: port, instanceID: instanceID}
 	}
 	commands := cli.Commands{
 		Serve:     cli.NewServeCommand(manager, httpServerFactory),
@@ -56,13 +59,6 @@ func main() {
 	if err := cli.Execute(context.Background(), os.Stdout, os.Stderr, commands); err != nil {
 		os.Exit(1)
 	}
-}
-
-// instanceIDFromPort derives a stable, human-readable instance identity from
-// the serve port. The format is "mildstack-{port}" so operators can correlate
-// CLI output, JSON records, and AWS resource paths without extra bookkeeping.
-func instanceIDFromPort(port int) string {
-	return fmt.Sprintf("mildstack-%d", port)
 }
 
 type instanceRegistrar struct {
@@ -90,8 +86,17 @@ func (r instanceRegistrar) Serve(ctx context.Context, port int) error {
 }
 
 func (r instanceRegistrar) Release(_ context.Context, port int) error {
+	instanceID := strings.TrimSpace(r.instanceID)
+	if instanceID == "" {
+		var err error
+		instanceID, err = r.storage.ResolveInstanceIDForPort(port)
+		if err != nil {
+			return err
+		}
+	}
+
 	r.manager.RemovePort(port)
-	return r.storage.DeleteActiveInstance(port)
+	return r.storage.DeleteActiveInstanceByIdentity(instanceID, port)
 }
 
 type failedHTTPServer struct {
@@ -103,15 +108,16 @@ func (s failedHTTPServer) Start(context.Context) error {
 }
 
 type recordingHTTPServer struct {
-	server  cli.HTTPServer
-	storage cli.Storage
-	port    int
+	server     cli.HTTPServer
+	storage    cli.Storage
+	port       int
+	instanceID string
 }
 
 func (s recordingHTTPServer) Start(ctx context.Context) error {
 	err := s.server.Start(ctx)
 	if err != nil {
-		if recordErr := s.storage.SaveErroredInstance(s.port, err); recordErr != nil {
+		if recordErr := s.storage.SaveErroredInstanceWithID(s.instanceID, s.port, err); recordErr != nil {
 			return fmt.Errorf("%w (and failed to persist errored instance: %v)", err, recordErr)
 		}
 	}

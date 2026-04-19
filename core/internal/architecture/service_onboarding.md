@@ -13,6 +13,7 @@ New services should follow the same shape as the existing S3 and DynamoDB real-s
 - `core/internal/infrastructure/` for the shared infrastructure boundary
 - `core/internal/delivery/http/` for HTTP presentation
 - `core/internal/delivery/cli/` and `core/internal/delivery/cli/ui/` for CLI presentation
+- `core/internal/resources/instancepath/` for the shared instance-scoped storage helper used by AWS-backed services
 - `core/internal/<feature>/domain/` for framework-free business rules
 - `core/internal/<feature>/application/` for the service implementation
 - `core/internal/<feature>/infrastructure/` for route catalogs and thin request/response adapters
@@ -70,6 +71,8 @@ Instance records are further split under `instances/` so the CLI can tell active
 - `instances/active/` stores the currently active ports the CLI should surface in `status` and `ports`
 - `instances/saved/` keeps the saved instance records that let a user rerun the same instance later
 
+AWS-backed services should use `MILDSTACK_INSTANCE_ID` as the required bootstrap identity seed and must resolve storage under `instances/<instanceID>/<service>`. The helper in `core/internal/resources/instancepath/` owns the path assembly rule so new services do not duplicate it. If a service cannot prove that layout in tests, it is not ready to be wired into the root composition.
+
 ## Test Matrix
 
 Future services should add the same regression shape as the current S3 and DynamoDB template:
@@ -90,6 +93,8 @@ Future services should add the same regression shape as the current S3 and Dynam
 - `TestServiceRealOperationsMutateState`
 - `TestServiceRejectsInvalidAndMissingRequests`
 - `TestServiceStartAndStopAreNoOps`
+- `MILDSTACK_INSTANCE_ID`
+- `instances/<instanceID>/<service>`
 
 The service test should verify metadata, `Policy()`, route registration, state attachment, and lifecycle no-ops. The domain test should prove snapshots and helpers copy nested state. The infrastructure test should verify the request/response adapter copies payloads and fails closed. If a service exposes extra behavior, add focused tests near the service package instead of broad integration helpers.
 

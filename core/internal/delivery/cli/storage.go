@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
+	"github.com/michasdev/mildstack/core/internal/resources/instancepath"
 )
 
 type Storage struct {
@@ -35,6 +38,9 @@ type instanceSummary struct {
 	Status     string `json:"status"`
 	Error      string `json:"error,omitempty"`
 }
+
+var processAliveFn = processAlive
+var terminateProcessFn = terminateProcess
 
 func NewStorage(paths runtime.Paths, legacyBaseDir string) Storage {
 	return Storage{
@@ -92,11 +98,19 @@ func (s Storage) MigrateInstance(name string) (bool, error) {
 }
 
 func (s Storage) SaveSavedInstance(port int) error {
-	return s.saveInstanceWithID("", s.SavedInstancesDir(), port, "not_started", "")
+	id, err := s.instanceIDForPort(port)
+	if err != nil {
+		return err
+	}
+	return s.saveInstanceWithID(id, s.SavedInstancesDir(), port, "not_started", "")
 }
 
 func (s Storage) SaveActiveInstance(port int) error {
-	return s.saveInstanceWithID("", s.ActiveInstancesDir(), port, "running", "")
+	id, err := s.instanceIDForPort(port)
+	if err != nil {
+		return err
+	}
+	return s.saveInstanceWithID(id, s.ActiveInstancesDir(), port, "running", "")
 }
 
 // SaveSavedInstanceWithID persists a saved instance record with the canonical instanceId.
@@ -114,23 +128,51 @@ func (s Storage) SaveErroredInstance(port int, err error) error {
 	if err != nil {
 		message = strings.TrimSpace(err.Error())
 	}
-	return s.saveInstanceWithID("", s.ActiveInstancesDir(), port, "errored", message)
+	id, lookupErr := s.instanceIDForPort(port)
+	if lookupErr != nil {
+		return lookupErr
+	}
+	return s.saveInstanceWithID(id, s.ActiveInstancesDir(), port, "errored", message)
 }
 
-func (s Storage) DeleteActiveInstance(port int) error {
-	path := s.instanceRecordPath(s.ActiveInstancesDir(), port)
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+func (s Storage) SaveErroredInstanceWithID(instanceID string, port int, err error) error {
+	message := ""
+	if err != nil {
+		message = strings.TrimSpace(err.Error())
+	}
+	return s.saveInstanceWithID(instanceID, s.ActiveInstancesDir(), port, "errored", message)
+}
+
+func (s Storage) DeleteActiveInstance(instance instanceSummary) error {
+	return s.deleteInstanceRecord(s.ActiveInstancesDir(), instance)
+}
+
+func (s Storage) DeleteSavedInstance(instance instanceSummary) error {
+	return s.deleteInstanceRecord(s.SavedInstancesDir(), instance)
+}
+
+func (s Storage) DeleteActiveInstanceByIdentity(instanceID string, port int) error {
+	return s.deleteInstanceRecord(s.ActiveInstancesDir(), instanceSummary{InstanceID: instanceID, Port: port})
+}
+
+func (s Storage) DeleteSavedInstanceByIdentity(instanceID string, port int) error {
+	return s.deleteInstanceRecord(s.SavedInstancesDir(), instanceSummary{InstanceID: instanceID, Port: port})
+}
+
+func (s Storage) DeleteInstanceResources(instanceID string) error {
+	root, err := instancepath.ResolveRoot(s.paths.BaseDir, instanceID)
+	if err != nil {
+		return err
+	}
+
+	if err := os.RemoveAll(root); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s Storage) DeleteSavedInstance(port int) error {
-	path := s.instanceRecordPath(s.SavedInstancesDir(), port)
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
-	return nil
+func (s Storage) ResolveInstanceIDForPort(port int) (string, error) {
+	return s.instanceIDForPort(port)
 }
 
 func (s Storage) LoadActivePorts() ([]int, error) {
@@ -160,16 +202,16 @@ func (s Storage) LoadInstances() ([]instanceSummary, error) {
 		return nil, err
 	}
 
-	instances := make(map[int]instanceSummary, len(saved)+len(active))
+	instances := make(map[string]instanceSummary, len(saved)+len(active))
 	for _, record := range saved {
 		if record.Port <= 0 {
 			continue
 		}
-		id := record.InstanceID
+		id := strings.TrimSpace(record.InstanceID)
 		if id == "" {
-			id = instanceIDFromPort(record.Port)
+			id = legacyInstanceIDFromPort(record.Port)
 		}
-		instances[record.Port] = instanceSummary{
+		instances[id] = instanceSummary{
 			InstanceID: id,
 			Port:       record.Port,
 			PID:        record.PID,
@@ -183,7 +225,7 @@ func (s Storage) LoadInstances() ([]instanceSummary, error) {
 		}
 		status := strings.TrimSpace(record.Status)
 		errorMessage := strings.TrimSpace(record.Error)
-		alive := record.PID > 0 && processAlive(record.PID)
+		alive := record.PID > 0 && processAliveFn(record.PID)
 		switch {
 		case errorMessage != "":
 			status = "errored"
@@ -192,15 +234,19 @@ func (s Storage) LoadInstances() ([]instanceSummary, error) {
 		default:
 			status = "not_started"
 		}
-		// active record wins on instanceId; fall back to saved, then derive from port
-		instanceID := record.InstanceID
+		// active record wins on instanceId; fall back to any saved record on the same port,
+		// then to the legacy id derivation so old port-keyed records remain visible.
+		instanceID := strings.TrimSpace(record.InstanceID)
 		if instanceID == "" {
-			if prev, ok := instances[record.Port]; ok && prev.InstanceID != "" {
-				instanceID = prev.InstanceID
+			for _, prev := range instances {
+				if prev.Port == record.Port && prev.InstanceID != "" {
+					instanceID = prev.InstanceID
+					break
+				}
 			}
 		}
 		if instanceID == "" {
-			instanceID = instanceIDFromPort(record.Port)
+			instanceID = legacyInstanceIDFromPort(record.Port)
 		}
 		instance := instanceSummary{
 			InstanceID: instanceID,
@@ -212,7 +258,7 @@ func (s Storage) LoadInstances() ([]instanceSummary, error) {
 		if instance.Status == "running" {
 			instance.Error = ""
 		}
-		instances[record.Port] = instance
+		instances[instanceID] = instance
 	}
 
 	result := make([]instanceSummary, 0, len(instances))
@@ -310,6 +356,15 @@ func (s Storage) legacyCategoryPath(category, name string) string {
 }
 
 func (s Storage) saveInstanceWithID(instanceID string, dir string, port int, status string, message string) error {
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID == "" {
+		var err error
+		instanceID, err = s.instanceIDForPort(port)
+		if err != nil {
+			return err
+		}
+	}
+
 	record := instanceRecord{
 		InstanceID: instanceID,
 		Port:       port,
@@ -329,7 +384,7 @@ func (s Storage) saveInstanceWithID(instanceID string, dir string, port int, sta
 		return err
 	}
 
-	path := s.instanceRecordPath(dir, port)
+	path := s.instanceRecordPath(dir, instanceID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -350,7 +405,60 @@ func processAlive(pid int) bool {
 	return process.Signal(syscall.Signal(0)) == nil
 }
 
-func (s Storage) instanceRecordPath(dir string, port int) string {
+func terminateProcess(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+
+	if err := process.Kill(); err != nil && processAlive(pid) {
+		return err
+	}
+
+	return nil
+}
+
+func (s Storage) instanceIDForPort(port int) (string, error) {
+	instances, err := s.LoadInstances()
+	if err != nil {
+		return "", err
+	}
+
+	for _, instance := range instances {
+		if instance.Port == port && strings.TrimSpace(instance.InstanceID) != "" {
+			return strings.TrimSpace(instance.InstanceID), nil
+		}
+	}
+
+	return newInstanceID()
+}
+
+func (s Storage) deleteInstanceRecord(dir string, instance instanceSummary) error {
+	paths := make([]string, 0, 2)
+	if id := strings.TrimSpace(instance.InstanceID); id != "" {
+		paths = append(paths, s.instanceRecordPath(dir, id))
+	}
+	if instance.Port > 0 {
+		paths = append(paths, s.legacyInstanceRecordPath(dir, instance.Port))
+	}
+
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s Storage) instanceRecordPath(dir string, instanceID string) string {
+	return filepath.Join(dir, instanceID+".json")
+}
+
+func (s Storage) legacyInstanceRecordPath(dir string, port int) string {
 	return filepath.Join(dir, strconv.Itoa(port)+".json")
 }
 
@@ -361,9 +469,18 @@ func writeFile(path string, data []byte) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-// instanceIDFromPort derives a stable, human-readable instance identity from
-// a port number. The format matches the derivation in main.go so that legacy
-// records without an explicit instanceId are always resolved consistently.
-func instanceIDFromPort(port int) string {
+func legacyInstanceIDFromPort(port int) string {
 	return fmt.Sprintf("mildstack-%d", port)
+}
+
+func newInstanceID() (string, error) {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf[:]), nil
+}
+
+func NewInstanceID() (string, error) {
+	return newInstanceID()
 }
