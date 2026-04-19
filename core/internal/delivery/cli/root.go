@@ -17,6 +17,7 @@ func init() {
 type Commands struct {
 	Serve     *cobra.Command
 	Instances *cobra.Command
+	Status    *cobra.Command
 	Stop      *cobra.Command
 	Delete    *cobra.Command
 }
@@ -35,6 +36,9 @@ func NewRootCommand(out, err io.Writer, commands Commands) *cobra.Command {
 	subcommands := []*cobra.Command{commands.Serve}
 	if commands.Instances != nil {
 		subcommands = append(subcommands, commands.Instances)
+	}
+	if commands.Status != nil {
+		subcommands = append(subcommands, commands.Status)
 	}
 	if commands.Stop != nil {
 		subcommands = append(subcommands, commands.Stop)

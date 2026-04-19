@@ -8,6 +8,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// NewStatusCommand returns a thin alias of the instances command so that
+// operator scripts targeting "status" continue to work without a separate
+// rendering path that could drift from instances.
+func NewStatusCommand(manager *runtime.Manager, storage Storage) *cobra.Command {
+	cmd := NewInstancesCommand(manager, storage)
+	cmd.Use = "status"
+	cmd.Short = "Show the runtime snapshot (alias for instances)"
+	return cmd
+}
+
 func NewInstancesCommand(manager *runtime.Manager, storage Storage) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "instances",
