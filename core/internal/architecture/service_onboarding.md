@@ -13,6 +13,7 @@ New services should follow the same shape as the existing S3 and DynamoDB real-s
 - `core/internal/infrastructure/` for the shared infrastructure boundary
 - `core/internal/delivery/http/` for HTTP presentation
 - `core/internal/delivery/cli/` and `core/internal/delivery/cli/ui/` for CLI presentation
+- `core/internal/resources/awscontext/` for shared AWS identity defaults and ARN helpers
 - `core/internal/resources/instancepath/` for the shared instance-scoped storage helper used by AWS-backed services
 - `core/internal/<feature>/domain/` for framework-free business rules
 - `core/internal/<feature>/application/` for the service implementation
@@ -72,6 +73,8 @@ Instance records are further split under `instances/` so the CLI can tell active
 - `instances/saved/` keeps the saved instance records that let a user rerun the same instance later
 
 AWS-backed services should use `MILDSTACK_INSTANCE_ID` as the required bootstrap identity seed and must resolve storage under `instances/<instanceID>/<service>`. The helper in `core/internal/resources/instancepath/` owns the path assembly rule so new services do not duplicate it. If a service cannot prove that layout in tests, it is not ready to be wired into the root composition.
+
+AWS-facing identity is a separate concern. Use `core/internal/resources/awscontext/` for account ID, region, partition, endpoint metadata, and ARN helpers, and keep it distinct from local storage isolation so `instancepath` remains the only source of truth for instance-scoped persistence.
 
 ## Test Matrix
 

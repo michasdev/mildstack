@@ -2,8 +2,10 @@ package infrastructure_test
 
 import (
 	"encoding/xml"
+	"strings"
 	"testing"
 
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	"github.com/michasdev/mildstack/core/internal/resources/s3/application"
 	"github.com/michasdev/mildstack/core/internal/resources/s3/infrastructure"
 )
@@ -327,7 +329,7 @@ func TestHandlersExposeListVariantsAndBatchDeleteDeterministically(t *testing.T)
 
 	createResp, err := handlers.CreateBucket(infrastructure.CreateBucketRequest{
 		Name:   "catalog-bucket",
-		Region: "us-east-1",
+		Region: awscontext.Default().Region,
 	})
 	if err != nil {
 		t.Fatalf("create bucket: %v", err)
@@ -425,7 +427,7 @@ func TestHandlersVersioningLifecycleIsCopySafe(t *testing.T) {
 
 	createResp, err := handlers.CreateBucket(infrastructure.CreateBucketRequest{
 		Name:   "mildstack-versioned",
-		Region: "us-east-1",
+		Region: awscontext.Default().Region,
 	})
 	if err != nil {
 		t.Fatalf("create bucket: %v", err)
@@ -506,7 +508,7 @@ func TestHandlersMultipartLifecycleIsCopySafe(t *testing.T) {
 
 	createResp, err := handlers.CreateBucket(infrastructure.CreateBucketRequest{
 		Name:   "mildstack-multipart",
-		Region: "us-east-1",
+		Region: awscontext.Default().Region,
 	})
 	if err != nil {
 		t.Fatalf("create bucket: %v", err)
@@ -604,7 +606,7 @@ func TestHandlersMultipartListContractsAreCopySafe(t *testing.T) {
 
 	createResp, err := handlers.CreateBucket(infrastructure.CreateBucketRequest{
 		Name:   "mildstack-multipart-contract",
-		Region: "us-east-1",
+		Region: awscontext.Default().Region,
 	})
 	if err != nil {
 		t.Fatalf("create bucket: %v", err)
@@ -712,7 +714,7 @@ func TestHandlersBucketGovernanceLifecycleIsCopySafe(t *testing.T) {
 
 	createResp, err := handlers.CreateBucket(infrastructure.CreateBucketRequest{
 		Name:   "mildstack-governed",
-		Region: "us-east-1",
+		Region: awscontext.Default().Region,
 	})
 	if err != nil {
 		t.Fatalf("create bucket: %v", err)
@@ -885,8 +887,12 @@ func TestHandlersBucketGovernanceLifecycleIsCopySafe(t *testing.T) {
 	}
 	if resp, err := handlers.GetObjectAcl(infrastructure.GetObjectAclRequest{Bucket: createResp.Bucket.Name, Key: governedObjectKey}); err != nil {
 		t.Fatalf("get default object acl: %v", err)
-	} else if got, want := string(resp.ACL.Body), xml.Header+`<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Owner><ID>owner-id</ID><DisplayName>mildstack</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>owner-id</ID><DisplayName>mildstack</DisplayName></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>`; got != want {
-		t.Fatalf("unexpected default object acl body: got %q want %q", got, want)
+	} else {
+		aws := awscontext.Default()
+		want := xml.Header + `<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Owner><ID>` + aws.AccountID + `</ID><DisplayName>mildstack</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>` + aws.AccountID + `</ID><DisplayName>mildstack</DisplayName></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>`
+		if got := string(resp.ACL.Body); got != want {
+			t.Fatalf("unexpected default object acl body: got %q want %q", got, want)
+		}
 	}
 	if resp, err := handlers.GetObjectTagging(infrastructure.GetObjectTaggingRequest{Bucket: createResp.Bucket.Name, Key: governedObjectKey}); err != nil {
 		t.Fatalf("get default object tagging: %v", err)
@@ -949,22 +955,22 @@ func TestHandlersBucketGovernanceLifecycleIsCopySafe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get default acl: %v", err)
 	}
-	const expectedDefaultACL = `<?xml version="1.0" encoding="UTF-8"?>
-<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+	aws := awscontext.Default()
+	expectedDefaultACL := xml.Header + strings.TrimSpace(`<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
   <Owner>
-    <ID>owner-id</ID>
+    <ID>`+aws.AccountID+`</ID>
     <DisplayName>mildstack</DisplayName>
   </Owner>
   <AccessControlList>
     <Grant>
       <Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser">
-        <ID>owner-id</ID>
+        <ID>`+aws.AccountID+`</ID>
         <DisplayName>mildstack</DisplayName>
       </Grantee>
       <Permission>FULL_CONTROL</Permission>
     </Grant>
   </AccessControlList>
-</AccessControlPolicy>`
+</AccessControlPolicy>`)
 	if got, want := string(aclDefault.ACL.Body), expectedDefaultACL; got != want {
 		t.Fatalf("unexpected default ACL body: got %q want %q", got, want)
 	}

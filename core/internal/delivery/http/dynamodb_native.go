@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	ddbcontracts "github.com/michasdev/mildstack/core/internal/resources/dynamodb/contracts"
 	dynamodbdomain "github.com/michasdev/mildstack/core/internal/resources/dynamodb/domain"
 )
@@ -227,6 +228,7 @@ func (h *dynamoDBNativeHandler) handleCreateTable(c *gin.Context, body []byte) e
 		TableDescription: tableDescription{
 			TableName:            table.Name,
 			TableStatus:          table.Status,
+			TableArn:             awscontext.Default().DynamoDBTableARN(table.Name),
 			CreationDateTime:     awsTimestamp(table.CreatedAt),
 			KeySchema:            cloneKeySchema(request.KeySchema, partitionKey, sortKey),
 			AttributeDefinitions: cloneAttributeDefinitions(request.AttributeDefinitions),
@@ -1144,6 +1146,7 @@ type dynamoAttributeDefinition struct {
 type tableDescription struct {
 	TableName            string                      `json:"TableName"`
 	TableStatus          string                      `json:"TableStatus"`
+	TableArn             string                      `json:"TableArn,omitempty"`
 	CreationDateTime     int64                       `json:"CreationDateTime,omitempty"`
 	KeySchema            []dynamoKeySchemaElement    `json:"KeySchema,omitempty"`
 	AttributeDefinitions []dynamoAttributeDefinition `json:"AttributeDefinitions,omitempty"`
@@ -1216,9 +1219,11 @@ func cloneAttributeDefinitions(source []dynamoAttributeDefinition) []dynamoAttri
 }
 
 func tableDescriptionFromDomain(table dynamodbdomain.Table) tableDescription {
+	aws := awscontext.Default()
 	return tableDescription{
 		TableName:          table.Name,
 		TableStatus:        table.Status,
+		TableArn:           aws.DynamoDBTableARN(table.Name),
 		CreationDateTime:   awsTimestamp(table.CreatedAt),
 		KeySchema:          cloneKeySchema(nil, table.PartitionKey, table.SortKey),
 		BillingModeSummary: billingModeSummaryFor(table.BillingMode),

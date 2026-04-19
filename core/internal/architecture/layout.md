@@ -12,6 +12,7 @@ This repository uses a feature-oriented tree under `core/internal/`. The current
 - `core/internal/delivery/cli/ui/`
 - `core/internal/resources/s3/`
 - `core/internal/resources/dynamodb/`
+- `core/internal/resources/awscontext/`
 - `core/internal/resources/instancepath/`
 - `core/internal/<feature>/domain/`
 - `core/internal/<feature>/application/`
@@ -32,6 +33,8 @@ The CLI delivery layer follows the same separation. Human-readable terminal outp
 Global CLI data now resolves through a user-scoped home directory layout. The base directory lives at `~/.mildstack/` on macOS and Linux, with a Windows-safe home equivalent chosen automatically when the platform requires it. The resolver exposes explicit `config/`, `instances/`, `logs/`, and `cache/` subdirectories, and the CLI storage layer prefers the new layout while still reading legacy paths during the transition window.
 
 AWS-backed resource bootstrap must also be instance-scoped: the instance identity seed comes from `MILDSTACK_INSTANCE_ID`, and a shared default namespace is not acceptable for services that persist S3, DynamoDB, or future AWS-backed state. The shared path rule lives in `core/internal/resources/instancepath/` so future AWS-backed services can reuse the same instance-scoped layout instead of copying path logic.
+
+AWS identity is separate from instance storage. The shared `core/internal/resources/awscontext/` package owns AWS-facing defaults such as account ID, region, partition, endpoint metadata, and ARN construction, while `instancepath` remains the only authority for local instance isolation.
 
 - `core/internal/domain/` documents the shared domain boundary used by feature packages
 - `core/internal/application/orchestrator/` owns the service contract, fidelity policy, and route/state hooks

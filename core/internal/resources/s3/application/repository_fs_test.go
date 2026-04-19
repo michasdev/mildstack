@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	"github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
@@ -17,7 +18,7 @@ func TestFSRepositorySaveAndLoadAreDeterministic(t *testing.T) {
 	state := domain.State{
 		Service: "s3",
 		Buckets: []domain.Bucket{
-			{Name: "zeta", Region: "us-east-1", CreatedAt: time.Date(2026, time.April, 17, 12, 0, 0, 0, time.UTC)},
+			{Name: "zeta", Region: awscontext.Default().Region, CreatedAt: time.Date(2026, time.April, 17, 12, 0, 0, 0, time.UTC)},
 			{Name: "alpha", Region: "us-west-2", CreatedAt: time.Date(2026, time.April, 17, 11, 0, 0, 0, time.UTC)},
 		},
 		Objects: []domain.Object{
@@ -159,7 +160,7 @@ func TestFSRepositoryPersistsGovernanceRoundTrip(t *testing.T) {
 	state.SetBucketNotification(bucket.Name, []byte("<NotificationConfiguration/>"))
 	state.SetBucketLoggingConfig(bucket.Name, []byte("<BucketLoggingStatus/>"))
 	state.SetBucketReplicationConfig(bucket.Name, domain.BucketReplicationConfig{
-		Role: "arn:aws:iam::123456789012:role/replication",
+		Role: awscontext.Default().IAMRoleARN("replication"),
 		Rules: []domain.BucketReplicationRule{
 			{
 				ID:     "rule-1",
@@ -204,7 +205,7 @@ func TestFSRepositoryPersistsGovernanceRoundTrip(t *testing.T) {
 	if got, ok := loaded.BucketLoggingConfig(bucket.Name); !ok || string(got) != "<BucketLoggingStatus/>" {
 		t.Fatalf("unexpected loaded logging: ok=%v body=%q", ok, string(got))
 	}
-	if got, ok := loaded.BucketReplicationConfig(bucket.Name); !ok || got.Role != "arn:aws:iam::123456789012:role/replication" {
+	if got, ok := loaded.BucketReplicationConfig(bucket.Name); !ok || got.Role != awscontext.Default().IAMRoleARN("replication") {
 		t.Fatalf("unexpected loaded replication: ok=%v role=%q", ok, got.Role)
 	}
 	if got, ok := loaded.BucketReplicationConfig(bucket.Name); !ok || len(got.Rules) != 1 || got.Rules[0].ID != "rule-1" {

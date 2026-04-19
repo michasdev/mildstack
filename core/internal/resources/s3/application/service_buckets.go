@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	"github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
@@ -25,12 +26,12 @@ func (s *Service) CreateBucket(name, region string) (domain.Bucket, error) {
 		return domain.Bucket{}, fmt.Errorf("s3: InvalidBucketName: The specified bucket is not valid")
 	}
 	if region == "" {
-		region = defaultRegion
+		region = awscontext.Default().Region
 	}
 
 	if bucket, ok := s.state.Bucket(name); ok {
 		if bucket.Region == "" {
-			bucket.Region = defaultRegion
+			bucket.Region = awscontext.Default().Region
 		}
 		return bucket, nil
 	}
@@ -56,7 +57,7 @@ func (s *Service) HeadBucket(name string) (domain.Bucket, error) {
 		return domain.Bucket{}, fmt.Errorf("s3: NoSuchBucket: bucket %q not found", name)
 	}
 	if bucket.Region == "" {
-		bucket.Region = defaultRegion
+		bucket.Region = awscontext.Default().Region
 	}
 	return bucket, nil
 }
@@ -74,9 +75,9 @@ func (s *Service) GetBucketLocation(name string) (string, error) {
 
 	region := strings.TrimSpace(bucket.Region)
 	if region == "" {
-		region = defaultRegion
+		region = awscontext.Default().Region
 	}
-	if region == defaultRegion {
+	if region == awscontext.Default().Region {
 		return "", nil
 	}
 	return region, nil

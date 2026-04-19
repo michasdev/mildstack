@@ -18,8 +18,6 @@ type Service struct {
 	mu               sync.Mutex
 }
 
-const defaultRegion = "us-east-1"
-
 func New() *Service {
 	return newService(domain.NewState(), nil)
 }
