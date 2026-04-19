@@ -12,10 +12,10 @@ func TestNewRootCommandRegistersSubcommandsInFixedOrder(t *testing.T) {
 	t.Helper()
 
 	cmd := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{}, Commands{
-		Serve:  &cobra.Command{Use: "serve"},
-		Status: &cobra.Command{Use: "status"},
-		Ports:  &cobra.Command{Use: "ports"},
-		UI:     &cobra.Command{Use: "ui"},
+		Serve:     &cobra.Command{Use: "serve"},
+		Instances: &cobra.Command{Use: "instances"},
+		Stop:      &cobra.Command{Use: "stop"},
+		Delete:    &cobra.Command{Use: "delete"},
 	})
 
 	if got, want := cmd.Use, "mildstack"; got != want {
@@ -27,9 +27,15 @@ func TestNewRootCommandRegistersSubcommandsInFixedOrder(t *testing.T) {
 		t.Fatalf("expected 4 subcommands, got %d", len(subcommands))
 	}
 
-	for i, want := range []string{"serve", "status", "ports", "ui"} {
+	for i, want := range []string{"serve", "instances", "stop", "delete"} {
 		if got := subcommands[i].Use; got != want {
 			t.Fatalf("unexpected subcommand at %d: got %q want %q", i, got, want)
+		}
+	}
+
+	for _, subcommand := range subcommands {
+		if subcommand.Use == "completion" {
+			t.Fatal("unexpected completion command")
 		}
 	}
 }

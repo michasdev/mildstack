@@ -13,6 +13,7 @@ import {
   FileText,
   Film,
   Folder,
+  FolderPlus,
   Image as ImageIcon,
   Search,
   Trash2,
@@ -62,6 +63,7 @@ import type { S3Object } from '../types'
 import type { S3BrowserOutletContext } from '../s3-layout'
 import { ObjectViewer } from './object-viewer'
 import { UploadDialog } from './upload-dialog'
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogTitle } from '@renderer/components/ui/dialog'
 
 export function ObjectList() {
   const { api, region } = useOutletContext<S3BrowserOutletContext>()
@@ -87,6 +89,9 @@ export function ObjectList() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null)
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false)
+  const [isCreateFolderDialogOpen, setIsCreateFolderDialogOpen] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false)
   const [droppedFiles, setDroppedFiles] = useState<FileList | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
@@ -286,6 +291,39 @@ export function ObjectList() {
     }
   }
 
+  const handleCreateFolder = async () => {
+    if (!bucketName || !newFolderName.trim()) return
+
+    setIsCreatingFolder(true)
+    try {
+      const folderKey = currentPrefix + newFolderName.trim() + '/'
+      await api.putObject(
+        bucketName,
+        folderKey,
+        new Uint8Array().buffer,
+        'application/x-directory',
+        region
+      )
+      toastManager.add({
+        title: 'Folder created',
+        description: `Successfully created folder "${newFolderName.trim()}"`,
+        type: 'success'
+      })
+      setNewFolderName('')
+      setIsCreateFolderDialogOpen(false)
+      await fetchObjects()
+    } catch (err) {
+      console.error('Failed to create folder', err)
+      toastManager.add({
+        title: 'Failed to create folder',
+        type: 'error',
+        description: err instanceof Error ? err.message : 'Unknown error'
+      })
+    } finally {
+      setIsCreatingFolder(false)
+    }
+  }
+
   const handleBulkDelete = () => {
     if (selectedObjects.size === 0 || !bucketName) return
     setShowDeleteConfirm(true)
@@ -379,6 +417,10 @@ export function ObjectList() {
               Delete ({selectedObjects.size})
             </Button>
           )}
+          <Button variant="outline" onClick={() => setIsCreateFolderDialogOpen(true)}>
+            <FolderPlus className="h-4 w-4" />
+            New Folder
+          </Button>
           <Button variant="outline" onClick={() => setIsUploadDialogOpen(true)}>
             <Upload className="h-4 w-4" />
             Upload
@@ -633,6 +675,41 @@ export function ObjectList() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={isCreateFolderDialogOpen} onOpenChange={setIsCreateFolderDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Folder</DialogTitle>
+            <DialogDescription>
+              Enter a name for the new folder in the current directory.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="py-4">
+            <Input
+              autoFocus
+              placeholder="Folder name..."
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newFolderName.trim()) {
+                  void handleCreateFolder()
+                }
+              }}
+            />
+          </DialogPanel>
+          <DialogFooter>
+            <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
+            <Button
+              variant="default"
+              onClick={handleCreateFolder}
+              loading={isCreatingFolder}
+              disabled={!newFolderName.trim()}
+            >
+              Create Folder
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

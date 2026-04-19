@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	"github.com/spf13/cobra"
@@ -16,11 +17,8 @@ func init() {
 type Commands struct {
 	Serve     *cobra.Command
 	Instances *cobra.Command
-	Status    *cobra.Command
 	Stop      *cobra.Command
 	Delete    *cobra.Command
-	Ports     *cobra.Command
-	UI        *cobra.Command
 }
 
 func NewRootCommand(out, err io.Writer, commands Commands) *cobra.Command {
@@ -32,24 +30,17 @@ func NewRootCommand(out, err io.Writer, commands Commands) *cobra.Command {
 	cmd.SetOut(out)
 	cmd.SetErr(err)
 	cmd.PersistentFlags().Bool("json", false, "Render machine-readable JSON output")
+	cmd.CompletionOptions.DisableDefaultCmd = true
 
 	subcommands := []*cobra.Command{commands.Serve}
 	if commands.Instances != nil {
 		subcommands = append(subcommands, commands.Instances)
-	} else if commands.Status != nil {
-		subcommands = append(subcommands, commands.Status)
 	}
 	if commands.Stop != nil {
 		subcommands = append(subcommands, commands.Stop)
 	}
 	if commands.Delete != nil {
 		subcommands = append(subcommands, commands.Delete)
-	}
-	if commands.Ports != nil {
-		subcommands = append(subcommands, commands.Ports)
-	}
-	if commands.UI != nil {
-		subcommands = append(subcommands, commands.UI)
 	}
 
 	for _, subcommand := range subcommands {
@@ -68,14 +59,14 @@ func Execute(ctx context.Context, out, err io.Writer, commands Commands) error {
 }
 
 func NewStopCommand(manager *runtime.Manager, storage Storage) *cobra.Command {
-	var port int
-
 	cmd := &cobra.Command{
 		Use:   "stop",
 		Short: "Stop a running instance",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !cmd.Flags().Changed("port") {
-				return fmt.Errorf("stop requires --port")
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			port, err := strconv.Atoi(args[0])
+			if err != nil {
+				return fmt.Errorf("stop: invalid instance port %q", args[0])
 			}
 
 			instance, ok, err := lookupInstance(storage, port)
@@ -93,7 +84,6 @@ func NewStopCommand(manager *runtime.Manager, storage Storage) *cobra.Command {
 			return storage.DeleteActiveInstance(port)
 		},
 	}
-	cmd.Flags().IntVar(&port, "port", 0, "instance port")
 
 	return cmd
 }

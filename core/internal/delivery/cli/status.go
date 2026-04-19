@@ -10,9 +10,8 @@ import (
 
 func NewInstancesCommand(manager *runtime.Manager, storage Storage) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "instances",
-		Aliases: []string{"status"},
-		Short:   "Show the runtime snapshot",
+		Use:   "instances",
+		Short: "Show the runtime snapshot",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			snapshot := manager.Snapshot(context.Background())
 			instances, err := storage.LoadInstances()
@@ -31,10 +30,6 @@ func NewInstancesCommand(manager *runtime.Manager, storage Storage) *cobra.Comma
 	}
 
 	return cmd
-}
-
-func NewStatusCommand(manager *runtime.Manager, storage Storage) *cobra.Command {
-	return NewInstancesCommand(manager, storage)
 }
 
 func instancesToRuntime(instances []instanceSummary) []runtime.Instance {
