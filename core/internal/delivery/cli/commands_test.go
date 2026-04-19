@@ -91,7 +91,7 @@ func (a noopAddr) Network() string { return string(a) }
 
 func (a noopAddr) String() string { return string(a) }
 
-func TestCommandsServeStatusAndPorts(t *testing.T) {
+func TestCommandsServeInstances(t *testing.T) {
 	t.Helper()
 
 	storage := newTestStorage(t)
@@ -113,17 +113,9 @@ func TestCommandsServeStatusAndPorts(t *testing.T) {
 	if got, want := instancesOutput, "Runtime Status\nState: running\n\nServices\n  alpha v1\n  beta v2\n\nInstances\n  8080 running\n  9090 running\n\nPorts\n  8080\n  9090\n"; got != want {
 		t.Fatalf("unexpected instances output:\n got %q\nwant %q", got, want)
 	}
-	if got, want := stripANSI(runCommand("status")), instancesOutput; got != want {
-		t.Fatalf("unexpected status alias output:\n got %q\nwant %q", got, want)
-	}
-
-	portsOutput := stripANSI(runCommand("ports"))
-	if got, want := portsOutput, "8080\n9090\n"; got != want {
-		t.Fatalf("unexpected ports output: got %q want %q", got, want)
-	}
 }
 
-func TestCommandsServeStatusAndPortsJSON(t *testing.T) {
+func TestCommandsServeInstancesJSON(t *testing.T) {
 	t.Helper()
 
 	storage := newTestStorage(t)
@@ -172,21 +164,6 @@ func TestCommandsServeStatusAndPortsJSON(t *testing.T) {
 		t.Fatalf("unexpected status instances: %#v", statusPayload.Instances)
 	}
 
-	statusOutput := runCommand("status", "--json")
-	if got, want := statusOutput, instancesOutput; got != want {
-		t.Fatalf("unexpected status alias json output:\n got %q\nwant %q", got, want)
-	}
-
-	portsOutput := runCommand("ports", "--json")
-	var portsPayload struct {
-		Ports []int `json:"ports"`
-	}
-	if err := json.Unmarshal([]byte(portsOutput), &portsPayload); err != nil {
-		t.Fatalf("unmarshal ports json: %v\npayload: %s", err, portsOutput)
-	}
-	if len(portsPayload.Ports) != 2 || portsPayload.Ports[0] != 8080 || portsPayload.Ports[1] != 9090 {
-		t.Fatalf("unexpected ports payload: %#v", portsPayload.Ports)
-	}
 }
 
 func TestServeDefaultsTo4566AndFallsBackWhenBusy(t *testing.T) {
@@ -316,10 +293,35 @@ func TestCommandsServeDetachedLifecycle(t *testing.T) {
 	manager := runtime.New(composition.Assemble([]orchestrator.Service{
 		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
 	}).Services)
+	originalDetachedServe := startDetachedServe
+	defer func() { startDetachedServe = originalDetachedServe }()
 
 	started := make(chan struct{})
 	release := make(chan struct{})
 	finished := make(chan struct{})
+	startDetachedServe = func(ctx context.Context, port int, start func(context.Context) error) error {
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- start(ctx)
+		}()
+
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			if containsPort(manager.Ports(context.Background()), port) {
+				return nil
+			}
+
+			select {
+			case err := <-errCh:
+				return err
+			case <-ticker.C:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
 	cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
 		return &commandServerStub{
 			manager:  manager,
@@ -396,7 +398,7 @@ func TestCommandsStopAndDeleteLifecycle(t *testing.T) {
 		t.Fatalf("serve lifecycle seed: %v", err)
 	}
 
-	if err := run("stop", "--port", "9090"); err != nil {
+	if err := run("stop", "9090"); err != nil {
 		t.Fatalf("stop lifecycle: %v", err)
 	}
 
@@ -435,7 +437,7 @@ func TestCommandsRejectMissingInstanceLifecycleTargets(t *testing.T) {
 	storage := newTestStorage(t)
 	manager := runtime.New(nil)
 
-	for _, args := range [][]string{{"stop"}, {"delete"}} {
+	for _, args := range [][]string{{"stop"}} {
 		cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
 			return &commandServerStub{manager: manager, storage: storage, port: port}
 		})
@@ -445,7 +447,7 @@ func TestCommandsRejectMissingInstanceLifecycleTargets(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected error for %v", args)
 		}
-		if got := err.Error(); !strings.Contains(got, "requires --port") {
+		if got := err.Error(); !strings.Contains(got, "accepts 1 arg") {
 			t.Fatalf("unexpected missing target error for %v: %v", args, err)
 		}
 	}
@@ -460,18 +462,6 @@ func TestCommandsRenderEmptyRuntimeStatus(t *testing.T) {
 
 	if got, want := stripANSI(statusOutput), "Runtime Status\nState: not_started\n\nServices\n  (none)\n\nInstances\n  (none)\n\nPorts\n  (none)\n"; got != want {
 		t.Fatalf("unexpected empty status output:\n got %q\nwant %q", got, want)
-	}
-}
-
-func TestCommandsRenderEmptyPortsState(t *testing.T) {
-	t.Helper()
-
-	storage := newTestStorage(t)
-	manager := runtime.New(nil)
-	portsOutput := stripANSI(executeCommand(t, manager, storage, "ports"))
-
-	if got, want := portsOutput, "No ports registered\n"; got != want {
-		t.Fatalf("unexpected empty ports output:\n got %q\nwant %q", got, want)
 	}
 }
 
@@ -521,7 +511,6 @@ func newTestCommand(t *testing.T, manager *runtime.Manager, storage Storage, fac
 		Instances: NewInstancesCommand(manager, storage),
 		Stop:      NewStopCommand(manager, storage),
 		Delete:    NewDeleteCommand(manager, storage),
-		Ports:     NewPortsCommand(manager, storage),
 	})
 	return cmd, stdout, stderr
 }
@@ -539,4 +528,13 @@ var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func stripANSI(s string) string {
 	return ansiPattern.ReplaceAllString(s, "")
+}
+
+func containsPort(ports []int, port int) bool {
+	for _, existing := range ports {
+		if existing == port {
+			return true
+		}
+	}
+	return false
 }

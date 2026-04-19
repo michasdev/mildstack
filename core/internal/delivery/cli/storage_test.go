@@ -165,3 +165,37 @@ func TestStorageTracksErroredInstancesAndHidesThemFromActivePorts(t *testing.T) 
 		t.Fatalf("expected errored instance to be excluded from active ports, got %#v", ports)
 	}
 }
+
+func TestStorageTracksInactiveInstancesAsNotStarted(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	configDir := t.TempDir()
+	paths := runtime.ResolvePathsFrom(homeDir, configDir)
+	storage := NewStorage(paths, runtime.LegacyBaseDirFrom(homeDir, configDir))
+
+	if err := storage.SaveSavedInstance(7070); err != nil {
+		t.Fatalf("save saved instance: %v", err)
+	}
+	recordPath := filepath.Join(paths.InstancesDir, "active", "7070.json")
+	if err := os.MkdirAll(filepath.Dir(recordPath), 0o755); err != nil {
+		t.Fatalf("create active dir: %v", err)
+	}
+	if err := os.WriteFile(recordPath, []byte("{\n  \"port\": 7070,\n  \"status\": \"running\"\n}\n"), 0o644); err != nil {
+		t.Fatalf("write inactive active record: %v", err)
+	}
+
+	instances, err := storage.LoadInstances()
+	if err != nil {
+		t.Fatalf("load instances: %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected one instance, got %#v", instances)
+	}
+	if got, want := instances[0].Status, "not_started"; got != want {
+		t.Fatalf("unexpected inactive instance status: got %q want %q", got, want)
+	}
+	if got := instances[0].Error; got != "" {
+		t.Fatalf("expected inactive instance to have no error, got %q", got)
+	}
+}

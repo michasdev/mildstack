@@ -10,7 +10,6 @@ import (
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	"github.com/michasdev/mildstack/core/internal/composition"
 	"github.com/michasdev/mildstack/core/internal/delivery/cli"
-	cliui "github.com/michasdev/mildstack/core/internal/delivery/cli/ui"
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
 )
 
@@ -43,8 +42,6 @@ func main() {
 		Instances: cli.NewInstancesCommand(manager, storage),
 		Stop:      cli.NewStopCommand(manager, storage),
 		Delete:    cli.NewDeleteCommand(manager, storage),
-		Ports:     cli.NewPortsCommand(manager, storage),
-		UI:        cliui.NewUICommand(manager),
 	}
 
 	if err := cli.Execute(context.Background(), os.Stdout, os.Stderr, commands); err != nil {
@@ -77,6 +74,9 @@ func (r instanceRegistrar) Serve(ctx context.Context, port int) error {
 		return err
 	}
 	if err := r.storage.SaveActiveInstance(port); err != nil {
+		return err
+	}
+	if err := signalDetachedReady(port); err != nil {
 		return err
 	}
 	return nil
@@ -172,4 +172,14 @@ func containsPort(ports []int, port int) bool {
 		}
 	}
 	return false
+}
+
+func signalDetachedReady(port int) error {
+	readyFile := strings.TrimSpace(os.Getenv("MILDSTACK_DETACHED_READY_FILE"))
+	if readyFile == "" {
+		return nil
+	}
+
+	payload := fmt.Sprintf("%d\n", port)
+	return os.WriteFile(readyFile, []byte(payload), 0o600)
 }

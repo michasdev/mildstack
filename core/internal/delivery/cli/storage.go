@@ -164,27 +164,21 @@ func (s Storage) LoadInstances() ([]instanceSummary, error) {
 			continue
 		}
 		status := strings.TrimSpace(record.Status)
+		errorMessage := strings.TrimSpace(record.Error)
 		alive := record.PID > 0 && processAlive(record.PID)
-		switch status {
-		case "":
-			if alive {
-				status = "running"
-			} else {
-				status = "errored"
-			}
-		case "running":
-			if !alive {
-				status = "errored"
-			}
-		}
-		if status != "running" && status != "errored" && status != "not_started" {
+		switch {
+		case errorMessage != "":
 			status = "errored"
+		case status == "running" && alive:
+			status = "running"
+		default:
+			status = "not_started"
 		}
 		instance := instanceSummary{
 			Port:   record.Port,
 			PID:    record.PID,
 			Status: status,
-			Error:  strings.TrimSpace(record.Error),
+			Error:  errorMessage,
 		}
 		if instance.Status == "running" {
 			instance.Error = ""
