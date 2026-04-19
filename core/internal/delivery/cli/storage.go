@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -164,8 +165,12 @@ func (s Storage) LoadInstances() ([]instanceSummary, error) {
 		if record.Port <= 0 {
 			continue
 		}
+		id := record.InstanceID
+		if id == "" {
+			id = instanceIDFromPort(record.Port)
+		}
 		instances[record.Port] = instanceSummary{
-			InstanceID: record.InstanceID,
+			InstanceID: id,
 			Port:       record.Port,
 			PID:        record.PID,
 			Status:     "not_started",
@@ -187,12 +192,15 @@ func (s Storage) LoadInstances() ([]instanceSummary, error) {
 		default:
 			status = "not_started"
 		}
-		// active record wins on instanceId if both saved and active exist
+		// active record wins on instanceId; fall back to saved, then derive from port
 		instanceID := record.InstanceID
 		if instanceID == "" {
-			if prev, ok := instances[record.Port]; ok {
+			if prev, ok := instances[record.Port]; ok && prev.InstanceID != "" {
 				instanceID = prev.InstanceID
 			}
+		}
+		if instanceID == "" {
+			instanceID = instanceIDFromPort(record.Port)
 		}
 		instance := instanceSummary{
 			InstanceID: instanceID,
@@ -351,4 +359,11 @@ func writeFile(path string, data []byte) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+// instanceIDFromPort derives a stable, human-readable instance identity from
+// a port number. The format matches the derivation in main.go so that legacy
+// records without an explicit instanceId are always resolved consistently.
+func instanceIDFromPort(port int) string {
+	return fmt.Sprintf("mildstack-%d", port)
 }

@@ -14,8 +14,6 @@ import (
 )
 
 func main() {
-	instanceID := resolveInstanceID()
-	root := composition.DefaultRoot(instanceID)
 	paths := runtime.ResolvePaths()
 	homeDir, _ := os.UserHomeDir()
 	configDir, _ := os.UserConfigDir()
@@ -24,9 +22,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	manager := runtime.NewWithPorts(root.Services, activePorts)
-	manager.SetInstanceID(instanceID)
+	// Manager starts with no services; services are wired per-serve call once
+	// the port (and therefore the instanceId) is known.
+	manager := runtime.NewWithPorts(nil, activePorts)
+
 	httpServerFactory := func(port int) cli.HTTPServer {
+		instanceID := instanceIDFromPort(port)
+		root := composition.DefaultRoot(instanceID)
+		manager.SetInstanceID(instanceID)
+		manager.SetServices(root.Services)
+
 		router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
 		if err := registerServiceRoutes(router.Registrar(), root.Services); err != nil {
 			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port}
@@ -37,7 +42,8 @@ func main() {
 		if err := registerNativeS3Routes(router, root.Services); err != nil {
 			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port}
 		}
-		return recordingHTTPServer{server: deliveryhttp.NewServer(instanceRegistrar{manager: manager, storage: storage}, router, port), storage: storage, port: port}
+		registrar := instanceRegistrar{manager: manager, storage: storage, instanceID: instanceID}
+		return recordingHTTPServer{server: deliveryhttp.NewServer(registrar, router, port), storage: storage, port: port}
 	}
 	commands := cli.Commands{
 		Serve:     cli.NewServeCommand(manager, httpServerFactory),
@@ -52,13 +58,17 @@ func main() {
 	}
 }
 
-func resolveInstanceID() string {
-	return strings.TrimSpace(os.Getenv("MILDSTACK_INSTANCE_ID"))
+// instanceIDFromPort derives a stable, human-readable instance identity from
+// the serve port. The format is "mildstack-{port}" so operators can correlate
+// CLI output, JSON records, and AWS resource paths without extra bookkeeping.
+func instanceIDFromPort(port int) string {
+	return fmt.Sprintf("mildstack-%d", port)
 }
 
 type instanceRegistrar struct {
-	manager *runtime.Manager
-	storage cli.Storage
+	manager    *runtime.Manager
+	storage    cli.Storage
+	instanceID string
 }
 
 func (r instanceRegistrar) Serve(ctx context.Context, port int) error {
@@ -67,10 +77,10 @@ func (r instanceRegistrar) Serve(ctx context.Context, port int) error {
 			return err
 		}
 	}
-	if err := r.storage.SaveSavedInstance(port); err != nil {
+	if err := r.storage.SaveSavedInstanceWithID(r.instanceID, port); err != nil {
 		return err
 	}
-	if err := r.storage.SaveActiveInstance(port); err != nil {
+	if err := r.storage.SaveActiveInstanceWithID(r.instanceID, port); err != nil {
 		return err
 	}
 	if err := signalDetachedReady(port); err != nil {

@@ -120,6 +120,22 @@ func (m *Manager) SetInstanceID(id string) {
 	m.instanceID = id
 }
 
+// SetServices replaces the manager's service metadata with metadata derived
+// from the provided services. Called when services are wired after the manager
+// is constructed (e.g., when instanceId is resolved from the serve port).
+func (m *Manager) SetServices(services []orchestrator.Service) {
+	metadata := make([]orchestrator.Metadata, 0, len(services))
+	for _, service := range services {
+		if service == nil {
+			continue
+		}
+		metadata = append(metadata, cloneMetadata(service.Metadata()))
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.services = metadata
+}
+
 func cloneMetadata(metadata orchestrator.Metadata) orchestrator.Metadata {
 	copied := orchestrator.Metadata{
 		Name:        metadata.Name,

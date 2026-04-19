@@ -56,10 +56,11 @@ func (s *commandServerStub) Start(ctx context.Context) error {
 	if err := s.manager.Serve(ctx, s.port); err != nil {
 		return err
 	}
-	if err := s.storage.SaveSavedInstance(s.port); err != nil {
+	instanceID := instanceIDFromPort(s.port)
+	if err := s.storage.SaveSavedInstanceWithID(instanceID, s.port); err != nil {
 		return err
 	}
-	if err := s.storage.SaveActiveInstance(s.port); err != nil {
+	if err := s.storage.SaveActiveInstanceWithID(instanceID, s.port); err != nil {
 		return err
 	}
 	if s.started != nil {
@@ -602,7 +603,6 @@ func TestCommandsServeInstancesJSONIncludesInstanceID(t *testing.T) {
 	manager := runtime.New(composition.Assemble([]orchestrator.Service{
 		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
 	}).Services)
-	manager.SetInstanceID("canonical-id-regression")
 
 	executeCommand(t, manager, storage, "serve", "--port", "7777")
 
@@ -621,7 +621,8 @@ func TestCommandsServeInstancesJSONIncludesInstanceID(t *testing.T) {
 	if len(payload.Instances) != 1 {
 		t.Fatalf("expected one instance, got %d", len(payload.Instances))
 	}
-	if got, want := payload.Instances[0].InstanceID, "canonical-id-regression"; got != want {
+	// instanceId is derived from the port: mildstack-{port}
+	if got, want := payload.Instances[0].InstanceID, "mildstack-7777"; got != want {
 		t.Fatalf("unexpected instanceId: got %q want %q", got, want)
 	}
 	if got, want := payload.Instances[0].Port, 7777; got != want {
