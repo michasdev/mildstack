@@ -81,6 +81,7 @@ func (r instanceRegistrar) Serve(ctx context.Context, port int) error {
 }
 
 func (r instanceRegistrar) Release(_ context.Context, port int) error {
+	r.manager.RemovePort(port)
 	return r.storage.DeleteActiveInstance(port)
 }
 

@@ -8,11 +8,14 @@ import (
 	"net"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	"github.com/michasdev/mildstack/core/internal/composition"
+	"github.com/spf13/cobra"
 )
 
 var _ orchestrator.Service = (*commandServiceStub)(nil)
@@ -36,19 +39,40 @@ func (s *commandServiceStub) RegisterRoutes(orchestrator.RouteRegistrar) error {
 func (s *commandServiceStub) AttachState(orchestrator.StateHook) error { return nil }
 
 type commandServerStub struct {
-	manager *runtime.Manager
-	storage Storage
-	port    int
+	manager  *runtime.Manager
+	storage  Storage
+	port     int
+	started  chan struct{}
+	release  chan struct{}
+	finished chan struct{}
 }
 
 func (s *commandServerStub) Start(ctx context.Context) error {
+	defer func() {
+		if s.finished != nil {
+			close(s.finished)
+		}
+	}()
 	if err := s.manager.Serve(ctx, s.port); err != nil {
 		return err
 	}
 	if err := s.storage.SaveSavedInstance(s.port); err != nil {
 		return err
 	}
-	return s.storage.SaveActiveInstance(s.port)
+	if err := s.storage.SaveActiveInstance(s.port); err != nil {
+		return err
+	}
+	if s.started != nil {
+		close(s.started)
+	}
+	if s.release != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.release:
+		}
+	}
+	return nil
 }
 
 type noopListener struct{}
@@ -218,7 +242,10 @@ func TestServeExplicitPortSkipsFallback(t *testing.T) {
 	listenCalls := 0
 	listenTCP = func(network, address string) (net.Listener, error) {
 		listenCalls++
-		return nil, errors.New("listen should not be called for explicit ports")
+		if address != ":4566" {
+			t.Fatalf("unexpected fallback probe: %s %s", network, address)
+		}
+		return noopListener{}, nil
 	}
 
 	manager := runtime.New(composition.Assemble([]orchestrator.Service{
@@ -233,8 +260,8 @@ func TestServeExplicitPortSkipsFallback(t *testing.T) {
 
 	runCommand("serve", "--port", "4566")
 
-	if got, want := listenCalls, 0; got != want {
-		t.Fatalf("expected no port probe for explicit flag, got %d", got)
+	if got, want := listenCalls, 1; got != want {
+		t.Fatalf("expected exactly one explicit probe, got %d", got)
 	}
 
 	ports := manager.Ports(context.Background())
@@ -291,14 +318,8 @@ func TestCommandsRenderErroredInstanceStatus(t *testing.T) {
 func executeCommand(t *testing.T, manager *runtime.Manager, storage Storage, args ...string) string {
 	t.Helper()
 
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd := NewRootCommand(stdout, stderr, Commands{
-		Serve: NewServeCommand(manager, func(port int) HTTPServer {
-			return &commandServerStub{manager: manager, storage: storage, port: port}
-		}),
-		Instances: NewInstancesCommand(manager, storage),
-		Ports:     NewPortsCommand(manager, storage),
+	cmd, stdout, stderr := newTestCommand(t, manager, storage, func(port int) HTTPServer {
+		return &commandServerStub{manager: manager, storage: storage, port: port}
 	})
 	cmd.SetArgs(args)
 
@@ -307,6 +328,19 @@ func executeCommand(t *testing.T, manager *runtime.Manager, storage Storage, arg
 	}
 
 	return stdout.String()
+}
+
+func newTestCommand(t *testing.T, manager *runtime.Manager, storage Storage, factory HTTPServerFactory) (*cobra.Command, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd := NewRootCommand(stdout, stderr, Commands{
+		Serve:     NewServeCommand(manager, factory),
+		Instances: NewInstancesCommand(manager, storage),
+		Ports:     NewPortsCommand(manager, storage),
+	})
+	return cmd, stdout, stderr
 }
 
 func newTestStorage(t *testing.T) Storage {

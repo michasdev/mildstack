@@ -627,6 +627,10 @@ func TestInstanceRegistrarPersistsAndReleasesActiveInstance(t *testing.T) {
 		t.Fatalf("release: %v", err)
 	}
 
+	if ports := manager.Ports(context.Background()); len(ports) != 0 {
+		t.Fatalf("expected manager ports to be cleared after release, got %#v", ports)
+	}
+
 	ports, err = storage.LoadActivePorts()
 	if err != nil {
 		t.Fatalf("load active ports after release: %v", err)

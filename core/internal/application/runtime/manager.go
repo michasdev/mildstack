@@ -96,6 +96,19 @@ func (m *Manager) Ports(ctx context.Context) []int {
 	return sortedPorts(m.ports)
 }
 
+func (m *Manager) RemovePort(port int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	filtered := m.ports[:0]
+	for _, existing := range m.ports {
+		if existing != port {
+			filtered = append(filtered, existing)
+		}
+	}
+	m.ports = append([]int(nil), filtered...)
+}
+
 func cloneMetadata(metadata orchestrator.Metadata) orchestrator.Metadata {
 	copied := orchestrator.Metadata{
 		Name:        metadata.Name,
