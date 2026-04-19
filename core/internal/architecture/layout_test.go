@@ -13,7 +13,7 @@ var forbiddenImports = []string{
 	"github.com/gin-gonic/gin",
 	"github.com/spf13/cobra",
 	"github.com/charmbracelet/bubbletea",
-	"github.com/charmbracelet/lipgloss",
+	"charm.land/lipgloss/v2",
 }
 
 func TestInwardLayersStayFrameworkFree(t *testing.T) {
@@ -85,7 +85,7 @@ func assertNoForbiddenImports(t *testing.T, path string) {
 		if strings.HasPrefix(importPath, "github.com/gin-gonic/gin") ||
 			strings.HasPrefix(importPath, "github.com/spf13/cobra") ||
 			strings.HasPrefix(importPath, "github.com/charmbracelet/bubbletea") ||
-			strings.HasPrefix(importPath, "github.com/charmbracelet/lipgloss") {
+			strings.HasPrefix(importPath, "charm.land/lipgloss/v2") {
 			t.Fatalf("%s imports forbidden framework package %s", path, importPath)
 		}
 		if strings.Contains(importPath, "core/internal/infrastructure/") || importPath == "core/internal/infrastructure" {

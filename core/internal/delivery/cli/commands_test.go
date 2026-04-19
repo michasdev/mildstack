@@ -117,7 +117,7 @@ func TestCommandsServeStatusAndPorts(t *testing.T) {
 		t.Fatalf("unexpected status alias output:\n got %q\nwant %q", got, want)
 	}
 
-	portsOutput := runCommand("ports")
+	portsOutput := stripANSI(runCommand("ports"))
 	if got, want := portsOutput, "8080\n9090\n"; got != want {
 		t.Fatalf("unexpected ports output: got %q want %q", got, want)
 	}

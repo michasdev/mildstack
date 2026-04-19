@@ -3,15 +3,18 @@ package ui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	charmgloss "charm.land/lipgloss/v2"
 )
 
 var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("120"))
-	helperStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	sectionStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("114"))
-	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("114"))
-	detailStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("114")).Padding(0, 1)
+	violet        = charmgloss.Color("#8b5cf6")
+	softViolet    = charmgloss.Color("#a78bfa")
+	muted         = charmgloss.Color("#9ca3af")
+	titleStyle    = charmgloss.NewStyle().Bold(true).Foreground(violet)
+	helperStyle   = charmgloss.NewStyle().Foreground(muted)
+	sectionStyle  = charmgloss.NewStyle().Bold(true).Foreground(softViolet)
+	selectedStyle = charmgloss.NewStyle().Bold(true).Foreground(violet)
+	detailStyle   = charmgloss.NewStyle().Border(charmgloss.NormalBorder()).BorderForeground(violet).Padding(0, 1)
 )
 
 func renderPane(title string, focused bool, lines []string) string {

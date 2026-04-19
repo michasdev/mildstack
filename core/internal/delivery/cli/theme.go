@@ -1,6 +1,6 @@
 package cli
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 type Theme struct {
 	TitleLabel     string
@@ -18,9 +18,9 @@ type Theme struct {
 }
 
 func DefaultTheme() Theme {
-	softGreen := lipgloss.Color("120")
-	green := lipgloss.Color("114")
-	muted := lipgloss.Color("245")
+	violet := lipgloss.Color("#8b5cf6")
+	softViolet := lipgloss.Color("#a78bfa")
+	muted := lipgloss.Color("#9ca3af")
 
 	return Theme{
 		TitleLabel:     "Runtime Status",
@@ -30,10 +30,10 @@ func DefaultTheme() Theme {
 		PortsLabel:     "Ports",
 		EmptyLabel:     "(none)",
 		Indent:         "  ",
-		TitleStyle:     lipgloss.NewStyle().Bold(true).Foreground(softGreen),
-		LabelStyle:     lipgloss.NewStyle().Bold(true).Foreground(green),
-		SectionStyle:   lipgloss.NewStyle().Bold(true).Foreground(softGreen),
-		AccentStyle:    lipgloss.NewStyle().Bold(true).Foreground(green),
+		TitleStyle:     lipgloss.NewStyle().Bold(true).Foreground(violet),
+		LabelStyle:     lipgloss.NewStyle().Bold(true).Foreground(softViolet),
+		SectionStyle:   lipgloss.NewStyle().Bold(true).Foreground(violet),
+		AccentStyle:    lipgloss.NewStyle().Bold(true).Foreground(softViolet),
 		EmptyStyle:     lipgloss.NewStyle().Foreground(muted),
 	}
 }
