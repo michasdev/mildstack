@@ -12,10 +12,11 @@ func init() {
 }
 
 type Commands struct {
-	Serve  *cobra.Command
-	Status *cobra.Command
-	Ports  *cobra.Command
-	UI     *cobra.Command
+	Serve     *cobra.Command
+	Instances *cobra.Command
+	Status    *cobra.Command
+	Ports     *cobra.Command
+	UI        *cobra.Command
 }
 
 func NewRootCommand(out, err io.Writer, commands Commands) *cobra.Command {
@@ -28,7 +29,24 @@ func NewRootCommand(out, err io.Writer, commands Commands) *cobra.Command {
 	cmd.SetErr(err)
 	cmd.PersistentFlags().Bool("json", false, "Render machine-readable JSON output")
 
-	for _, subcommand := range []*cobra.Command{commands.Serve, commands.Status, commands.Ports, commands.UI} {
+	subcommands := []*cobra.Command{commands.Serve}
+	switch {
+	case commands.Instances != nil:
+		subcommands = append(subcommands, commands.Instances)
+		if commands.Ports != nil {
+			subcommands = append(subcommands, commands.Ports)
+		}
+	case commands.Status != nil:
+		subcommands = append(subcommands, commands.Status)
+		if commands.Ports != nil {
+			subcommands = append(subcommands, commands.Ports)
+		}
+	case commands.Ports != nil:
+		subcommands = append(subcommands, commands.Ports)
+	}
+	subcommands = append(subcommands, commands.UI)
+
+	for _, subcommand := range subcommands {
 		if subcommand != nil {
 			cmd.AddCommand(subcommand)
 		}

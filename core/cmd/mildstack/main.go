@@ -39,10 +39,10 @@ func main() {
 		return recordingHTTPServer{server: deliveryhttp.NewServer(instanceRegistrar{manager: manager, storage: storage}, router, port), storage: storage, port: port}
 	}
 	commands := cli.Commands{
-		Serve:  cli.NewServeCommand(manager, httpServerFactory),
-		Status: cli.NewStatusCommand(manager, storage),
-		Ports:  cli.NewPortsCommand(manager, storage),
-		UI:     cliui.NewUICommand(manager),
+		Serve:     cli.NewServeCommand(manager, httpServerFactory),
+		Instances: cli.NewInstancesCommand(manager, storage),
+		Ports:     cli.NewPortsCommand(manager, storage),
+		UI:        cliui.NewUICommand(manager),
 	}
 
 	if err := cli.Execute(context.Background(), os.Stdout, os.Stderr, commands); err != nil {

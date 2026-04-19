@@ -85,9 +85,12 @@ func TestCommandsServeStatusAndPorts(t *testing.T) {
 	runCommand("serve", "--port", "9090")
 	runCommand("serve", "--port", "8080")
 
-	statusOutput := stripANSI(runCommand("status"))
-	if got, want := statusOutput, "Runtime Status\nState: running\n\nServices\n  alpha v1\n  beta v2\n\nInstances\n  8080 running\n  9090 running\n\nPorts\n  8080\n  9090\n"; got != want {
-		t.Fatalf("unexpected status output:\n got %q\nwant %q", got, want)
+	instancesOutput := stripANSI(runCommand("instances"))
+	if got, want := instancesOutput, "Runtime Status\nState: running\n\nServices\n  alpha v1\n  beta v2\n\nInstances\n  8080 running\n  9090 running\n\nPorts\n  8080\n  9090\n"; got != want {
+		t.Fatalf("unexpected instances output:\n got %q\nwant %q", got, want)
+	}
+	if got, want := stripANSI(runCommand("status")), instancesOutput; got != want {
+		t.Fatalf("unexpected status alias output:\n got %q\nwant %q", got, want)
 	}
 
 	portsOutput := runCommand("ports")
@@ -114,7 +117,7 @@ func TestCommandsServeStatusAndPortsJSON(t *testing.T) {
 	runCommand("serve", "--port", "9090")
 	runCommand("serve", "--port", "8080")
 
-	statusOutput := runCommand("status", "--json")
+	instancesOutput := runCommand("instances", "--json")
 	var statusPayload struct {
 		State    string `json:"state"`
 		Services []struct {
@@ -129,8 +132,8 @@ func TestCommandsServeStatusAndPortsJSON(t *testing.T) {
 		} `json:"instances"`
 		Ports []int `json:"ports"`
 	}
-	if err := json.Unmarshal([]byte(statusOutput), &statusPayload); err != nil {
-		t.Fatalf("unmarshal status json: %v\npayload: %s", err, statusOutput)
+	if err := json.Unmarshal([]byte(instancesOutput), &statusPayload); err != nil {
+		t.Fatalf("unmarshal instances json: %v\npayload: %s", err, instancesOutput)
 	}
 	if got, want := statusPayload.State, "running"; got != want {
 		t.Fatalf("unexpected status state: got %q want %q", got, want)
@@ -143,6 +146,11 @@ func TestCommandsServeStatusAndPortsJSON(t *testing.T) {
 	}
 	if len(statusPayload.Instances) != 2 || statusPayload.Instances[0].Status != "running" || statusPayload.Instances[1].Status != "running" {
 		t.Fatalf("unexpected status instances: %#v", statusPayload.Instances)
+	}
+
+	statusOutput := runCommand("status", "--json")
+	if got, want := statusOutput, instancesOutput; got != want {
+		t.Fatalf("unexpected status alias json output:\n got %q\nwant %q", got, want)
 	}
 
 	portsOutput := runCommand("ports", "--json")
@@ -240,7 +248,7 @@ func TestCommandsRenderEmptyRuntimeStatus(t *testing.T) {
 
 	storage := newTestStorage(t)
 	manager := runtime.New(nil)
-	statusOutput := executeCommand(t, manager, storage, "status")
+	statusOutput := executeCommand(t, manager, storage, "instances")
 
 	if got, want := stripANSI(statusOutput), "Runtime Status\nState: not_started\n\nServices\n  (none)\n\nInstances\n  (none)\n\nPorts\n  (none)\n"; got != want {
 		t.Fatalf("unexpected empty status output:\n got %q\nwant %q", got, want)
@@ -274,7 +282,7 @@ func TestCommandsRenderErroredInstanceStatus(t *testing.T) {
 		t.Fatalf("save errored instance: %v", err)
 	}
 
-	statusOutput := stripANSI(executeCommand(t, manager, storage, "status"))
+	statusOutput := stripANSI(executeCommand(t, manager, storage, "instances"))
 	if got, want := statusOutput, "Runtime Status\nState: errored\n\nServices\n  alpha v1\n\nInstances\n  8080 errored: failed to start\n\nPorts\n  (none)\n"; got != want {
 		t.Fatalf("unexpected errored status output:\n got %q\nwant %q", got, want)
 	}
@@ -289,8 +297,8 @@ func executeCommand(t *testing.T, manager *runtime.Manager, storage Storage, arg
 		Serve: NewServeCommand(manager, func(port int) HTTPServer {
 			return &commandServerStub{manager: manager, storage: storage, port: port}
 		}),
-		Status: NewStatusCommand(manager, storage),
-		Ports:  NewPortsCommand(manager, storage),
+		Instances: NewInstancesCommand(manager, storage),
+		Ports:     NewPortsCommand(manager, storage),
 	})
 	cmd.SetArgs(args)
 

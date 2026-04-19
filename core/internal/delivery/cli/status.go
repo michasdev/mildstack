@@ -8,10 +8,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewStatusCommand(manager *runtime.Manager, storage Storage) *cobra.Command {
+func NewInstancesCommand(manager *runtime.Manager, storage Storage) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Show the runtime snapshot",
+		Use:     "instances",
+		Aliases: []string{"status"},
+		Short:   "Show the runtime snapshot",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			snapshot := manager.Snapshot(context.Background())
 			instances, err := storage.LoadInstances()
@@ -30,6 +31,10 @@ func NewStatusCommand(manager *runtime.Manager, storage Storage) *cobra.Command 
 	}
 
 	return cmd
+}
+
+func NewStatusCommand(manager *runtime.Manager, storage Storage) *cobra.Command {
+	return NewInstancesCommand(manager, storage)
 }
 
 func instancesToRuntime(instances []instanceSummary) []runtime.Instance {
