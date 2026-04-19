@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -15,10 +14,7 @@ import (
 )
 
 func main() {
-	instanceID, err := resolveInstanceID()
-	if err != nil {
-		panic(err)
-	}
+	instanceID := resolveInstanceID()
 	root := composition.DefaultRoot(instanceID)
 	paths := runtime.ResolvePaths()
 	homeDir, _ := os.UserHomeDir()
@@ -56,12 +52,8 @@ func main() {
 	}
 }
 
-func resolveInstanceID() (string, error) {
-	instanceID := strings.TrimSpace(os.Getenv("MILDSTACK_INSTANCE_ID"))
-	if instanceID == "" {
-		return "", errors.New("MILDSTACK_INSTANCE_ID is required")
-	}
-	return instanceID, nil
+func resolveInstanceID() string {
+	return strings.TrimSpace(os.Getenv("MILDSTACK_INSTANCE_ID"))
 }
 
 type instanceRegistrar struct {

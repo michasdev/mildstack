@@ -195,3 +195,10 @@ func TestDefaultRootUsesInstanceScopedDynamoDBStorage(t *testing.T) {
 		t.Fatalf("expected storage file at %s: %v", storagePath, err)
 	}
 }
+
+func TestDefaultRootWithEmptyInstanceIDReturnsNoServices(t *testing.T) {
+	root := defaultRootWithHook(&stateHookStub{}, DefaultRootConfig{})
+	if len(root.Services) != 0 {
+		t.Fatalf("expected empty root when instance id is missing, got %d services", len(root.Services))
+	}
+}

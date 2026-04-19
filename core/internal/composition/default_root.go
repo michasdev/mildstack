@@ -23,8 +23,12 @@ func DefaultRoot(instanceID string) Root {
 
 func defaultRootWithHook(hook orchestrator.StateHook, config DefaultRootConfig) Root {
 	instanceID := strings.TrimSpace(config.InstanceID)
+	// When no instance ID is provided, return a root with no services.
+	// This allows read-only CLI commands (instances, status, stop, delete)
+	// to run without a MILDSTACK_INSTANCE_ID env var. The serve command
+	// validates the ID before starting a server.
 	if instanceID == "" {
-		panic("composition: s3 instance id is required")
+		return Assemble(nil)
 	}
 
 	s3Service, err := s3.NewWithStorage(s3.StorageConfig{
