@@ -35,6 +35,7 @@ func TestInwardLayersStayFrameworkFree(t *testing.T) {
 	mustExist(t, "../resources/dynamodb/domain")
 	mustExist(t, "../resources/dynamodb/application")
 	mustExist(t, "../resources/dynamodb/infrastructure")
+	mustExist(t, "../resources/awscontext")
 	mustExist(t, "../resources/instancepath")
 	mustExist(t, "layout.md")
 

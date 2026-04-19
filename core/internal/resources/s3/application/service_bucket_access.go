@@ -3,6 +3,8 @@ package application
 import (
 	"encoding/xml"
 	"fmt"
+
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 )
 
 const s3BucketAccessNamespace = "http://s3.amazonaws.com/doc/2006-03-01/"
@@ -90,7 +92,8 @@ func defaultPublicAccessBlockBody() []byte {
 }
 
 func defaultAccessControlPolicyBody() []byte {
-	return []byte(xml.Header + `<AccessControlPolicy xmlns="` + s3BucketAccessNamespace + `"><Owner><ID>owner-id</ID><DisplayName>mildstack</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>owner-id</ID><DisplayName>mildstack</DisplayName></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>`)
+	aws := awscontext.Default()
+	return []byte(xml.Header + `<AccessControlPolicy xmlns="` + s3BucketAccessNamespace + `"><Owner><ID>` + aws.AccountID + `</ID><DisplayName>mildstack</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>` + aws.AccountID + `</ID><DisplayName>mildstack</DisplayName></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>`)
 }
 
 func defaultObjectTaggingBody() []byte {

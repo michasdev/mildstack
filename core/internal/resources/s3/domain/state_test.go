@@ -3,13 +3,15 @@ package domain
 import (
 	"testing"
 	"time"
+
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 )
 
 func TestStateSnapshotCopiesLiveData(t *testing.T) {
 	t.Helper()
 
 	state := NewState()
-	bucket := state.UpsertBucket(Bucket{Name: "mildstack-archive", Region: "us-west-2"})
+	bucket := state.UpsertBucket(Bucket{Name: "mildstack-archive", Region: awscontext.Default().Region})
 	state.UpsertObject(Object{
 		Bucket:      bucket.Name,
 		Key:         "manifest.txt",
@@ -145,7 +147,7 @@ func TestStateDeleteBucketRequiresEmptyBucket(t *testing.T) {
 		t.Fatal("expected non-empty bootstrap bucket delete to fail")
 	}
 
-	state.UpsertBucket(Bucket{Name: "empty-bucket", Region: "us-east-1", CreatedAt: time.Now().UTC()})
+	state.UpsertBucket(Bucket{Name: "empty-bucket", Region: awscontext.Default().Region, CreatedAt: time.Now().UTC()})
 	if deleted := state.DeleteBucket("empty-bucket"); !deleted {
 		t.Fatal("expected empty bucket delete to succeed")
 	}
@@ -218,7 +220,7 @@ func TestStateListObjectPageUsesDeterministicDelimiterPagination(t *testing.T) {
 	t.Helper()
 
 	state := NewState()
-	state.UpsertBucket(Bucket{Name: "catalog-bucket", Region: "us-east-1"})
+	state.UpsertBucket(Bucket{Name: "catalog-bucket", Region: awscontext.Default().Region})
 	state.UpsertObject(Object{Bucket: "catalog-bucket", Key: "alpha.txt", Body: []byte("a"), ContentType: "text/plain"})
 	state.UpsertObject(Object{Bucket: "catalog-bucket", Key: "photos/2026/01.jpg", Body: []byte("b"), ContentType: "image/jpeg"})
 	state.UpsertObject(Object{Bucket: "catalog-bucket", Key: "photos/2027/02.jpg", Body: []byte("c"), ContentType: "image/jpeg"})
@@ -328,7 +330,7 @@ func TestStateBucketDeleteClearsGovernanceState(t *testing.T) {
 	state.SetBucketNotification(bucket.Name, []byte("<NotificationConfiguration/>"))
 	state.SetBucketLoggingConfig(bucket.Name, []byte("<BucketLoggingStatus/>"))
 	state.SetBucketReplicationConfig(bucket.Name, BucketReplicationConfig{
-		Role: "arn:aws:iam::123456789012:role/replication",
+		Role: awscontext.Default().IAMRoleARN("replication"),
 		Rules: []BucketReplicationRule{
 			{
 				ID:     "rule-1",
@@ -373,13 +375,13 @@ func TestStateSnapshotCopiesGovernanceData(t *testing.T) {
 	t.Helper()
 
 	state := NewState()
-	bucket := state.UpsertBucket(Bucket{Name: "snapshot-governance", Region: "us-east-1"})
+	bucket := state.UpsertBucket(Bucket{Name: "snapshot-governance", Region: awscontext.Default().Region})
 	state.SetBucketPolicy(bucket.Name, []byte(`{"statement":"allow"}`))
 	state.SetBucketACLConfig(bucket.Name, []byte("<AccessControlPolicy/>"))
 	state.SetBucketNotification(bucket.Name, []byte("<NotificationConfiguration/>"))
 	state.SetBucketLoggingConfig(bucket.Name, []byte("<BucketLoggingStatus/>"))
 	state.SetBucketReplicationConfig(bucket.Name, BucketReplicationConfig{
-		Role: "arn:aws:iam::123456789012:role/replication",
+		Role: awscontext.Default().IAMRoleARN("replication"),
 		Rules: []BucketReplicationRule{
 			{
 				ID:     "rule-1",
@@ -408,7 +410,7 @@ func TestStateSnapshotCopiesGovernanceData(t *testing.T) {
 
 	replication := snapshot["bucket_replication"].([]any)
 	replication[0].(map[string]any)["role"] = "mutated"
-	if got, ok := state.BucketReplicationConfig(bucket.Name); !ok || got.Role != "arn:aws:iam::123456789012:role/replication" {
+	if got, ok := state.BucketReplicationConfig(bucket.Name); !ok || got.Role != awscontext.Default().IAMRoleARN("replication") {
 		t.Fatalf("snapshot mutated live replication state: ok=%v role=%q", ok, got.Role)
 	}
 }

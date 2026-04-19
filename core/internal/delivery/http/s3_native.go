@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	s3domain "github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
@@ -107,12 +108,13 @@ func (h s3NativeHandler) dispatch(c *gin.Context) bool {
 
 func (h s3NativeHandler) listBuckets(c *gin.Context) {
 	buckets := h.service.ListBuckets()
+	aws := awscontext.Default()
 	c.Header("Content-Type", "application/xml")
 	c.XML(http.StatusOK, listBucketsResult{
 		XMLName: xml.Name{Local: "ListAllMyBucketsResult"},
 		XMLNS:   s3XMLNamespace,
 		Owner: bucketOwner{
-			ID:          "mildstack",
+			ID:          aws.AccountID,
 			DisplayName: "mildstack",
 		},
 		Buckets: listBucketsContainer{
@@ -140,7 +142,7 @@ func (h s3NativeHandler) listObjects(c *gin.Context, bucketName string) {
 func (h s3NativeHandler) createBucket(c *gin.Context, bucketName string) {
 	region := strings.TrimSpace(c.GetHeader("x-amz-bucket-region"))
 	if region == "" {
-		region = "us-east-1"
+		region = awscontext.Default().Region
 	}
 
 	bucket, err := h.service.CreateBucket(bucketName, region)

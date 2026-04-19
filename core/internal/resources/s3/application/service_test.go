@@ -18,6 +18,7 @@ import (
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	"github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
@@ -349,7 +350,7 @@ func TestServiceBucketGovernanceSubresourcesRoundTripAndCleanup(t *testing.T) {
 
 	service := New()
 
-	bucket, err := service.CreateBucket("mildstack-governed", "us-east-1")
+	bucket, err := service.CreateBucket("mildstack-governed", awscontext.Default().Region)
 	if err != nil {
 		t.Fatalf("create governed bucket: %v", err)
 	}
@@ -506,25 +507,25 @@ func TestServiceBucketGovernanceSubresourcesRoundTripAndCleanup(t *testing.T) {
 	if _, err := service.GetBucketReplication(bucket.Name); err == nil {
 		t.Fatal("expected missing replication config to fail")
 	}
-	if _, err := service.PutBucketReplication(bucket.Name, []byte(`<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::123456789012:role/replication</Role><Rule><ID>rule-1</ID><Status>Enabled</Status></Rule></ReplicationConfiguration>`)); err == nil {
+	if _, err := service.PutBucketReplication(bucket.Name, []byte(`<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>`+awscontext.Default().IAMRoleARN("replication")+`</Role><Rule><ID>rule-1</ID><Status>Enabled</Status></Rule></ReplicationConfiguration>`)); err == nil {
 		t.Fatal("expected replication put to fail before versioning is enabled")
 	}
 
-	versioned, err := service.CreateBucket("mildstack-replicated", "us-east-1")
+	versioned, err := service.CreateBucket("mildstack-replicated", awscontext.Default().Region)
 	if err != nil {
 		t.Fatalf("create versioned replication bucket: %v", err)
 	}
 	if _, err := service.PutBucketVersioning(versioned.Name, domain.VersioningEnabled); err != nil {
 		t.Fatalf("enable versioning for replication: %v", err)
 	}
-	destination, err := service.CreateBucket("mildstack-replica-destination", "us-east-1")
+	destination, err := service.CreateBucket("mildstack-replica-destination", awscontext.Default().Region)
 	if err != nil {
 		t.Fatalf("create replication destination bucket: %v", err)
 	}
 	if _, err := service.PutBucketVersioning(destination.Name, domain.VersioningEnabled); err != nil {
 		t.Fatalf("enable versioning for replication destination: %v", err)
 	}
-	replicationBody := []byte(`<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::123456789012:role/replication</Role><Rule><Status>Enabled</Status><Destination><Bucket>mildstack-replica-destination</Bucket><StorageClass>STANDARD</StorageClass></Destination></Rule></ReplicationConfiguration>`)
+	replicationBody := []byte(`<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>` + awscontext.Default().IAMRoleARN("replication") + `</Role><Rule><Status>Enabled</Status><Destination><Bucket>mildstack-replica-destination</Bucket><StorageClass>STANDARD</StorageClass></Destination></Rule></ReplicationConfiguration>`)
 	storedReplication, err := service.PutBucketReplication(versioned.Name, replicationBody)
 	if err != nil {
 		t.Fatalf("put replication: %v", err)
@@ -551,7 +552,7 @@ func TestServiceBucketGovernanceSubresourcesRoundTripAndCleanup(t *testing.T) {
 		t.Fatalf("delete governed bucket: %v", err)
 	}
 
-	recreated, err := service.CreateBucket(bucket.Name, "us-east-1")
+	recreated, err := service.CreateBucket(bucket.Name, awscontext.Default().Region)
 	if err != nil {
 		t.Fatalf("recreate governed bucket: %v", err)
 	}
@@ -596,7 +597,7 @@ func TestServiceVersioningTracksHistoryAndDeleteMarkers(t *testing.T) {
 
 	service := New()
 
-	versioned, err := service.CreateBucket("mildstack-versioned", "us-east-1")
+	versioned, err := service.CreateBucket("mildstack-versioned", awscontext.Default().Region)
 	if err != nil {
 		t.Fatalf("create versioned bucket: %v", err)
 	}
@@ -638,7 +639,7 @@ func TestServiceVersioningTracksHistoryAndDeleteMarkers(t *testing.T) {
 		t.Fatalf("unexpected first version body: got %q want %q", got, want)
 	}
 
-	plain, err := service.CreateBucket("mildstack-plain", "us-east-1")
+	plain, err := service.CreateBucket("mildstack-plain", awscontext.Default().Region)
 	if err != nil {
 		t.Fatalf("create plain bucket: %v", err)
 	}
@@ -668,7 +669,7 @@ func TestVersioningContractListObjectVersionsIsCopySafe(t *testing.T) {
 
 	service := New()
 
-	bucket, err := service.CreateBucket("mildstack-versioning-contract", "us-east-1")
+	bucket, err := service.CreateBucket("mildstack-versioning-contract", awscontext.Default().Region)
 	if err != nil {
 		t.Fatalf("create versioning contract bucket: %v", err)
 	}
@@ -716,7 +717,7 @@ func TestServiceMultipartLifecycleAssemblesAndAbortsCopySafely(t *testing.T) {
 
 	service := New()
 
-	bucket, err := service.CreateBucket("mildstack-multipart", "us-east-1")
+	bucket, err := service.CreateBucket("mildstack-multipart", awscontext.Default().Region)
 	if err != nil {
 		t.Fatalf("create multipart bucket: %v", err)
 	}
@@ -808,7 +809,7 @@ func TestMultipartContractListOperationsAreCopySafe(t *testing.T) {
 
 	service := New()
 
-	bucket, err := service.CreateBucket("mildstack-multipart-contract", "us-east-1")
+	bucket, err := service.CreateBucket("mildstack-multipart-contract", awscontext.Default().Region)
 	if err != nil {
 		t.Fatalf("create multipart contract bucket: %v", err)
 	}
@@ -902,7 +903,7 @@ func TestServiceBucketCatalogFollowsAWSSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("idempotent create bucket: %v", err)
 	}
-	if got, want := owned.Region, "us-east-1"; got != want {
+	if got, want := owned.Region, awscontext.Default().Region; got != want {
 		t.Fatalf("unexpected owned bucket region: got %q want %q", got, want)
 	}
 
@@ -910,7 +911,7 @@ func TestServiceBucketCatalogFollowsAWSSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create bucket with default region: %v", err)
 	}
-	if got, want := created.Region, "us-east-1"; got != want {
+	if got, want := created.Region, awscontext.Default().Region; got != want {
 		t.Fatalf("unexpected default region: got %q want %q", got, want)
 	}
 	if created.CreatedAt.IsZero() {
@@ -921,7 +922,7 @@ func TestServiceBucketCatalogFollowsAWSSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("head bucket: %v", err)
 	}
-	if got, want := head.Region, "us-east-1"; got != want {
+	if got, want := head.Region, awscontext.Default().Region; got != want {
 		t.Fatalf("unexpected head bucket region: got %q want %q", got, want)
 	}
 
@@ -1034,7 +1035,7 @@ func TestServiceListObjectsV1UsesMarkerPaginationDeterministically(t *testing.T)
 	t.Helper()
 
 	service := New()
-	bucket, err := service.CreateBucket("catalog-bucket", "us-east-1")
+	bucket, err := service.CreateBucket("catalog-bucket", awscontext.Default().Region)
 	if err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
@@ -1088,7 +1089,7 @@ func TestServiceListObjectsV2UsesContinuationTokensAndStartAfter(t *testing.T) {
 	t.Helper()
 
 	service := New()
-	bucket, err := service.CreateBucket("catalog-v2-bucket", "us-east-1")
+	bucket, err := service.CreateBucket("catalog-v2-bucket", awscontext.Default().Region)
 	if err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
@@ -1155,7 +1156,7 @@ func TestServiceDeleteObjectsPreservesOrderAndTreatsMissingKeysAsDeleted(t *test
 	t.Helper()
 
 	service := New()
-	bucket, err := service.CreateBucket("catalog-delete-bucket", "us-east-1")
+	bucket, err := service.CreateBucket("catalog-delete-bucket", awscontext.Default().Region)
 	if err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}

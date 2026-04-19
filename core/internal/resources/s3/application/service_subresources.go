@@ -3,6 +3,8 @@ package application
 import (
 	"fmt"
 	"strings"
+
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 )
 
 func (s *Service) GetBucketPolicy(bucket string) ([]byte, error) {
@@ -222,16 +224,17 @@ func (s *Service) DeleteBucketTagging(bucket string) error {
 
 func defaultBucketACLBody(bucket string) []byte {
 	_ = bucket
+	aws := awscontext.Default()
 	return []byte(strings.TrimSpace(`<?xml version="1.0" encoding="UTF-8"?>
 <AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
   <Owner>
-    <ID>owner-id</ID>
+    <ID>` + aws.AccountID + `</ID>
     <DisplayName>mildstack</DisplayName>
   </Owner>
   <AccessControlList>
     <Grant>
       <Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser">
-        <ID>owner-id</ID>
+        <ID>` + aws.AccountID + `</ID>
         <DisplayName>mildstack</DisplayName>
       </Grantee>
       <Permission>FULL_CONTROL</Permission>

@@ -2,12 +2,14 @@ package http
 
 import (
 	"bytes"
+	"encoding/xml"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	s3domain "github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
@@ -108,5 +110,35 @@ func TestS3NativePutObjectDoesNotBufferWholeRequest(t *testing.T) {
 	}
 	if body.reads != 0 {
 		t.Fatalf("expected zero pre-buffering reads, got %d", body.reads)
+	}
+}
+
+func TestS3NativeListBucketsUsesSharedAWSAccountID(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	spy := &spyS3NativeService{}
+	engine := gin.New()
+	RegisterS3NativeRoutes(engine, spy)
+
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	recorder := httptest.NewRecorder()
+
+	engine.ServeHTTP(recorder, request)
+
+	if got, want := recorder.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected status: got %d want %d", got, want)
+	}
+	var payload struct {
+		XMLName xml.Name `xml:"ListAllMyBucketsResult"`
+		Owner   struct {
+			ID string `xml:"ID"`
+		} `xml:"Owner"`
+	}
+	if err := xml.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode list buckets response: %v", err)
+	}
+	if got, want := payload.Owner.ID, awscontext.Default().AccountID; got != want {
+		t.Fatalf("unexpected owner id: got %q want %q", got, want)
 	}
 }

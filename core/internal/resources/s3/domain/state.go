@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"sort"
 	"time"
+
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 )
 
 const StateKey = "services/s3"
@@ -168,12 +170,13 @@ type DeleteObjectsResult struct {
 }
 
 func NewState() State {
+	aws := awscontext.Default()
 	return State{
 		Service: "s3",
 		Buckets: []Bucket{
 			{
 				Name:      "mildstack-assets",
-				Region:    "us-east-1",
+				Region:    aws.Region,
 				CreatedAt: time.Date(2026, time.April, 16, 0, 0, 0, 0, time.UTC),
 			},
 		},

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	"github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
@@ -372,7 +373,7 @@ func normalizeState(state domain.State) domain.State {
 
 	for i := range normalized.Buckets {
 		if normalized.Buckets[i].Region == "" {
-			normalized.Buckets[i].Region = defaultRegion
+			normalized.Buckets[i].Region = awscontext.Default().Region
 		}
 		if normalized.Buckets[i].CreatedAt.IsZero() {
 			normalized.Buckets[i].CreatedAt = fallbackBucketCreatedAt(normalized.Buckets[i].Name)

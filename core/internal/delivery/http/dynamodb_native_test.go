@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	"github.com/michasdev/mildstack/core/internal/resources/dynamodb/application"
 )
 
@@ -90,6 +91,9 @@ func TestDynamoDBNativeRoutesHandleSupportedLocalSubset(t *testing.T) {
 	if got, want := createTableResponse.TableDescription.TableStatus, "CREATING"; got != want {
 		t.Fatalf("unexpected table status: got %q want %q", got, want)
 	}
+	if got, want := createTableResponse.TableDescription.TableArn, awscontext.Default().DynamoDBTableARN("mildstack-archive"); got != want {
+		t.Fatalf("unexpected table arn: got %q want %q", got, want)
+	}
 	if got := createTableResponse.TableDescription.CreationDateTime; got <= 0 {
 		t.Fatalf("expected create table creation date time to be populated, got %d", got)
 	}
@@ -107,6 +111,9 @@ func TestDynamoDBNativeRoutesHandleSupportedLocalSubset(t *testing.T) {
 	decodeResponse(t, describeTable.body, &describeTableResponse)
 	if got, want := describeTableResponse.Table.TableStatus, "CREATING"; got != want {
 		t.Fatalf("unexpected creating table status: got %q want %q", got, want)
+	}
+	if got, want := describeTableResponse.Table.TableArn, awscontext.Default().DynamoDBTableARN("mildstack-archive"); got != want {
+		t.Fatalf("unexpected describe table arn: got %q want %q", got, want)
 	}
 
 	putItem := doDynamoDBRequest(t, engine, dynamoRequest{
