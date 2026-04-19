@@ -744,20 +744,19 @@ func equalStringSlices(got, want []string) bool {
 	return true
 }
 
-func TestResolveInstanceIDUsesEnvironmentVariable(t *testing.T) {
-	t.Setenv("MILDSTACK_INSTANCE_ID", "  env-instance-31  ")
-
-	got := resolveInstanceID()
-	if got != "env-instance-31" {
-		t.Fatalf("unexpected instance id: got %q want %q", got, "env-instance-31")
+func TestInstanceIDFromPortUsesPortNumber(t *testing.T) {
+	cases := []struct {
+		port int
+		want string
+	}{
+		{4566, "mildstack-4566"},
+		{8080, "mildstack-8080"},
+		{9000, "mildstack-9000"},
 	}
-}
-
-func TestResolveInstanceIDReturnsEmptyWhenNotSet(t *testing.T) {
-	t.Setenv("MILDSTACK_INSTANCE_ID", " ")
-
-	got := resolveInstanceID()
-	if got != "" {
-		t.Fatalf("expected empty instance id when env var is blank, got %q", got)
+	for _, tc := range cases {
+		got := instanceIDFromPort(tc.port)
+		if got != tc.want {
+			t.Fatalf("port %d: got %q want %q", tc.port, got, tc.want)
+		}
 	}
 }
