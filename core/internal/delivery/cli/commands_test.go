@@ -123,6 +123,7 @@ func TestCommandsServeInstancesJSON(t *testing.T) {
 		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
 		&commandServiceStub{metadata: orchestrator.Metadata{Name: "beta", Version: "v2"}},
 	}).Services)
+	manager.SetInstanceID("test-instance-json")
 
 	runCommand := func(args ...string) string {
 		t.Helper()
@@ -142,9 +143,10 @@ func TestCommandsServeInstancesJSON(t *testing.T) {
 			Tags    []string `json:"tags"`
 		} `json:"services"`
 		Instances []struct {
-			Port   int    `json:"port"`
-			Status string `json:"status"`
-			Error  string `json:"error"`
+			InstanceID string `json:"instanceId"`
+			Port       int    `json:"port"`
+			Status     string `json:"status"`
+			Error      string `json:"error"`
 		} `json:"instances"`
 		Ports []int `json:"ports"`
 	}
@@ -163,7 +165,12 @@ func TestCommandsServeInstancesJSON(t *testing.T) {
 	if len(statusPayload.Instances) != 2 || statusPayload.Instances[0].Status != "running" || statusPayload.Instances[1].Status != "running" {
 		t.Fatalf("unexpected status instances: %#v", statusPayload.Instances)
 	}
-
+	// instanceId must be present in the JSON payload
+	for _, inst := range statusPayload.Instances {
+		if inst.InstanceID == "" {
+			t.Fatalf("expected instanceId to be non-empty in JSON payload for port %d", inst.Port)
+		}
+	}
 }
 
 func TestServeDefaultsTo4566AndFallsBackWhenBusy(t *testing.T) {
@@ -509,6 +516,7 @@ func newTestCommand(t *testing.T, manager *runtime.Manager, storage Storage, fac
 	cmd := NewRootCommand(stdout, stderr, Commands{
 		Serve:     NewServeCommand(manager, factory),
 		Instances: NewInstancesCommand(manager, storage),
+		Status:    NewStatusCommand(manager, storage),
 		Stop:      NewStopCommand(manager, storage),
 		Delete:    NewDeleteCommand(manager, storage),
 	})
@@ -537,4 +545,89 @@ func containsPort(ports []int, port int) bool {
 		}
 	}
 	return false
+}
+
+func TestStatusAliasMatchesInstancesOutput(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	manager := runtime.New(composition.Assemble([]orchestrator.Service{
+		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
+	}).Services)
+	manager.SetInstanceID("test-alias-instance")
+
+	runCommand := func(args ...string) string {
+		t.Helper()
+		return executeCommand(t, manager, storage, args...)
+	}
+
+	runCommand("serve", "--port", "9090")
+
+	instancesOut := stripANSI(runCommand("instances"))
+	statusOut := stripANSI(runCommand("status"))
+
+	if instancesOut != statusOut {
+		t.Fatalf("status alias output does not match instances output:\ninstances: %q\nstatus:    %q", instancesOut, statusOut)
+	}
+}
+
+func TestStatusAliasJSONMatchesInstancesJSON(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	manager := runtime.New(composition.Assemble([]orchestrator.Service{
+		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
+	}).Services)
+	manager.SetInstanceID("test-alias-json-instance")
+
+	runCommand := func(args ...string) string {
+		t.Helper()
+		return executeCommand(t, manager, storage, args...)
+	}
+
+	runCommand("serve", "--port", "8080")
+
+	instancesJSON := runCommand("instances", "--json")
+	statusJSON := runCommand("status", "--json")
+
+	if instancesJSON != statusJSON {
+		t.Fatalf("status alias JSON does not match instances JSON:\ninstances: %s\nstatus:    %s", instancesJSON, statusJSON)
+	}
+}
+
+func TestCommandsServeInstancesJSONIncludesInstanceID(t *testing.T) {
+	t.Helper()
+
+	storage := newTestStorage(t)
+	manager := runtime.New(composition.Assemble([]orchestrator.Service{
+		&commandServiceStub{metadata: orchestrator.Metadata{Name: "alpha", Version: "v1"}},
+	}).Services)
+	manager.SetInstanceID("canonical-id-regression")
+
+	executeCommand(t, manager, storage, "serve", "--port", "7777")
+
+	out := executeCommand(t, manager, storage, "instances", "--json")
+
+	var payload struct {
+		Instances []struct {
+			InstanceID string `json:"instanceId"`
+			Port       int    `json:"port"`
+			Status     string `json:"status"`
+		} `json:"instances"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("unmarshal: %v\npayload: %s", err, out)
+	}
+	if len(payload.Instances) != 1 {
+		t.Fatalf("expected one instance, got %d", len(payload.Instances))
+	}
+	if got, want := payload.Instances[0].InstanceID, "canonical-id-regression"; got != want {
+		t.Fatalf("unexpected instanceId: got %q want %q", got, want)
+	}
+	if got, want := payload.Instances[0].Port, 7777; got != want {
+		t.Fatalf("unexpected port: got %d want %d", got, want)
+	}
+	if got, want := payload.Instances[0].Status, "running"; got != want {
+		t.Fatalf("unexpected status: got %q want %q", got, want)
+	}
 }

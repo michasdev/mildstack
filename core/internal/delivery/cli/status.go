@@ -28,7 +28,7 @@ func NewInstancesCommand(manager *runtime.Manager, storage Storage) *cobra.Comma
 			if err != nil {
 				return err
 			}
-			snapshot.Instances = instancesToRuntime(instances)
+			snapshot.Instances = instancesToRuntime(instances, snapshot.Instances)
 			presenter := NewPresenter(snapshot)
 			if resolveOutputMode(cmd) == OutputModeJSON {
 				fmt.Fprint(cmd.OutOrStdout(), RenderStatusJSON(presenter))
@@ -42,11 +42,27 @@ func NewInstancesCommand(manager *runtime.Manager, storage Storage) *cobra.Comma
 	return cmd
 }
 
-func instancesToRuntime(instances []instanceSummary) []runtime.Instance {
+// instancesToRuntime converts storage summaries into runtime instances.
+// If a storage summary lacks an InstanceID, the function falls back to the
+// InstanceID carried by the corresponding live snapshot instance (matched by port)
+// so that the canonical identity is always present when the manager knows it.
+func instancesToRuntime(instances []instanceSummary, liveInstances []runtime.Instance) []runtime.Instance {
+	// build a port -> InstanceID index from the live snapshot
+	liveID := make(map[int]string, len(liveInstances))
+	for _, live := range liveInstances {
+		if live.InstanceID != "" {
+			liveID[live.Port] = live.InstanceID
+		}
+	}
+
 	copied := make([]runtime.Instance, len(instances))
 	for i, instance := range instances {
+		id := instance.InstanceID
+		if id == "" {
+			id = liveID[instance.Port]
+		}
 		copied[i] = runtime.Instance{
-			InstanceID: instance.InstanceID,
+			InstanceID: id,
 			Port:       instance.Port,
 			PID:        instance.PID,
 			Status:     instance.Status,
