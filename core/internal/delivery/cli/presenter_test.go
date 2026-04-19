@@ -55,3 +55,37 @@ func TestPresenterRendersEmptyAndErrorStates(t *testing.T) {
 		t.Fatalf("unexpected error output:\n got %q\nwant %q", got, want)
 	}
 }
+
+func TestPresenterStatusPayloadIncludesInstanceID(t *testing.T) {
+	t.Helper()
+
+	snapshot := runtime.Snapshot{
+		Instances: []runtime.Instance{
+			{InstanceID: "inst-xyz", Port: 8080, PID: 1234, Status: "running"},
+		},
+		Ports: []int{8080},
+	}
+
+	presenter := NewPresenter(snapshot)
+	payload := presenter.StatusPayload()
+
+	if len(payload.Instances) != 1 {
+		t.Fatalf("expected one instance in payload, got %d", len(payload.Instances))
+	}
+	if got, want := payload.Instances[0].InstanceID, "inst-xyz"; got != want {
+		t.Fatalf("unexpected instanceId in payload: got %q want %q", got, want)
+	}
+	if got, want := payload.Instances[0].Port, 8080; got != want {
+		t.Fatalf("unexpected port in payload: got %d want %d", got, want)
+	}
+	if got, want := payload.Instances[0].Status, "running"; got != want {
+		t.Fatalf("unexpected status in payload: got %q want %q", got, want)
+	}
+
+	// mutation of the snapshot must not affect the already-built presenter
+	snapshot.Instances[0].InstanceID = "mutated"
+	payload2 := presenter.StatusPayload()
+	if got, want := payload2.Instances[0].InstanceID, "inst-xyz"; got != want {
+		t.Fatalf("payload must be copy-safe: got %q want %q", got, want)
+	}
+}

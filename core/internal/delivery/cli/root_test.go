@@ -47,3 +47,26 @@ func TestExecuteWiresContextAndRootCommand(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 }
+
+func TestNewRootCommandRegistersStatusAlias(t *testing.T) {
+	t.Helper()
+
+	cmd := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{}, Commands{
+		Serve:     &cobra.Command{Use: "serve"},
+		Instances: &cobra.Command{Use: "instances"},
+		Stop:      &cobra.Command{Use: "stop"},
+		Delete:    &cobra.Command{Use: "delete"},
+		Status:    &cobra.Command{Use: "status"},
+	})
+
+	var found bool
+	for _, sub := range cmd.Commands() {
+		if sub.Use == "status" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected 'status' alias command to be registered in root")
+	}
+}
