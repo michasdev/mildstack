@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -14,7 +15,11 @@ import (
 )
 
 func main() {
-	root := composition.DefaultRoot(resolveInstanceID())
+	instanceID, err := resolveInstanceID()
+	if err != nil {
+		panic(err)
+	}
+	root := composition.DefaultRoot(instanceID)
 	paths := runtime.ResolvePaths()
 	homeDir, _ := os.UserHomeDir()
 	configDir, _ := os.UserConfigDir()
@@ -24,6 +29,7 @@ func main() {
 		panic(err)
 	}
 	manager := runtime.NewWithPorts(root.Services, activePorts)
+	manager.SetInstanceID(instanceID)
 	httpServerFactory := func(port int) cli.HTTPServer {
 		router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
 		if err := registerServiceRoutes(router.Registrar(), root.Services); err != nil {
@@ -49,14 +55,12 @@ func main() {
 	}
 }
 
-const defaultInstanceID = "default"
-
-func resolveInstanceID() string {
+func resolveInstanceID() (string, error) {
 	instanceID := strings.TrimSpace(os.Getenv("MILDSTACK_INSTANCE_ID"))
 	if instanceID == "" {
-		return defaultInstanceID
+		return "", errors.New("MILDSTACK_INSTANCE_ID is required")
 	}
-	return instanceID
+	return instanceID, nil
 }
 
 type instanceRegistrar struct {

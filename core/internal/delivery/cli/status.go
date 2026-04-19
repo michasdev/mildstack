@@ -36,10 +36,11 @@ func instancesToRuntime(instances []instanceSummary) []runtime.Instance {
 	copied := make([]runtime.Instance, len(instances))
 	for i, instance := range instances {
 		copied[i] = runtime.Instance{
-			Port:   instance.Port,
-			PID:    instance.PID,
-			Status: instance.Status,
-			Error:  instance.Error,
+			InstanceID: instance.InstanceID,
+			Port:       instance.Port,
+			PID:        instance.PID,
+			Status:     instance.Status,
+			Error:      instance.Error,
 		}
 	}
 	return copied

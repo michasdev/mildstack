@@ -139,6 +139,7 @@ func TestManagerInstanceCarriesInstanceID(t *testing.T) {
 	t.Helper()
 
 	manager := New(nil)
+	manager.SetInstanceID("test-instance-abc")
 	if err := manager.Serve(context.Background(), 8080); err != nil {
 		t.Fatalf("serve 8080: %v", err)
 	}
@@ -147,8 +148,8 @@ func TestManagerInstanceCarriesInstanceID(t *testing.T) {
 	if len(snapshot.Instances) != 1 {
 		t.Fatalf("expected one instance, got %d", len(snapshot.Instances))
 	}
-	if snapshot.Instances[0].InstanceID == "" {
-		t.Fatal("expected instance to carry a non-empty InstanceID")
+	if got, want := snapshot.Instances[0].InstanceID, "test-instance-abc"; got != want {
+		t.Fatalf("unexpected instance InstanceID: got %q want %q", got, want)
 	}
 	if snapshot.Instances[0].Port != 8080 {
 		t.Fatalf("unexpected instance port: got %d want 8080", snapshot.Instances[0].Port)

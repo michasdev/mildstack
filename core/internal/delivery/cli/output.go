@@ -41,10 +41,11 @@ type portsPayload struct {
 }
 
 type instancePayload struct {
-	Port   int    `json:"port"`
-	PID    int    `json:"pid,omitempty"`
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
+	InstanceID string `json:"instanceId,omitempty"`
+	Port       int    `json:"port"`
+	PID        int    `json:"pid,omitempty"`
+	Status     string `json:"status"`
+	Error      string `json:"error,omitempty"`
 }
 
 func renderJSON(value any) string {

@@ -20,17 +20,19 @@ type Storage struct {
 }
 
 type instanceRecord struct {
-	Port   int    `json:"port"`
-	PID    int    `json:"pid,omitempty"`
-	Status string `json:"status,omitempty"`
-	Error  string `json:"error,omitempty"`
+	InstanceID string `json:"instanceId,omitempty"`
+	Port       int    `json:"port"`
+	PID        int    `json:"pid,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 type instanceSummary struct {
-	Port   int    `json:"port"`
-	PID    int    `json:"pid,omitempty"`
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
+	InstanceID string `json:"instanceId"`
+	Port       int    `json:"port"`
+	PID        int    `json:"pid,omitempty"`
+	Status     string `json:"status"`
+	Error      string `json:"error,omitempty"`
 }
 
 func NewStorage(paths runtime.Paths, legacyBaseDir string) Storage {
@@ -89,11 +91,21 @@ func (s Storage) MigrateInstance(name string) (bool, error) {
 }
 
 func (s Storage) SaveSavedInstance(port int) error {
-	return s.saveInstance(s.SavedInstancesDir(), port, "not_started", "")
+	return s.saveInstanceWithID("", s.SavedInstancesDir(), port, "not_started", "")
 }
 
 func (s Storage) SaveActiveInstance(port int) error {
-	return s.saveInstance(s.ActiveInstancesDir(), port, "running", "")
+	return s.saveInstanceWithID("", s.ActiveInstancesDir(), port, "running", "")
+}
+
+// SaveSavedInstanceWithID persists a saved instance record with the canonical instanceId.
+func (s Storage) SaveSavedInstanceWithID(instanceID string, port int) error {
+	return s.saveInstanceWithID(instanceID, s.SavedInstancesDir(), port, "not_started", "")
+}
+
+// SaveActiveInstanceWithID persists an active instance record with the canonical instanceId.
+func (s Storage) SaveActiveInstanceWithID(instanceID string, port int) error {
+	return s.saveInstanceWithID(instanceID, s.ActiveInstancesDir(), port, "running", "")
 }
 
 func (s Storage) SaveErroredInstance(port int, err error) error {
@@ -101,7 +113,7 @@ func (s Storage) SaveErroredInstance(port int, err error) error {
 	if err != nil {
 		message = strings.TrimSpace(err.Error())
 	}
-	return s.saveInstance(s.ActiveInstancesDir(), port, "errored", message)
+	return s.saveInstanceWithID("", s.ActiveInstancesDir(), port, "errored", message)
 }
 
 func (s Storage) DeleteActiveInstance(port int) error {
@@ -153,10 +165,11 @@ func (s Storage) LoadInstances() ([]instanceSummary, error) {
 			continue
 		}
 		instances[record.Port] = instanceSummary{
-			Port:   record.Port,
-			PID:    record.PID,
-			Status: "not_started",
-			Error:  strings.TrimSpace(record.Error),
+			InstanceID: record.InstanceID,
+			Port:       record.Port,
+			PID:        record.PID,
+			Status:     "not_started",
+			Error:      strings.TrimSpace(record.Error),
 		}
 	}
 	for _, record := range active {
@@ -174,11 +187,19 @@ func (s Storage) LoadInstances() ([]instanceSummary, error) {
 		default:
 			status = "not_started"
 		}
+		// active record wins on instanceId if both saved and active exist
+		instanceID := record.InstanceID
+		if instanceID == "" {
+			if prev, ok := instances[record.Port]; ok {
+				instanceID = prev.InstanceID
+			}
+		}
 		instance := instanceSummary{
-			Port:   record.Port,
-			PID:    record.PID,
-			Status: status,
-			Error:  errorMessage,
+			InstanceID: instanceID,
+			Port:       record.Port,
+			PID:        record.PID,
+			Status:     status,
+			Error:      errorMessage,
 		}
 		if instance.Status == "running" {
 			instance.Error = ""
@@ -280,12 +301,13 @@ func (s Storage) legacyCategoryPath(category, name string) string {
 	return filepath.Join(s.legacyBaseDir, category, name)
 }
 
-func (s Storage) saveInstance(dir string, port int, status string, message string) error {
+func (s Storage) saveInstanceWithID(instanceID string, dir string, port int, status string, message string) error {
 	record := instanceRecord{
-		Port:   port,
-		PID:    os.Getpid(),
-		Status: status,
-		Error:  strings.TrimSpace(message),
+		InstanceID: instanceID,
+		Port:       port,
+		PID:        os.Getpid(),
+		Status:     status,
+		Error:      strings.TrimSpace(message),
 	}
 	if record.Status == "not_started" {
 		record.PID = 0
