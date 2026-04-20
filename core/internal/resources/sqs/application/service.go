@@ -7,18 +7,28 @@ import (
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/contracts"
+	"github.com/michasdev/mildstack/core/internal/resources/sqs/domain"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/infrastructure"
 )
 
 var _ orchestrator.Service = (*Service)(nil)
 
 type Service struct {
-	policy orchestrator.EmulationPolicy
-	mu     sync.Mutex
+	state     domain.State
+	policy    orchestrator.EmulationPolicy
+	repo      Repository
+	stateHook orchestrator.StateHook
+	mu        sync.Mutex
 }
 
 func New() *Service {
+	return newService(domain.NewState(), nil)
+}
+
+func newService(state domain.State, repo Repository) *Service {
 	return &Service{
+		state: state.Clone(),
+		repo:  repo,
 		policy: orchestrator.NewEmulationPolicy(
 			orchestrator.FidelityExemplar,
 			contracts.ActionNames(),
@@ -33,6 +43,17 @@ func (s *Service) Start(context.Context) error {
 }
 
 func (s *Service) Stop(context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.repo == nil {
+		return nil
+	}
+
+	if err := s.repo.Close(); err != nil {
+		return fmt.Errorf("sqs: close repository: %w", err)
+	}
+	s.repo = nil
 	return nil
 }
 
@@ -63,13 +84,18 @@ func (s *Service) AttachState(hook orchestrator.StateHook) error {
 		return fmt.Errorf("sqs: nil state hook")
 	}
 
-	hook.Set("sqs", map[string]any{
-		"service":  "sqs",
-		"metadata": s.Metadata(),
-		"policy":   s.Policy(),
-		"routes":   infrastructure.Routes(),
-		"catalog":  contracts.Catalog(),
-		"phase":    34,
-	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.stateHook = hook
+	s.publishSnapshotLocked()
 	return nil
+}
+
+func (s *Service) publishSnapshotLocked() {
+	if s.stateHook == nil {
+		return
+	}
+
+	s.stateHook.Set(domain.StateKey, s.state.Snapshot())
 }
