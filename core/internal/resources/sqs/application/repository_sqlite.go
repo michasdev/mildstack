@@ -21,7 +21,7 @@ import (
 const (
 	sqliteFileName   = "state.db"
 	schemaVersionKey = "schema_version"
-	schemaVersion    = "2"
+	schemaVersion    = "3"
 )
 
 type SQLiteRepository struct {
@@ -133,7 +133,9 @@ func (r *SQLiteRepository) bootstrap() error {
 			dead_letter_queue TEXT NOT NULL DEFAULT '',
 			policy_json TEXT NOT NULL,
 			created_at_ns INTEGER NOT NULL DEFAULT 0,
-			updated_at_ns INTEGER NOT NULL DEFAULT 0
+			updated_at_ns INTEGER NOT NULL DEFAULT 0,
+			deleted_at_ns INTEGER NOT NULL DEFAULT 0,
+			purged_at_ns INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS sqs_messages (
 			queue_name TEXT NOT NULL,
@@ -179,6 +181,14 @@ func (r *SQLiteRepository) bootstrap() error {
 	if err := ensureColumn(ctx, tx, "sqs_queues", "ordering_hint TEXT NOT NULL DEFAULT ''"); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("sqs: ensure queue ordering column: %w", err)
+	}
+	if err := ensureColumn(ctx, tx, "sqs_queues", "deleted_at_ns INTEGER NOT NULL DEFAULT 0"); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: ensure queue deleted column: %w", err)
+	}
+	if err := ensureColumn(ctx, tx, "sqs_queues", "purged_at_ns INTEGER NOT NULL DEFAULT 0"); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: ensure queue purged column: %w", err)
 	}
 	if err := ensureColumn(ctx, tx, "sqs_messages", "message_group_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		_ = tx.Rollback()
@@ -238,7 +248,7 @@ func (r *SQLiteRepository) loadLocked() (domain.State, error) {
 	state := domain.NewState()
 
 	queueRows, err := r.db.QueryContext(ctx, `
-		SELECT name, url, attributes_json, ordering_hint, dead_letter_queue, policy_json, created_at_ns, updated_at_ns
+		SELECT name, url, attributes_json, ordering_hint, dead_letter_queue, policy_json, created_at_ns, updated_at_ns, deleted_at_ns, purged_at_ns
 		FROM sqs_queues
 		ORDER BY name
 	`)
@@ -255,8 +265,10 @@ func (r *SQLiteRepository) loadLocked() (domain.State, error) {
 			policy      string
 			createdAtNS int64
 			updatedAtNS int64
+			deletedAtNS int64
+			purgedAtNS  int64
 		)
-		if err := queueRows.Scan(&queue.Name, &queue.URL, &attributes, &ordering, &queue.Recovery.DeadLetterQueue, &policy, &createdAtNS, &updatedAtNS); err != nil {
+		if err := queueRows.Scan(&queue.Name, &queue.URL, &attributes, &ordering, &queue.Recovery.DeadLetterQueue, &policy, &createdAtNS, &updatedAtNS, &deletedAtNS, &purgedAtNS); err != nil {
 			return domain.State{}, fmt.Errorf("sqs: scan queue: %w", err)
 		}
 		queue.Attributes, err = decodeStringMap(attributes)
@@ -270,6 +282,8 @@ func (r *SQLiteRepository) loadLocked() (domain.State, error) {
 		queue.OrderingHint = ordering
 		queue.CreatedAt = unixNanoToTime(createdAtNS)
 		queue.UpdatedAt = unixNanoToTime(updatedAtNS)
+		queue.DeletedAt = unixNanoToTime(deletedAtNS)
+		queue.PurgedAt = unixNanoToTime(purgedAtNS)
 		state.Queues = append(state.Queues, queue)
 	}
 	if err := queueRows.Err(); err != nil {
@@ -430,8 +444,8 @@ func (r *SQLiteRepository) saveLocked(state domain.State) error {
 
 	queueStmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO sqs_queues (
-			name, url, attributes_json, ordering_hint, dead_letter_queue, policy_json, created_at_ns, updated_at_ns
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			name, url, attributes_json, ordering_hint, dead_letter_queue, policy_json, created_at_ns, updated_at_ns, deleted_at_ns, purged_at_ns
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		_ = tx.Rollback()
@@ -459,6 +473,8 @@ func (r *SQLiteRepository) saveLocked(state domain.State) error {
 			policy,
 			timeToUnixNano(queue.CreatedAt),
 			timeToUnixNano(queue.UpdatedAt),
+			timeToUnixNano(queue.DeletedAt),
+			timeToUnixNano(queue.PurgedAt),
 		); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("sqs: insert queue %q: %w", queue.Name, err)

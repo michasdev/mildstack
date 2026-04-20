@@ -23,6 +23,8 @@ type Queue struct {
 	Recovery     QueueRecovery
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+	DeletedAt    time.Time
+	PurgedAt     time.Time
 }
 
 type QueueRecovery struct {
@@ -87,6 +89,8 @@ func (s State) Snapshot() map[string]any {
 			},
 			"created_at": snapshotTime(queue.CreatedAt),
 			"updated_at": snapshotTime(queue.UpdatedAt),
+			"deleted_at": snapshotTime(queue.DeletedAt),
+			"purged_at":  snapshotTime(queue.PurgedAt),
 		})
 	}
 

@@ -24,12 +24,31 @@ func TestSQSNativeRegistryDerivesSpecsFromCatalog(t *testing.T) {
 		if !spec.Supported {
 			t.Fatalf("expected action %s to be transport-supported", spec.Action)
 		}
+		if isQueueLifecycleAction(spec.Action) {
+			if spec.DomainDeferred {
+				t.Fatalf("expected action %s to be routed to the service, not deferred", spec.Action)
+			}
+			continue
+		}
 		if !spec.DomainDeferred {
-			t.Fatalf("expected action %s to be domain deferred", spec.Action)
+			t.Fatalf("expected action %s to remain domain deferred", spec.Action)
 		}
 		if spec.Scope != catalog[i].Scope {
 			t.Fatalf("unexpected scope for %s: got %q want %q", spec.Action, spec.Scope, catalog[i].Scope)
 		}
+	}
+}
+
+func TestSQSNativeRegistryRecognizesQueueLifecycleActions(t *testing.T) {
+	t.Helper()
+
+	for _, action := range []string{"CreateQueue", "DeleteQueue", "GetQueueAttributes", "GetQueueUrl", "ListQueues", "PurgeQueue", "SetQueueAttributes"} {
+		if !isQueueLifecycleAction(action) {
+			t.Fatalf("expected %s to be recognized as a queue lifecycle action", action)
+		}
+	}
+	if isQueueLifecycleAction("SendMessage") {
+		t.Fatal("did not expect SendMessage to be treated as a queue lifecycle action")
 	}
 }
 

@@ -33,7 +33,7 @@ func NewSQSRegistry() SQSRegistry {
 			Scope:            spec.Scope,
 			Version:          spec.Version,
 			Supported:        true,
-			DomainDeferred:   true,
+			DomainDeferred:   !isQueueLifecycleAction(spec.Action),
 			ReturnsQueueURL:  spec.ReturnsQueueURL,
 			UsesQueueContext: spec.UsesQueueContext,
 		}
@@ -89,6 +89,15 @@ func (r SQSRegistry) UnsupportedActions() []string {
 
 func (r SQSRegistry) String() string {
 	return fmt.Sprintf("sqs registry: %d actions", len(r.ordered))
+}
+
+func isQueueLifecycleAction(action string) bool {
+	switch action {
+	case "CreateQueue", "DeleteQueue", "GetQueueAttributes", "GetQueueUrl", "ListQueues", "PurgeQueue", "SetQueueAttributes":
+		return true
+	default:
+		return false
+	}
 }
 
 func isSQSErrorCode(err error, target error) bool {
