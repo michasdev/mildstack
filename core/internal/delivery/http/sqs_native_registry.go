@@ -29,12 +29,13 @@ func NewSQSRegistry() SQSRegistry {
 	byName := make(map[string]SQSRegistrySpec, len(specs))
 
 	for _, spec := range specs {
+		supported := isQueueLifecycleAction(spec.Action) || spec.MessageSurface
 		entry := SQSRegistrySpec{
 			Action:           spec.Action,
 			Scope:            spec.Scope,
 			Version:          spec.Version,
-			Supported:        true,
-			DomainDeferred:   !isQueueLifecycleAction(spec.Action) && !spec.MessageSurface,
+			Supported:        supported,
+			DomainDeferred:   !supported,
 			MessageSurface:   spec.MessageSurface,
 			ReturnsQueueURL:  spec.ReturnsQueueURL,
 			UsesQueueContext: spec.UsesQueueContext,
