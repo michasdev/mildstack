@@ -1,10 +1,13 @@
 package http
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/xml"
 	"errors"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -122,6 +125,20 @@ func (h sqsNativeHandler) dispatch(c *gin.Context) bool {
 		h.handleGetQueueAttributes(c, ctx)
 	case "SetQueueAttributes":
 		h.handleSetQueueAttributes(c, ctx)
+	case "ReceiveMessage":
+		h.handleReceiveMessage(c, ctx)
+	case "SendMessage":
+		h.handleSendMessage(c, ctx)
+	case "SendMessageBatch":
+		h.handleSendMessageBatch(c, ctx)
+	case "DeleteMessage":
+		h.handleDeleteMessage(c, ctx)
+	case "DeleteMessageBatch":
+		h.handleDeleteMessageBatch(c, ctx)
+	case "ChangeMessageVisibility":
+		h.handleChangeMessageVisibility(c, ctx)
+	case "ChangeMessageVisibilityBatch":
+		h.handleChangeMessageVisibilityBatch(c, ctx)
 	default:
 		writeSQSError(c, ErrSQSUnsupported, requestIDFromContext(c))
 	}
@@ -204,7 +221,109 @@ func (h sqsNativeHandler) handleSetQueueAttributes(c *gin.Context, ctx SQSReques
 	writeSQSSetQueueAttributesResponse(c, view)
 }
 
+func (h sqsNativeHandler) handleReceiveMessage(c *gin.Context, ctx SQSRequestContext) {
+	request := receiveMessageRequestFromValues(ctx.Values)
+	maxMessages := request.MaxNumberOfMessages
+	if maxMessages <= 0 {
+		maxMessages = 1
+	}
+	waitTime := time.Duration(request.WaitTimeSeconds) * time.Second
+	messages, err := h.service.ReceiveMessage(ctx.QueueName, maxMessages, waitTime)
+	if err != nil {
+		h.finishMessageAction(c, err)
+		return
+	}
+	if ctx.TargetStyle {
+		writeSQSReceiveMessageJSON(c, messages)
+		return
+	}
+	writeSQSReceiveMessageResponse(c, messages)
+}
+
+func (h sqsNativeHandler) handleSendMessage(c *gin.Context, ctx SQSRequestContext) {
+	request := sendMessageRequestFromValues(ctx.Values)
+	result, err := h.service.SendMessage(ctx.QueueName, request)
+	if err != nil {
+		h.finishMessageAction(c, err)
+		return
+	}
+	if ctx.TargetStyle {
+		writeSQSSendMessageJSON(c, result)
+		return
+	}
+	writeSQSSendMessageResponse(c, result)
+}
+
+func (h sqsNativeHandler) handleSendMessageBatch(c *gin.Context, ctx SQSRequestContext) {
+	request := sendMessageBatchRequestFromValues(ctx.Values)
+	result, err := h.service.SendMessageBatch(ctx.QueueName, request)
+	if err != nil {
+		h.finishMessageAction(c, err)
+		return
+	}
+	if ctx.TargetStyle {
+		writeSQSSendMessageBatchJSON(c, result)
+		return
+	}
+	writeSQSSendMessageBatchResponse(c, result)
+}
+
+func (h sqsNativeHandler) handleDeleteMessage(c *gin.Context, ctx SQSRequestContext) {
+	request := deleteMessageRequestFromValues(ctx.Values)
+	if err := h.service.DeleteMessage(ctx.QueueName, request.ReceiptHandle); err != nil {
+		h.finishMessageAction(c, err)
+		return
+	}
+	writeSQSDeleteMessageResponse(c)
+}
+
+func (h sqsNativeHandler) handleDeleteMessageBatch(c *gin.Context, ctx SQSRequestContext) {
+	request := deleteMessageBatchRequestFromValues(ctx.Values)
+	result, err := h.service.DeleteMessageBatch(ctx.QueueName, request)
+	if err != nil {
+		h.finishMessageAction(c, err)
+		return
+	}
+	if ctx.TargetStyle {
+		writeSQSDeleteMessageBatchJSON(c, result)
+		return
+	}
+	writeSQSDeleteMessageBatchResponse(c, result)
+}
+
+func (h sqsNativeHandler) handleChangeMessageVisibility(c *gin.Context, ctx SQSRequestContext) {
+	request := changeMessageVisibilityRequestFromValues(ctx.Values)
+	visibility := time.Duration(request.VisibilityTimeout) * time.Second
+	if err := h.service.ChangeMessageVisibility(ctx.QueueName, request.ReceiptHandle, visibility); err != nil {
+		h.finishMessageAction(c, err)
+		return
+	}
+	writeSQSChangeMessageVisibilityResponse(c)
+}
+
+func (h sqsNativeHandler) handleChangeMessageVisibilityBatch(c *gin.Context, ctx SQSRequestContext) {
+	request := changeMessageVisibilityBatchRequestFromValues(ctx.Values)
+	result, err := h.service.ChangeMessageVisibilityBatch(ctx.QueueName, request)
+	if err != nil {
+		h.finishMessageAction(c, err)
+		return
+	}
+	if ctx.TargetStyle {
+		writeSQSChangeMessageVisibilityBatchJSON(c, result)
+		return
+	}
+	writeSQSChangeMessageVisibilityBatchResponse(c, result)
+}
+
 func (h sqsNativeHandler) finishQueueAction(c *gin.Context, err error) {
+	if err == nil || errors.Is(err, contracts.ErrSQSOperationDeferred) {
+		writeSQSError(c, ErrSQSUnsupported, requestIDFromContext(c))
+		return
+	}
+	writeSQSError(c, err, requestIDFromContext(c))
+}
+
+func (h sqsNativeHandler) finishMessageAction(c *gin.Context, err error) {
 	if err == nil || errors.Is(err, contracts.ErrSQSOperationDeferred) {
 		writeSQSError(c, ErrSQSUnsupported, requestIDFromContext(c))
 		return
@@ -276,6 +395,77 @@ type sqsQueueAttributeXML struct {
 type sqsSetQueueAttributesResponse struct {
 	XMLName          xml.Name            `xml:"SetQueueAttributesResponse"`
 	ResponseMetadata sqsResponseMetadata `xml:"ResponseMetadata"`
+}
+
+type sqsSendMessageResponse struct {
+	XMLName           xml.Name             `xml:"SendMessageResponse"`
+	SendMessageResult sqsSendMessageResult `xml:"SendMessageResult"`
+	ResponseMetadata  sqsResponseMetadata  `xml:"ResponseMetadata"`
+}
+
+type sqsSendMessageResult struct {
+	MessageID                    string `xml:"MessageId,omitempty"`
+	MD5OfMessageBody             string `xml:"MD5OfMessageBody,omitempty"`
+	MD5OfMessageAttributes       string `xml:"MD5OfMessageAttributes,omitempty"`
+	MD5OfMessageSystemAttributes string `xml:"MD5OfMessageSystemAttributes,omitempty"`
+	SequenceNumber               string `xml:"SequenceNumber,omitempty"`
+}
+
+type sqsSendMessageBatchResponse struct {
+	XMLName                xml.Name                  `xml:"SendMessageBatchResponse"`
+	SendMessageBatchResult sqsSendMessageBatchResult `xml:"SendMessageBatchResult"`
+	ResponseMetadata       sqsResponseMetadata       `xml:"ResponseMetadata"`
+}
+
+type sqsSendMessageBatchResult struct {
+	Successful []contracts.SendMessageBatchResultEntry `xml:"SendMessageBatchResultEntry,omitempty"`
+	Failed     []contracts.BatchResultErrorEntry       `xml:"BatchResultErrorEntry,omitempty"`
+}
+
+type sqsDeleteMessageBatchResponse struct {
+	XMLName                  xml.Name                    `xml:"DeleteMessageBatchResponse"`
+	DeleteMessageBatchResult sqsDeleteMessageBatchResult `xml:"DeleteMessageBatchResult"`
+	ResponseMetadata         sqsResponseMetadata         `xml:"ResponseMetadata"`
+}
+
+type sqsDeleteMessageBatchResult struct {
+	Successful []contracts.DeleteMessageBatchResultEntry `xml:"DeleteMessageBatchResultEntry,omitempty"`
+	Failed     []contracts.BatchResultErrorEntry         `xml:"BatchResultErrorEntry,omitempty"`
+}
+
+type sqsChangeMessageVisibilityBatchResponse struct {
+	XMLName                            xml.Name                              `xml:"ChangeMessageVisibilityBatchResponse"`
+	ChangeMessageVisibilityBatchResult sqsChangeMessageVisibilityBatchResult `xml:"ChangeMessageVisibilityBatchResult"`
+	ResponseMetadata                   sqsResponseMetadata                   `xml:"ResponseMetadata"`
+}
+
+type sqsChangeMessageVisibilityBatchResult struct {
+	Successful []contracts.ChangeMessageVisibilityBatchResultEntry `xml:"ChangeMessageVisibilityBatchResultEntry,omitempty"`
+	Failed     []contracts.BatchResultErrorEntry                   `xml:"BatchResultErrorEntry,omitempty"`
+}
+
+type sqsReceiveMessageResponse struct {
+	XMLName              xml.Name                `xml:"ReceiveMessageResponse"`
+	ReceiveMessageResult sqsReceiveMessageResult `xml:"ReceiveMessageResult"`
+	ResponseMetadata     sqsResponseMetadata     `xml:"ResponseMetadata"`
+}
+
+type sqsReceiveMessageResult struct {
+	Messages []sqsReceivedMessageXML `xml:"Message,omitempty"`
+}
+
+type sqsReceivedMessageXML struct {
+	Body                   string                   `xml:"Body,omitempty"`
+	MD5OfBody              string                   `xml:"MD5OfBody,omitempty"`
+	MD5OfMessageAttributes string                   `xml:"MD5OfMessageAttributes,omitempty"`
+	MessageID              string                   `xml:"MessageId,omitempty"`
+	ReceiptHandle          string                   `xml:"ReceiptHandle,omitempty"`
+	Attributes             []sqsMessageAttributeXML `xml:"Attribute,omitempty"`
+}
+
+type sqsMessageAttributeXML struct {
+	Name  string `xml:"Name"`
+	Value string `xml:"Value"`
 }
 
 type sqsDeleteQueueResponse struct {
@@ -360,6 +550,188 @@ func writeSQSSetQueueAttributesResponse(c *gin.Context, _ contracts.QueueAttribu
 	c.XML(http.StatusOK, sqsSetQueueAttributesResponse{
 		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
 	})
+}
+
+func writeSQSSendMessageResponse(c *gin.Context, result contracts.SendMessageResult) {
+	c.XML(http.StatusOK, sqsSendMessageResponse{
+		SendMessageResult: sqsSendMessageResult{
+			MessageID:                    result.MessageId,
+			MD5OfMessageBody:             result.MD5OfMessageBody,
+			MD5OfMessageAttributes:       result.MD5OfMessageAttributes,
+			MD5OfMessageSystemAttributes: result.MD5OfMessageSystemAttributes,
+			SequenceNumber:               result.SequenceNumber,
+		},
+		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
+}
+
+func writeSQSSendMessageJSON(c *gin.Context, result contracts.SendMessageResult) {
+	c.JSON(http.StatusOK, result)
+}
+
+func writeSQSSendMessageBatchResponse(c *gin.Context, result contracts.SendMessageBatchResult) {
+	c.XML(http.StatusOK, sqsSendMessageBatchResponse{
+		SendMessageBatchResult: sqsSendMessageBatchResult{
+			Successful: result.Successful,
+			Failed:     result.Failed,
+		},
+		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
+}
+
+func writeSQSSendMessageBatchJSON(c *gin.Context, result contracts.SendMessageBatchResult) {
+	c.JSON(http.StatusOK, result)
+}
+
+func writeSQSDeleteMessageResponse(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	c.Status(http.StatusOK)
+}
+
+func writeSQSDeleteMessageBatchResponse(c *gin.Context, result contracts.DeleteMessageBatchResult) {
+	c.XML(http.StatusOK, sqsDeleteMessageBatchResponse{
+		DeleteMessageBatchResult: sqsDeleteMessageBatchResult{
+			Successful: result.Successful,
+			Failed:     result.Failed,
+		},
+		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
+}
+
+func writeSQSDeleteMessageBatchJSON(c *gin.Context, result contracts.DeleteMessageBatchResult) {
+	c.JSON(http.StatusOK, result)
+}
+
+func writeSQSChangeMessageVisibilityResponse(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	c.Status(http.StatusOK)
+}
+
+func writeSQSChangeMessageVisibilityBatchResponse(c *gin.Context, result contracts.ChangeMessageVisibilityBatchResult) {
+	c.XML(http.StatusOK, sqsChangeMessageVisibilityBatchResponse{
+		ChangeMessageVisibilityBatchResult: sqsChangeMessageVisibilityBatchResult{
+			Successful: result.Successful,
+			Failed:     result.Failed,
+		},
+		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
+}
+
+func writeSQSChangeMessageVisibilityBatchJSON(c *gin.Context, result contracts.ChangeMessageVisibilityBatchResult) {
+	c.JSON(http.StatusOK, result)
+}
+
+func writeSQSReceiveMessageResponse(c *gin.Context, messages []domain.Message) {
+	xmlMessages := make([]sqsReceivedMessageXML, 0, len(messages))
+	for _, message := range messages {
+		xmlMessages = append(xmlMessages, sqsReceivedMessageXML{
+			Body:                   message.Body,
+			MD5OfBody:              messageMD5OfBody(message.Body),
+			MessageID:              message.MessageID,
+			ReceiptHandle:          applicationCurrentReceiptHandle(message),
+			Attributes:             receivedMessageAttributesXML(message),
+			MD5OfMessageAttributes: "",
+		})
+	}
+	c.XML(http.StatusOK, sqsReceiveMessageResponse{
+		ReceiveMessageResult: sqsReceiveMessageResult{Messages: xmlMessages},
+		ResponseMetadata:     sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
+}
+
+func writeSQSReceiveMessageJSON(c *gin.Context, messages []domain.Message) {
+	received := make([]contracts.ReceivedMessage, 0, len(messages))
+	for _, message := range messages {
+		received = append(received, contracts.ReceivedMessage{
+			Attributes:             receivedMessageAttributesMap(message),
+			Body:                   message.Body,
+			MD5OfBody:              messageMD5OfBody(message.Body),
+			MD5OfMessageAttributes: "",
+			MessageAttributes:      receivedMessageAttributesValues(message),
+			MessageId:              message.MessageID,
+			ReceiptHandle:          applicationCurrentReceiptHandle(message),
+		})
+	}
+	c.JSON(http.StatusOK, contracts.ReceiveMessageResult{Messages: received})
+}
+
+func messageMD5OfBody(body string) string {
+	sum := md5.Sum([]byte(body))
+	return hex.EncodeToString(sum[:])
+}
+
+func applicationCurrentReceiptHandle(message domain.Message) string {
+	if len(message.ReceiptKeys) == 0 {
+		return ""
+	}
+	return message.ReceiptKeys[len(message.ReceiptKeys)-1]
+}
+
+func receivedMessageAttributesXML(message domain.Message) []sqsMessageAttributeXML {
+	attrs := make([]sqsMessageAttributeXML, 0, 4)
+	if message.Recovery.Attempts > 0 {
+		attrs = append(attrs, sqsMessageAttributeXML{Name: "ApproximateReceiveCount", Value: strconv.Itoa(message.Recovery.Attempts)})
+	}
+	if !message.SentAt.IsZero() {
+		attrs = append(attrs, sqsMessageAttributeXML{Name: "SentTimestamp", Value: strconv.FormatInt(message.SentAt.UnixMilli(), 10)})
+	}
+	if timestamp := strings.TrimSpace(message.Metadata["approximate_first_receive_timestamp"]); timestamp != "" {
+		attrs = append(attrs, sqsMessageAttributeXML{Name: "ApproximateFirstReceiveTimestamp", Value: timestamp})
+	}
+	if groupID := strings.TrimSpace(message.MessageGroupID); groupID != "" {
+		attrs = append(attrs, sqsMessageAttributeXML{Name: "MessageGroupId", Value: groupID})
+	}
+	if sequenceNumber := message.SequenceNumber; sequenceNumber > 0 {
+		attrs = append(attrs, sqsMessageAttributeXML{Name: "SequenceNumber", Value: strconv.FormatInt(sequenceNumber, 10)})
+	}
+	if dedupeID := strings.TrimSpace(message.Metadata["MessageDeduplicationId"]); dedupeID != "" {
+		attrs = append(attrs, sqsMessageAttributeXML{Name: "MessageDeduplicationId", Value: dedupeID})
+	}
+	return attrs
+}
+
+func receivedMessageAttributesMap(message domain.Message) map[string]string {
+	attrs := map[string]string{}
+	if message.Recovery.Attempts > 0 {
+		attrs["ApproximateReceiveCount"] = strconv.Itoa(message.Recovery.Attempts)
+	}
+	if !message.SentAt.IsZero() {
+		attrs["SentTimestamp"] = strconv.FormatInt(message.SentAt.UnixMilli(), 10)
+	}
+	if timestamp := strings.TrimSpace(message.Metadata["approximate_first_receive_timestamp"]); timestamp != "" {
+		attrs["ApproximateFirstReceiveTimestamp"] = timestamp
+	}
+	if groupID := strings.TrimSpace(message.MessageGroupID); groupID != "" {
+		attrs["MessageGroupId"] = groupID
+	}
+	if sequenceNumber := message.SequenceNumber; sequenceNumber > 0 {
+		attrs["SequenceNumber"] = strconv.FormatInt(sequenceNumber, 10)
+	}
+	if dedupeID := strings.TrimSpace(message.Metadata["MessageDeduplicationId"]); dedupeID != "" {
+		attrs["MessageDeduplicationId"] = dedupeID
+	}
+	if len(attrs) == 0 {
+		return nil
+	}
+	return attrs
+}
+
+func receivedMessageAttributesValues(message domain.Message) map[string]contracts.MessageAttributeValue {
+	if len(message.Attributes) == 0 {
+		return nil
+	}
+	received := make(map[string]contracts.MessageAttributeValue, len(message.Attributes))
+	for key, value := range message.Attributes {
+		received[key] = contracts.MessageAttributeValue{
+			DataType:    "String",
+			StringValue: value,
+		}
+	}
+	return received
 }
 
 func writeSQSDeleteQueueResponse(c *gin.Context) {

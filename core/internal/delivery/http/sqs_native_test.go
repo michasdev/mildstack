@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -31,7 +32,8 @@ func TestSQSNativeMiddlewareInterceptsQueryRequestsAndLeavesRuntimeRoutesUntouch
 	manager := runtime.New(root.Services)
 	router := NewRouter(DefaultConfig(), manager)
 
-	RegisterSQSNativeRoutes(router.Engine(), sqsapplication.New())
+	service := sqsapplication.New()
+	RegisterSQSNativeRoutes(router.Engine(), service)
 
 	healthRecorder := httptest.NewRecorder()
 	healthRequest := httptest.NewRequest(http.MethodGet, "/api/v1/runtime/health", nil)
@@ -53,15 +55,18 @@ func TestSQSNativeMiddlewareInterceptsQueryRequestsAndLeavesRuntimeRoutesUntouch
 		t.Fatalf("expected list queues XML, got %q", rootRecorder.Body.String())
 	}
 
+	if _, err := service.CreateQueue("orders", nil); err != nil {
+		t.Fatalf("create queue: %v", err)
+	}
 	queueRecorder := httptest.NewRecorder()
 	queueRequest := httptest.NewRequest(http.MethodPost, "/123456789012/orders/", strings.NewReader("Action=SendMessage&Version=2012-11-05&MessageBody=hello"))
 	queueRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	router.Engine().ServeHTTP(queueRecorder, queueRequest)
-	if got, want := queueRecorder.Code, http.StatusBadRequest; got != want {
+	if got, want := queueRecorder.Code, http.StatusOK; got != want {
 		t.Fatalf("unexpected queue status: got %d want %d", got, want)
 	}
-	if !strings.Contains(queueRecorder.Body.String(), "UnsupportedOperation") {
-		t.Fatalf("expected unsupported operation XML, got %q", queueRecorder.Body.String())
+	if !strings.Contains(queueRecorder.Body.String(), "SendMessageResponse") {
+		t.Fatalf("expected send message XML, got %q", queueRecorder.Body.String())
 	}
 
 	mismatchRecorder := httptest.NewRecorder()
@@ -75,6 +80,55 @@ func TestSQSNativeMiddlewareInterceptsQueryRequestsAndLeavesRuntimeRoutesUntouch
 	}
 }
 
+func TestSQSNativeMessageActionsPreserveAWSRequestNames(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	service := &stubSQSNativeService{
+		sendMessageResult: contracts.SendMessageResult{
+			MessageId:        "message-1",
+			MD5OfMessageBody: "md5-body",
+		},
+	}
+	router := gin.New()
+	RegisterSQSNativeRoutes(router, service)
+
+	payload := map[string]any{
+		"QueueUrl":     service.QueueURL("orders"),
+		"MessageBody":  "hello",
+		"DelaySeconds": 5,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-amz-json-1.0")
+	request.Header.Set("X-Amz-Target", "AmazonSQS.SendMessage")
+	router.ServeHTTP(recorder, request)
+
+	if got, want := recorder.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected send status: got %d want %d", got, want)
+	}
+	if got, want := service.sendMessageQueueName, "orders"; got != want {
+		t.Fatalf("unexpected send queue name: got %q want %q", got, want)
+	}
+	if got, want := service.sendMessageRequest.MessageBody, "hello"; got != want {
+		t.Fatalf("unexpected send message body: got %q want %q", got, want)
+	}
+	if got, want := service.sendMessageRequest.DelaySeconds, 5; got != want {
+		t.Fatalf("unexpected send delay seconds: got %d want %d", got, want)
+	}
+	if ct := recorder.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("expected json content type, got %q", ct)
+	}
+	if !strings.Contains(recorder.Body.String(), "\"MessageId\"") {
+		t.Fatalf("expected send message json, got %q", recorder.Body.String())
+	}
+}
+
 func TestSQSSDKSmokeReceivesAWSCompatibleSuccess(t *testing.T) {
 	t.Helper()
 
@@ -82,7 +136,8 @@ func TestSQSSDKSmokeReceivesAWSCompatibleSuccess(t *testing.T) {
 	root := composition.DefaultRoot("test-instance")
 	manager := runtime.New(root.Services)
 	router := NewRouter(DefaultConfig(), manager)
-	RegisterSQSNativeRoutes(router.Engine(), sqsapplication.New())
+	service := sqsapplication.New()
+	RegisterSQSNativeRoutes(router.Engine(), service)
 
 	server := httptest.NewServer(router.Engine())
 	t.Cleanup(server.Close)
@@ -104,12 +159,41 @@ func TestSQSSDKSmokeReceivesAWSCompatibleSuccess(t *testing.T) {
 		o.BaseEndpoint = aws.String(server.URL)
 	})
 
+	if _, err := service.CreateQueue("orders", nil); err != nil {
+		t.Fatalf("create queue: %v", err)
+	}
+
 	_, err = client.ListQueues(ctx, &sqs.ListQueuesInput{})
 	if err != nil {
 		t.Fatalf("expected list queues to return successfully: %v", err)
 	}
 	if !strings.Contains(string(transport.body), "\"QueueUrls\"") {
 		t.Fatalf("expected captured json body, got %q", string(transport.body))
+	}
+
+	sendOutput, err := client.SendMessage(ctx, &sqs.SendMessageInput{
+		QueueUrl:    aws.String(service.QueueURL("orders")),
+		MessageBody: aws.String("hello"),
+	})
+	if err != nil {
+		t.Fatalf("expected send message to return successfully: %v", err)
+	}
+	if sendOutput.MessageId == nil || *sendOutput.MessageId == "" {
+		t.Fatal("expected send message output to include a message id")
+	}
+
+	receiveOutput, err := client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+		QueueUrl:            aws.String(service.QueueURL("orders")),
+		MaxNumberOfMessages: 1,
+	})
+	if err != nil {
+		t.Fatalf("expected receive message to return successfully: %v", err)
+	}
+	if got, want := len(receiveOutput.Messages), 1; got != want {
+		t.Fatalf("unexpected receive count: got %d want %d", got, want)
+	}
+	if got, want := aws.ToString(receiveOutput.Messages[0].Body), "hello"; got != want {
+		t.Fatalf("unexpected receive body: got %q want %q", got, want)
 	}
 }
 
@@ -147,10 +231,13 @@ func TestSQSNativeMiddlewareRoutesLifecycleActionThroughService(t *testing.T) {
 }
 
 type stubSQSNativeService struct {
-	listQueuesCalled bool
-	queueNamePrefix  string
-	maxResults       int
-	nextToken        string
+	listQueuesCalled     bool
+	queueNamePrefix      string
+	maxResults           int
+	nextToken            string
+	sendMessageQueueName string
+	sendMessageRequest   contracts.SendMessageRequest
+	sendMessageResult    contracts.SendMessageResult
 }
 
 func (s *stubSQSNativeService) Policy() orchestrator.EmulationPolicy {
@@ -211,7 +298,15 @@ func (s *stubSQSNativeService) SetQueueAttributes(queueName string, attributes m
 }
 
 func (s *stubSQSNativeService) ReceiveMessage(queueName string, maxMessages int, waitTime time.Duration) ([]domain.Message, error) {
-	return nil, contracts.ErrSQSOperationDeferred
+	return []domain.Message{
+		{
+			Queue:       queueName,
+			MessageID:   "message-1",
+			Body:        "hello",
+			SentAt:      time.Now(),
+			ReceiptKeys: []string{"receipt-1"},
+		},
+	}, nil
 }
 
 func (s *stubSQSNativeService) DeleteMessage(queueName string, receiptHandle string) error {
@@ -223,7 +318,15 @@ func (s *stubSQSNativeService) ChangeMessageVisibility(queueName string, receipt
 }
 
 func (s *stubSQSNativeService) SendMessage(queueName string, request contracts.SendMessageRequest) (contracts.SendMessageResult, error) {
-	return contracts.SendMessageResult{}, contracts.ErrSQSOperationDeferred
+	s.sendMessageQueueName = queueName
+	s.sendMessageRequest = request
+	if s.sendMessageResult.MessageId == "" {
+		s.sendMessageResult = contracts.SendMessageResult{
+			MessageId:        "message-1",
+			MD5OfMessageBody: "md5-body",
+		}
+	}
+	return s.sendMessageResult, nil
 }
 
 func (s *stubSQSNativeService) SendMessageBatch(queueName string, request contracts.SendMessageBatchRequest) (contracts.SendMessageBatchResult, error) {
