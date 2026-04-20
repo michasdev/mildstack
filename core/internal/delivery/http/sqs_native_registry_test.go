@@ -1,0 +1,69 @@
+package http
+
+import (
+	"testing"
+
+	"github.com/michasdev/mildstack/core/internal/resources/sqs/contracts"
+)
+
+func TestSQSNativeRegistryDerivesSpecsFromCatalog(t *testing.T) {
+	t.Helper()
+
+	registry := NewSQSRegistry()
+	entries := registry.Entries()
+	catalog := contracts.Catalog()
+
+	if got, want := len(entries), len(catalog); got != want {
+		t.Fatalf("unexpected registry entry count: got %d want %d", got, want)
+	}
+
+	for i, spec := range entries {
+		if spec.Action != catalog[i].Action {
+			t.Fatalf("unexpected action at %d: got %q want %q", i, spec.Action, catalog[i].Action)
+		}
+		if !spec.Supported {
+			t.Fatalf("expected action %s to be transport-supported", spec.Action)
+		}
+		if !spec.DomainDeferred {
+			t.Fatalf("expected action %s to be domain deferred", spec.Action)
+		}
+		if spec.Scope != catalog[i].Scope {
+			t.Fatalf("unexpected scope for %s: got %q want %q", spec.Action, spec.Scope, catalog[i].Scope)
+		}
+	}
+}
+
+func TestSQSNativeRegistryScopeMismatchesMapToExplicitErrors(t *testing.T) {
+	t.Helper()
+
+	registry := NewSQSRegistry()
+
+	rootCtx := SQSRequestContext{Action: "ListQueues", Version: sqsQueryVersion, Kind: SQSRequestKindRoot}
+	if _, err := registry.Resolve(rootCtx); err != nil {
+		t.Fatalf("resolve matching root action: %v", err)
+	}
+
+	queueCtx := SQSRequestContext{Action: "SendMessage", Version: sqsQueryVersion, Kind: SQSRequestKindQueue}
+	if _, err := registry.Resolve(queueCtx); err != nil {
+		t.Fatalf("resolve matching queue action: %v", err)
+	}
+
+	queueMismatch := SQSRequestContext{Action: "CreateQueue", Version: sqsQueryVersion, Kind: SQSRequestKindQueue}
+	if _, err := registry.Resolve(queueMismatch); err != ErrSQSQueuePathMismatch {
+		t.Fatalf("unexpected queue mismatch error: got %v want %v", err, ErrSQSQueuePathMismatch)
+	}
+
+	rootMismatch := SQSRequestContext{Action: "SendMessage", Version: sqsQueryVersion, Kind: SQSRequestKindRoot}
+	if _, err := registry.Resolve(rootMismatch); err != ErrSQSQueuePathMismatch {
+		t.Fatalf("unexpected root mismatch error: got %v want %v", err, ErrSQSQueuePathMismatch)
+	}
+}
+
+func TestSQSNativeRegistryRejectsUnknownAction(t *testing.T) {
+	t.Helper()
+
+	registry := NewSQSRegistry()
+	if _, err := registry.Resolve(SQSRequestContext{Action: "NotARealAction", Version: sqsQueryVersion, Kind: SQSRequestKindRoot}); err != ErrSQSInvalidAction {
+		t.Fatalf("unexpected unknown action error: got %v want %v", err, ErrSQSInvalidAction)
+	}
+}
