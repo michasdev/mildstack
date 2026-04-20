@@ -1,5 +1,5 @@
-import { ipcMain } from 'electron'
 import { getActiveInstancePort } from './instance-state'
+import { registerValidatedHandler } from './ipc-middleware'
 import {
   S3Client,
   ListBucketsCommand,
@@ -53,7 +53,7 @@ type S3ClientCacheEntry = {
 const clientCache = new Map<string, S3ClientCacheEntry>()
 
 export function registerS3IpcHandlers(): void {
-  ipcMain.handle('s3:listBuckets', async (_event, args: { region?: string }) => {
+  registerValidatedHandler('s3:listBuckets', async (_event, args: { region?: string }) => {
     const response = await getClient(args.region).send(new ListBucketsCommand({}))
     return (response.Buckets ?? []).map((bucket) => ({
       Name: bucket.Name,
@@ -61,7 +61,7 @@ export function registerS3IpcHandlers(): void {
     }))
   })
 
-  ipcMain.handle('s3:createBucket', async (_event, args: CreateBucketArgs) => {
+  registerValidatedHandler('s3:createBucket', async (_event, args: CreateBucketArgs) => {
     const region = normalizeRegion(args.region)
     const input =
       region === 'us-east-1'
@@ -77,12 +77,12 @@ export function registerS3IpcHandlers(): void {
     return null
   })
 
-  ipcMain.handle('s3:deleteBucket', async (_event, args: { name: string; region?: string }) => {
+  registerValidatedHandler('s3:deleteBucket', async (_event, args: { name: string; region?: string }) => {
     await getClient(args.region).send(new DeleteBucketCommand({ Bucket: args.name }))
     return null
   })
 
-  ipcMain.handle('s3:listObjects', async (_event, args: ListObjectsArgs) => {
+  registerValidatedHandler('s3:listObjects', async (_event, args: ListObjectsArgs) => {
     const response = await getClient(args.region).send(
       new ListObjectsV2Command({
         Bucket: args.bucket,
@@ -124,7 +124,7 @@ export function registerS3IpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('s3:putObject', async (_event, args: PutObjectArgs) => {
+  registerValidatedHandler('s3:putObject', async (_event, args: PutObjectArgs) => {
     const body = Buffer.from(args.body)
     await getClient(args.region).send(
       new PutObjectCommand({
@@ -137,7 +137,7 @@ export function registerS3IpcHandlers(): void {
     return null
   })
 
-  ipcMain.handle('s3:deleteObjects', async (_event, args: DeleteObjectsArgs) => {
+  registerValidatedHandler('s3:deleteObjects', async (_event, args: DeleteObjectsArgs) => {
     console.log(`[S3-IPC] deleteObjects called for bucket: ${args.bucket}, keys: ${args.keys?.length}`)
     if (args.keys.length === 0) {
       return { Deleted: [], Errors: [] }
@@ -163,7 +163,7 @@ export function registerS3IpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('s3:getObject', async (_event, args: GetObjectArgs) => {
+  registerValidatedHandler('s3:getObject', async (_event, args: GetObjectArgs) => {
     const response = await getClient(args.region).send(
       new GetObjectCommand({
         Bucket: args.bucket,

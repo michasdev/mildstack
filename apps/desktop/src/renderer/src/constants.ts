@@ -1,4 +1,5 @@
 export const regions = [
+  'sa-east-1',
   'us-east-1',
   'us-east-2',
   'us-west-1',
@@ -28,10 +29,5 @@ export const regions = [
   'ap-east-2',
   'me-south-1',
   'me-central-1',
-  'af-south-1',
-  'sa-east-1',
-  'cn-north-1',
-  'cn-northwest-1',
-  'us-gov-east-1',
-  'us-gov-west-1'
+  'af-south-1'
 ]

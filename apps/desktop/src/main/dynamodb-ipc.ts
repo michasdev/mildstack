@@ -1,5 +1,5 @@
-import { ipcMain } from 'electron'
 import { getActiveInstancePort } from './instance-state'
+import { registerValidatedHandler } from './ipc-middleware'
 import {
   DynamoDBClient,
   ListTablesCommand,
@@ -79,12 +79,12 @@ type DynamoDBClientCacheEntry = {
 const clientCache = new Map<string, DynamoDBClientCacheEntry>()
 
 export function registerDynamoDBIpcHandlers(): void {
-  ipcMain.handle('dynamodb:listTables', async (_event, args: { region?: string }) => {
+  registerValidatedHandler('dynamodb:listTables', async (_event, args: { region?: string }) => {
     const response = await getClient(args.region).send(new ListTablesCommand({}))
     return response.TableNames ?? []
   })
 
-  ipcMain.handle('dynamodb:describeTable', async (_event, args: DescribeTableArgs) => {
+  registerValidatedHandler('dynamodb:describeTable', async (_event, args: DescribeTableArgs) => {
     const response = await getClient(args.region).send(
       new DescribeTableCommand({ TableName: args.tableName })
     )
@@ -136,7 +136,7 @@ export function registerDynamoDBIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('dynamodb:createTable', async (_event, args: CreateTableArgs) => {
+  registerValidatedHandler('dynamodb:createTable', async (_event, args: CreateTableArgs) => {
     await getClient(args.region).send(
       new CreateTableCommand({
         TableName: args.tableName,
@@ -148,14 +148,14 @@ export function registerDynamoDBIpcHandlers(): void {
     return null
   })
 
-  ipcMain.handle('dynamodb:deleteTable', async (_event, args: { tableName: string; region?: string }) => {
+  registerValidatedHandler('dynamodb:deleteTable', async (_event, args: { tableName: string; region?: string }) => {
     await getClient(args.region).send(
       new DeleteTableCommand({ TableName: args.tableName })
     )
     return null
   })
 
-  ipcMain.handle('dynamodb:scan', async (_event, args: ScanArgs) => {
+  registerValidatedHandler('dynamodb:scan', async (_event, args: ScanArgs) => {
     const params: ScanCommandInput = {
       TableName: args.tableName,
       ExclusiveStartKey: args.exclusiveStartKey,
@@ -180,7 +180,7 @@ export function registerDynamoDBIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('dynamodb:query', async (_event, args: QueryArgs) => {
+  registerValidatedHandler('dynamodb:query', async (_event, args: QueryArgs) => {
     const params: QueryCommandInput = {
       TableName: args.tableName,
       KeyConditionExpression: args.keyConditionExpression,
@@ -210,7 +210,7 @@ export function registerDynamoDBIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('dynamodb:putItem', async (_event, args: PutItemArgs) => {
+  registerValidatedHandler('dynamodb:putItem', async (_event, args: PutItemArgs) => {
     await getClient(args.region).send(
       new PutItemCommand({
         TableName: args.tableName,
@@ -220,7 +220,7 @@ export function registerDynamoDBIpcHandlers(): void {
     return null
   })
 
-  ipcMain.handle('dynamodb:deleteItem', async (_event, args: DeleteItemArgs) => {
+  registerValidatedHandler('dynamodb:deleteItem', async (_event, args: DeleteItemArgs) => {
     await getClient(args.region).send(
       new DeleteItemCommand({
         TableName: args.tableName,
@@ -230,7 +230,7 @@ export function registerDynamoDBIpcHandlers(): void {
     return null
   })
 
-  ipcMain.handle('dynamodb:getItem', async (_event, args: GetItemArgs) => {
+  registerValidatedHandler('dynamodb:getItem', async (_event, args: GetItemArgs) => {
     const response = await getClient(args.region).send(
       new GetItemCommand({
         TableName: args.tableName,
