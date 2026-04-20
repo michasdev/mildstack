@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 
 export function CallToAction() {
   return (
-    <div className="relative mx-auto flex w-full max-w-3xl flex-col justify-between gap-y-6 border-y bg-background bg-[radial-gradient(35%_80%_at_25%_0%,color-mix(in_oklab,var(--color-primary)_35%,var(--color-background)),transparent)] px-4 py-8">
+    <div className="relative mx-auto flex w-full max-w-3xl flex-col justify-between gap-y-6 border-y bg-background bg-[radial-gradient(35%_80%_at_75%_0%,color-mix(in_oklab,var(--color-primary)_35%,var(--color-background)),transparent)] px-4 py-8">
       <PlusIcon
         className="absolute top-[-12.5px] left-[-11.5px] z-1 size-6"
         strokeWidth={1}
