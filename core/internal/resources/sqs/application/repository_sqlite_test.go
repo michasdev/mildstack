@@ -72,6 +72,7 @@ func TestSQLiteRepositoryPersistsQueueAndMessageStateAcrossRestart(t *testing.T)
 			"VisibilityTimeout": "30",
 			"DelaySeconds":      "0",
 		},
+		OrderingHint: "fifo",
 		Recovery: domain.QueueRecovery{
 			DeadLetterQueue: "queue-dlq",
 			Policy: map[string]string{
@@ -82,16 +83,25 @@ func TestSQLiteRepositoryPersistsQueueAndMessageStateAcrossRestart(t *testing.T)
 		UpdatedAt: createdAt.Add(time.Minute),
 	})
 	state.Messages = append(state.Messages, domain.Message{
-		Queue:       "queue-a",
-		MessageID:   "message-1",
-		Body:        "payload",
-		Attributes:  map[string]string{"foo": "bar"},
-		Metadata:    map[string]string{"trace": "abc"},
-		Tags:        []string{"alpha", "beta"},
-		ReceiptKeys: []string{"r-1", "r-2"},
-		SentAt:      createdAt.Add(2 * time.Minute),
-		AvailableAt: createdAt.Add(3 * time.Minute),
-		ReceivedAt:  createdAt.Add(4 * time.Minute),
+		Queue:                 "queue-a",
+		MessageID:             "message-1",
+		Body:                  "payload",
+		Attributes:            map[string]string{"foo": "bar"},
+		Metadata:              map[string]string{"trace": "abc"},
+		Tags:                  []string{"alpha", "beta"},
+		ReceiptKeys:           []string{"r-1", "r-2"},
+		MessageGroupID:        "group-a",
+		SequenceNumber:        42,
+		BatchID:               "batch-a",
+		BatchEntryID:          "entry-a",
+		BatchEntryIndex:       1,
+		BatchEntryCount:       3,
+		DeadLetterQueue:       "queue-dlq",
+		DeadLetterSourceQueue: "queue-a",
+		DeadLetteredAt:        createdAt.Add(5 * time.Minute),
+		SentAt:                createdAt.Add(2 * time.Minute),
+		AvailableAt:           createdAt.Add(3 * time.Minute),
+		ReceivedAt:            createdAt.Add(4 * time.Minute),
 		Recovery: domain.MessageRecovery{
 			Attempts: 2,
 			Detail:   map[string]string{"state": "pending"},
@@ -135,6 +145,9 @@ func TestSQLiteRepositoryPersistsQueueAndMessageStateAcrossRestart(t *testing.T)
 	if got, want := queue.Attributes["VisibilityTimeout"], "30"; got != want {
 		t.Fatalf("unexpected queue attribute after restart: got %q want %q", got, want)
 	}
+	if got, want := queue.OrderingHint, "fifo"; got != want {
+		t.Fatalf("unexpected ordering hint after restart: got %q want %q", got, want)
+	}
 	if got, want := queue.Recovery.DeadLetterQueue, "queue-dlq"; got != want {
 		t.Fatalf("unexpected dead-letter queue after restart: got %q want %q", got, want)
 	}
@@ -157,6 +170,24 @@ func TestSQLiteRepositoryPersistsQueueAndMessageStateAcrossRestart(t *testing.T)
 	}
 	if got, want := message.ReceiptKeys[1], "r-2"; got != want {
 		t.Fatalf("unexpected latest receipt key after restart: got %q want %q", got, want)
+	}
+	if got, want := message.MessageGroupID, "group-a"; got != want {
+		t.Fatalf("unexpected message group after restart: got %q want %q", got, want)
+	}
+	if got, want := message.SequenceNumber, int64(42); got != want {
+		t.Fatalf("unexpected message sequence after restart: got %d want %d", got, want)
+	}
+	if got, want := message.BatchID, "batch-a"; got != want {
+		t.Fatalf("unexpected batch id after restart: got %q want %q", got, want)
+	}
+	if got, want := message.DeadLetterQueue, "queue-dlq"; got != want {
+		t.Fatalf("unexpected dead letter queue after restart: got %q want %q", got, want)
+	}
+	if got, want := message.DeadLetterSourceQueue, "queue-a"; got != want {
+		t.Fatalf("unexpected dead letter source after restart: got %q want %q", got, want)
+	}
+	if got, want := message.DeadLetteredAt, createdAt.Add(5*time.Minute); !got.Equal(want) {
+		t.Fatalf("unexpected dead letter time after restart: got %v want %v", got, want)
 	}
 	if got, want := message.Recovery.Detail["state"], "pending"; got != want {
 		t.Fatalf("unexpected message recovery detail after restart: got %q want %q", got, want)

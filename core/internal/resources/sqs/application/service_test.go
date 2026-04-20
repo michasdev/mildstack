@@ -150,6 +150,124 @@ func TestSQSServiceAttachStateUsesNamespacedCopySafeSnapshot(t *testing.T) {
 	}
 }
 
+func TestSQSServiceReceiveMessageRespectsStandardOrderAndFifoOrdering(t *testing.T) {
+	t.Helper()
+
+	clock := newManualClock(time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC))
+	service := newServiceWithClock(domain.State{
+		Service: "sqs",
+		Queues: []domain.Queue{
+			{
+				Name: "queue-standard",
+				Attributes: map[string]string{
+					"VisibilityTimeout": "30",
+				},
+			},
+			{
+				Name:         "queue-fifo",
+				OrderingHint: "fifo",
+				Attributes: map[string]string{
+					"VisibilityTimeout": "30",
+					"FifoQueue":         "true",
+				},
+			},
+		},
+		Messages: []domain.Message{
+			{
+				Queue:     "queue-standard",
+				MessageID: "std-late",
+				Body:      "late",
+				SentAt:    clock.Now().Add(time.Second),
+			},
+			{
+				Queue:     "queue-standard",
+				MessageID: "std-early",
+				Body:      "early",
+				SentAt:    clock.Now(),
+			},
+			{
+				Queue:          "queue-fifo",
+				MessageID:      "fifo-second",
+				Body:           "second",
+				MessageGroupID: "group-a",
+				SequenceNumber: 2,
+				SentAt:         clock.Now().Add(2 * time.Second),
+			},
+			{
+				Queue:          "queue-fifo",
+				MessageID:      "fifo-first",
+				Body:           "first",
+				MessageGroupID: "group-a",
+				SequenceNumber: 1,
+				SentAt:         clock.Now().Add(time.Second),
+			},
+		},
+	}, nil, clock)
+
+	standard, err := service.ReceiveMessage("queue-standard", 2, 0)
+	if err != nil {
+		t.Fatalf("receive standard messages: %v", err)
+	}
+	if got, want := len(standard), 2; got != want {
+		t.Fatalf("unexpected standard count: got %d want %d", got, want)
+	}
+	if got, want := standard[0].MessageID, "std-early"; got != want {
+		t.Fatalf("unexpected standard first message: got %q want %q", got, want)
+	}
+	if got, want := standard[1].MessageID, "std-late"; got != want {
+		t.Fatalf("unexpected standard second message: got %q want %q", got, want)
+	}
+
+	fifo, err := service.ReceiveMessage("queue-fifo", 2, 0)
+	if err != nil {
+		t.Fatalf("receive fifo messages: %v", err)
+	}
+	if got, want := len(fifo), 1; got != want {
+		t.Fatalf("unexpected fifo count: got %d want %d", got, want)
+	}
+	if got, want := fifo[0].MessageID, "fifo-first"; got != want {
+		t.Fatalf("unexpected fifo first message: got %q want %q", got, want)
+	}
+}
+
+func TestSQSServiceDeadLetterEligibilityUsesRecoveryPolicy(t *testing.T) {
+	t.Helper()
+
+	now := time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC)
+	service := newService(domain.State{
+		Service: "sqs",
+		Queues: []domain.Queue{
+			{
+				Name: "queue-a",
+				Recovery: domain.QueueRecovery{
+					DeadLetterQueue: "queue-dlq",
+					Policy: map[string]string{
+						"max_receive_count": "3",
+					},
+				},
+			},
+		},
+		Messages: []domain.Message{
+			{
+				Queue:      "queue-a",
+				MessageID:  "message-1",
+				ReceivedAt: now.Add(-31 * time.Second),
+				Recovery: domain.MessageRecovery{
+					Attempts: 3,
+				},
+			},
+		},
+	}, nil)
+
+	queue, ok := service.queueByNameLocked("queue-a")
+	if !ok {
+		t.Fatal("expected queue to exist")
+	}
+	if !service.deadLetterEligibleLocked(service.state.Messages[0], queue, now) {
+		t.Fatal("expected message to be dead-letter eligible")
+	}
+}
+
 func TestSQSServiceNewWithPersistenceLoadsRepositoryState(t *testing.T) {
 	t.Helper()
 
@@ -171,19 +289,29 @@ func TestSQSServiceNewWithPersistenceLoadsRepositoryState(t *testing.T) {
 		Attributes: map[string]string{
 			"VisibilityTimeout": "45",
 		},
+		OrderingHint: "fifo",
 		Recovery: domain.QueueRecovery{
 			DeadLetterQueue: "queue-dlq",
 		},
 		CreatedAt: time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC),
 	})
 	state.Messages = append(state.Messages, domain.Message{
-		Queue:       "queue-a",
-		MessageID:   "message-1",
-		Body:        "payload",
-		Tags:        []string{"persisted"},
-		AvailableAt: time.Date(2026, time.April, 19, 12, 3, 0, 0, time.UTC),
-		ReceivedAt:  time.Date(2026, time.April, 19, 12, 4, 0, 0, time.UTC),
-		ReceiptKeys: []string{"r-1", "r-2"},
+		Queue:                 "queue-a",
+		MessageID:             "message-1",
+		Body:                  "payload",
+		Tags:                  []string{"persisted"},
+		MessageGroupID:        "group-a",
+		SequenceNumber:        9,
+		BatchID:               "batch-a",
+		BatchEntryID:          "entry-a",
+		BatchEntryIndex:       0,
+		BatchEntryCount:       1,
+		DeadLetterQueue:       "queue-dlq",
+		DeadLetterSourceQueue: "queue-a",
+		DeadLetteredAt:        time.Date(2026, time.April, 19, 12, 5, 0, 0, time.UTC),
+		AvailableAt:           time.Date(2026, time.April, 19, 12, 3, 0, 0, time.UTC),
+		ReceivedAt:            time.Date(2026, time.April, 19, 12, 4, 0, 0, time.UTC),
+		ReceiptKeys:           []string{"r-1", "r-2"},
 	})
 	if err := repo.Save(state); err != nil {
 		_ = repo.Close()
@@ -212,6 +340,9 @@ func TestSQSServiceNewWithPersistenceLoadsRepositoryState(t *testing.T) {
 	if got, want := service.state.Queues[0].Name, "queue-a"; got != want {
 		t.Fatalf("unexpected queue name after load: got %q want %q", got, want)
 	}
+	if got, want := service.state.Queues[0].OrderingHint, "fifo"; got != want {
+		t.Fatalf("unexpected queue ordering after load: got %q want %q", got, want)
+	}
 	if got, want := service.state.Messages[0].MessageID, "message-1"; got != want {
 		t.Fatalf("unexpected message id after load: got %q want %q", got, want)
 	}
@@ -223,6 +354,12 @@ func TestSQSServiceNewWithPersistenceLoadsRepositoryState(t *testing.T) {
 	}
 	if got, want := service.state.Messages[0].ReceiptKeys[1], "r-2"; got != want {
 		t.Fatalf("unexpected receipt handle history after load: got %q want %q", got, want)
+	}
+	if got, want := service.state.Messages[0].MessageGroupID, "group-a"; got != want {
+		t.Fatalf("unexpected message group after load: got %q want %q", got, want)
+	}
+	if got, want := service.state.Messages[0].DeadLetterQueue, "queue-dlq"; got != want {
+		t.Fatalf("unexpected dead letter queue after load: got %q want %q", got, want)
 	}
 }
 

@@ -50,7 +50,7 @@ func (w *worker) run(ctx context.Context) {
 		case <-timer.C:
 		}
 
-		w.redeliver(w.clock.Now())
+		w.advance(w.clock.Now())
 	}
 }
 
@@ -121,9 +121,15 @@ func (w *worker) redeliver(now time.Time) []domain.Message {
 		if !ok {
 			continue
 		}
-		if CanRedeliver(message, queue, now) {
+		if CanRedeliver(message, queue, now) && !IsDeadLetterEligible(message, queue, now) {
 			redeliverable = append(redeliverable, cloneMessage(message))
 		}
 	}
 	return redeliverable
+}
+
+func (w *worker) advance(now time.Time) int {
+	w.service.mu.Lock()
+	defer w.service.mu.Unlock()
+	return w.service.sweepDeadLettersLocked(now)
 }

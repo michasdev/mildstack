@@ -309,15 +309,18 @@ func (s *Service) receiveReadyMessagesLocked(queueName string, maxMessages int, 
 
 	indices := make([]int, 0, len(s.state.Messages))
 	for idx, message := range s.state.Messages {
-		if message.Queue != queueName {
+		if !messageVisibleInQueue(message, queueName) {
 			continue
 		}
 		if IsDelayed(message, now) || IsInvisible(message, queue, now) {
 			continue
 		}
+		if IsFIFOQueue(queue) && fifoDeliveryBlocked(s.state.Messages, idx, queueName) {
+			continue
+		}
 		indices = append(indices, idx)
 	}
-	sortMessagesByDelivery(s.state.Messages, indices)
+	sortMessagesByDelivery(s.state.Messages, indices, queue)
 
 	selected := make([]domain.Message, 0, maxMessages)
 	for _, idx := range indices {
@@ -327,6 +330,7 @@ func (s *Service) receiveReadyMessagesLocked(queueName string, maxMessages int, 
 		}
 		timeout := queueVisibilityTimeout(queue, *message)
 		message.ReceivedAt = now
+		message.Recovery.Attempts++
 		message.Metadata[leaseVisibilityTimeoutMetaKey] = strconv.FormatInt(int64(timeout/time.Second), 10)
 		message.ReceiptKeys = append(message.ReceiptKeys, nextReceiptHandle(queueName, *message))
 		selected = append(selected, cloneMessage(*message))
@@ -347,7 +351,7 @@ func (s *Service) receiveReadyMessagesLocked(queueName string, maxMessages int, 
 
 func (s *Service) findMessageByReceiptLocked(queueName, receiptHandle string) (int, bool) {
 	for idx, message := range s.state.Messages {
-		if message.Queue != queueName {
+		if !messageVisibleInQueue(message, queueName) {
 			continue
 		}
 		if CurrentReceiptHandle(message) == receiptHandle {
@@ -357,10 +361,18 @@ func (s *Service) findMessageByReceiptLocked(queueName, receiptHandle string) (i
 	return -1, false
 }
 
-func sortMessagesByDelivery(messages []domain.Message, indices []int) {
+func sortMessagesByDelivery(messages []domain.Message, indices []int, queue domain.Queue) {
 	sort.SliceStable(indices, func(i, j int) bool {
 		left := messages[indices[i]]
 		right := messages[indices[j]]
+		if IsFIFOQueue(queue) {
+			if left.MessageGroupID != right.MessageGroupID {
+				return left.MessageGroupID < right.MessageGroupID
+			}
+			if left.SequenceNumber != right.SequenceNumber && left.SequenceNumber > 0 && right.SequenceNumber > 0 {
+				return left.SequenceNumber < right.SequenceNumber
+			}
+		}
 		if !left.SentAt.Equal(right.SentAt) {
 			return left.SentAt.Before(right.SentAt)
 		}
@@ -423,4 +435,141 @@ func cloneMap(values map[string]string) map[string]string {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func messageVisibleInQueue(message domain.Message, queueName string) bool {
+	if message.Queue != queueName {
+		return false
+	}
+	if trimName(message.DeadLetterSourceQueue) == queueName && trimName(message.DeadLetterQueue) != queueName {
+		return false
+	}
+	return true
+}
+
+func fifoDeliveryBlocked(messages []domain.Message, candidateIndex int, queueName string) bool {
+	candidate := messages[candidateIndex]
+	groupID := trimName(candidate.MessageGroupID)
+	if groupID == "" {
+		return false
+	}
+
+	for idx, other := range messages {
+		if idx == candidateIndex || !messageVisibleInQueue(other, queueName) {
+			continue
+		}
+		if trimName(other.MessageGroupID) != groupID {
+			continue
+		}
+		if compareFIFOMessageOrder(other, candidate) < 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func compareFIFOMessageOrder(left, right domain.Message) int {
+	if left.SequenceNumber > 0 && right.SequenceNumber > 0 && left.SequenceNumber != right.SequenceNumber {
+		if left.SequenceNumber < right.SequenceNumber {
+			return -1
+		}
+		return 1
+	}
+	if !left.SentAt.Equal(right.SentAt) {
+		if left.SentAt.Before(right.SentAt) {
+			return -1
+		}
+		return 1
+	}
+	if !left.AvailableAt.Equal(right.AvailableAt) {
+		if left.AvailableAt.Before(right.AvailableAt) {
+			return -1
+		}
+		return 1
+	}
+	switch {
+	case left.MessageID < right.MessageID:
+		return -1
+	case left.MessageID > right.MessageID:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func queueOrderingMode(queue domain.Queue) string {
+	if IsFIFOQueue(queue) {
+		return "fifo"
+	}
+	return "standard"
+}
+
+func deadLetterThresholdFromQueue(queue domain.Queue) int {
+	return deadLetterThreshold(queue)
+}
+
+func (s *Service) deadLetterEligibleLocked(message domain.Message, queue domain.Queue, now time.Time) bool {
+	return IsDeadLetterEligible(message, queue, now)
+}
+
+func (s *Service) sweepDeadLettersLocked(now time.Time) int {
+	mutated := 0
+	for idx := range s.state.Messages {
+		message := s.state.Messages[idx]
+		queue, ok := s.queueByNameLocked(message.Queue)
+		if !ok {
+			continue
+		}
+		if !s.deadLetterEligibleLocked(message, queue, now) {
+			continue
+		}
+		if s.moveMessageToDeadLetterLocked(idx, queue, now) {
+			mutated++
+		}
+	}
+	if mutated > 0 {
+		_ = s.commitStateLocked()
+	}
+	return mutated
+}
+
+func (s *Service) moveMessageToDeadLetterLocked(index int, sourceQueue domain.Queue, now time.Time) bool {
+	message := &s.state.Messages[index]
+	dlqName := trimName(sourceQueue.Recovery.DeadLetterQueue)
+	if dlqName == "" || trimName(message.DeadLetterQueue) == dlqName {
+		return false
+	}
+
+	message.DeadLetterQueue = dlqName
+	message.DeadLetterSourceQueue = sourceQueue.Name
+	message.DeadLetteredAt = now
+	message.ReceivedAt = time.Time{}
+	message.AvailableAt = now
+	if message.Metadata == nil {
+		message.Metadata = map[string]string{}
+	}
+	message.Metadata["dead_letter_queue"] = dlqName
+	message.Metadata["dead_letter_source_queue"] = sourceQueue.Name
+	message.Metadata["dead_lettered_at"] = now.UTC().Format(time.RFC3339Nano)
+
+	if dlqQueue, ok := s.queueByNameLocked(dlqName); ok {
+		message.Queue = dlqQueue.Name
+	}
+
+	if s.state.RecoveryMetadata == nil {
+		s.state.RecoveryMetadata = map[string]domain.RecoveryMetadata{}
+	}
+	s.state.RecoveryMetadata[sourceQueue.Name+"/"+message.MessageID] = domain.RecoveryMetadata{
+		Queue:   dlqName,
+		Message: message.MessageID,
+		Detail: map[string]string{
+			"source_queue":       sourceQueue.Name,
+			"dead_letter_queue":  dlqName,
+			"attempts":           strconv.Itoa(message.Recovery.Attempts),
+			"dead_lettered_at":   now.UTC().Format(time.RFC3339Nano),
+			"dead_letter_reason": "max_receive_count",
+			"ordering_mode":      queueOrderingMode(sourceQueue),
+		},
+	}
+	return true
 }

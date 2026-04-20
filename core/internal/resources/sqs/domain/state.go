@@ -16,12 +16,13 @@ type State struct {
 }
 
 type Queue struct {
-	Name       string
-	URL        string
-	Attributes map[string]string
-	Recovery   QueueRecovery
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	Name         string
+	URL          string
+	Attributes   map[string]string
+	OrderingHint string
+	Recovery     QueueRecovery
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type QueueRecovery struct {
@@ -30,17 +31,26 @@ type QueueRecovery struct {
 }
 
 type Message struct {
-	Queue       string
-	MessageID   string
-	Body        string
-	Attributes  map[string]string
-	Metadata    map[string]string
-	Tags        []string
-	ReceiptKeys []string
-	SentAt      time.Time
-	AvailableAt time.Time
-	ReceivedAt  time.Time
-	Recovery    MessageRecovery
+	Queue                 string
+	MessageID             string
+	Body                  string
+	Attributes            map[string]string
+	Metadata              map[string]string
+	Tags                  []string
+	ReceiptKeys           []string
+	MessageGroupID        string
+	SequenceNumber        int64
+	BatchID               string
+	BatchEntryID          string
+	BatchEntryIndex       int
+	BatchEntryCount       int
+	DeadLetterQueue       string
+	DeadLetterSourceQueue string
+	DeadLetteredAt        time.Time
+	SentAt                time.Time
+	AvailableAt           time.Time
+	ReceivedAt            time.Time
+	Recovery              MessageRecovery
 }
 
 type MessageRecovery struct {
@@ -67,9 +77,10 @@ func (s State) Snapshot() map[string]any {
 	queues := make([]any, 0, len(s.Queues))
 	for _, queue := range s.ListQueues() {
 		queues = append(queues, map[string]any{
-			"name":       queue.Name,
-			"url":        queue.URL,
-			"attributes": cloneStringMapAny(queue.Attributes),
+			"name":          queue.Name,
+			"url":           queue.URL,
+			"attributes":    cloneStringMapAny(queue.Attributes),
+			"ordering_hint": queue.OrderingHint,
 			"recovery": map[string]any{
 				"dead_letter_queue": queue.Recovery.DeadLetterQueue,
 				"policy":            cloneStringMapAny(queue.Recovery.Policy),
@@ -82,16 +93,25 @@ func (s State) Snapshot() map[string]any {
 	messages := make([]any, 0, len(s.Messages))
 	for _, message := range s.ListMessages() {
 		messages = append(messages, map[string]any{
-			"queue":        message.Queue,
-			"message_id":   message.MessageID,
-			"body":         message.Body,
-			"attributes":   cloneStringMapAny(message.Attributes),
-			"metadata":     cloneStringMapAny(message.Metadata),
-			"tags":         append([]string(nil), message.Tags...),
-			"receipt_keys": append([]string(nil), message.ReceiptKeys...),
-			"sent_at":      snapshotTime(message.SentAt),
-			"available_at": snapshotTime(message.AvailableAt),
-			"received_at":  snapshotTime(message.ReceivedAt),
+			"queue":                    message.Queue,
+			"message_id":               message.MessageID,
+			"body":                     message.Body,
+			"attributes":               cloneStringMapAny(message.Attributes),
+			"metadata":                 cloneStringMapAny(message.Metadata),
+			"tags":                     append([]string(nil), message.Tags...),
+			"receipt_keys":             append([]string(nil), message.ReceiptKeys...),
+			"message_group_id":         message.MessageGroupID,
+			"sequence_number":          message.SequenceNumber,
+			"batch_id":                 message.BatchID,
+			"batch_entry_id":           message.BatchEntryID,
+			"batch_entry_index":        message.BatchEntryIndex,
+			"batch_entry_count":        message.BatchEntryCount,
+			"dead_letter_queue":        message.DeadLetterQueue,
+			"dead_letter_source_queue": message.DeadLetterSourceQueue,
+			"dead_lettered_at":         snapshotTime(message.DeadLetteredAt),
+			"sent_at":                  snapshotTime(message.SentAt),
+			"available_at":             snapshotTime(message.AvailableAt),
+			"received_at":              snapshotTime(message.ReceivedAt),
 			"recovery": map[string]any{
 				"attempts": message.Recovery.Attempts,
 				"detail":   cloneStringMapAny(message.Recovery.Detail),
