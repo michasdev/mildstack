@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -10,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/contracts"
@@ -43,6 +46,9 @@ var (
 	errQueueNotFound           = errors.New("sqs: queue not found")
 	errReceiptHandleMismatch   = errors.New("sqs: receipt handle does not match active lease")
 	errInvalidVisibilityWindow = errors.New("sqs: visibility timeout must be non-negative")
+	errEmptyBatchRequest       = errors.New("sqs: batch request is empty")
+	errTooManyBatchEntries     = errors.New("sqs: batch request contains more than 10 entries")
+	errDuplicateBatchEntryIDs  = errors.New("sqs: batch request contains duplicate entry IDs")
 )
 
 func New() *Service {
@@ -549,7 +555,27 @@ func (s *Service) SendMessage(queueName string, request contracts.SendMessageReq
 	if queueName == "" {
 		return contracts.SendMessageResult{}, fmt.Errorf("sqs: queue name is required")
 	}
-	return contracts.SendMessageResult{}, contracts.ErrSQSOperationDeferred
+	if trimName(request.MessageBody) == "" {
+		return contracts.SendMessageResult{}, fmt.Errorf("sqs: message body is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	queue, ok := s.activeQueueByNameLocked(queueName)
+	if !ok {
+		return contracts.SendMessageResult{}, errQueueNotFound
+	}
+
+	message, result, err := s.enqueueMessageLocked(queueName, queue, request, "", "", 0, 1)
+	if err != nil {
+		return contracts.SendMessageResult{}, err
+	}
+	s.state.Messages = append(s.state.Messages, message)
+	if err := s.commitStateLocked(); err != nil {
+		return contracts.SendMessageResult{}, err
+	}
+	return result, nil
 }
 
 func (s *Service) SendMessageBatch(queueName string, request contracts.SendMessageBatchRequest) (contracts.SendMessageBatchResult, error) {
@@ -557,7 +583,47 @@ func (s *Service) SendMessageBatch(queueName string, request contracts.SendMessa
 	if queueName == "" {
 		return contracts.SendMessageBatchResult{}, fmt.Errorf("sqs: queue name is required")
 	}
-	return contracts.SendMessageBatchResult{}, contracts.ErrSQSOperationDeferred
+	if len(request.Entries) == 0 {
+		return contracts.SendMessageBatchResult{}, errEmptyBatchRequest
+	}
+	if len(request.Entries) > 10 {
+		return contracts.SendMessageBatchResult{}, errTooManyBatchEntries
+	}
+	if hasDuplicateBatchEntryIDsByID(request.Entries, func(entry contracts.SendMessageBatchRequestEntry) string { return entry.Id }) {
+		return contracts.SendMessageBatchResult{}, errDuplicateBatchEntryIDs
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	queue, ok := s.activeQueueByNameLocked(queueName)
+	if !ok {
+		return contracts.SendMessageBatchResult{}, errQueueNotFound
+	}
+
+	result := contracts.SendMessageBatchResult{
+		Successful: make([]contracts.SendMessageBatchResultEntry, 0, len(request.Entries)),
+		Failed:     make([]contracts.BatchResultErrorEntry, 0),
+	}
+	pending := make([]domain.Message, 0, len(request.Entries))
+	for index, entry := range request.Entries {
+		entryResult, message, err := s.enqueueBatchMessageLocked(queueName, queue, entry, index, len(request.Entries))
+		if err != nil {
+			result.Failed = append(result.Failed, batchFailureEntry(entry.Id, err.Error(), true))
+			continue
+		}
+		pending = append(pending, message)
+		result.Successful = append(result.Successful, entryResult)
+	}
+
+	if len(pending) > 0 {
+		s.state.Messages = append(s.state.Messages, pending...)
+		if err := s.commitStateLocked(); err != nil {
+			return contracts.SendMessageBatchResult{}, err
+		}
+	}
+
+	return result, nil
 }
 
 func (s *Service) DeleteMessageBatch(queueName string, request contracts.DeleteMessageBatchRequest) (contracts.DeleteMessageBatchResult, error) {
@@ -565,7 +631,54 @@ func (s *Service) DeleteMessageBatch(queueName string, request contracts.DeleteM
 	if queueName == "" {
 		return contracts.DeleteMessageBatchResult{}, fmt.Errorf("sqs: queue name is required")
 	}
-	return contracts.DeleteMessageBatchResult{}, contracts.ErrSQSOperationDeferred
+	if len(request.Entries) == 0 {
+		return contracts.DeleteMessageBatchResult{}, errEmptyBatchRequest
+	}
+	if len(request.Entries) > 10 {
+		return contracts.DeleteMessageBatchResult{}, errTooManyBatchEntries
+	}
+	if hasDuplicateBatchEntryIDsByID(request.Entries, func(entry contracts.DeleteMessageBatchRequestEntry) string { return entry.Id }) {
+		return contracts.DeleteMessageBatchResult{}, errDuplicateBatchEntryIDs
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.activeQueueByNameLocked(queueName); !ok {
+		return contracts.DeleteMessageBatchResult{}, errQueueNotFound
+	}
+
+	result := contracts.DeleteMessageBatchResult{
+		Successful: make([]contracts.DeleteMessageBatchResultEntry, 0, len(request.Entries)),
+		Failed:     make([]contracts.BatchResultErrorEntry, 0),
+	}
+	deleted := false
+	for _, entry := range request.Entries {
+		id := trimName(entry.Id)
+		receiptHandle := trimName(entry.ReceiptHandle)
+		if id == "" || receiptHandle == "" {
+			result.Failed = append(result.Failed, batchFailureEntry(entry.Id, "receipt handle is required", true))
+			continue
+		}
+
+		idx, ok := s.findMessageByReceiptLocked(queueName, receiptHandle)
+		if !ok {
+			result.Failed = append(result.Failed, batchFailureEntry(entry.Id, "receipt handle is invalid", true))
+			continue
+		}
+
+		s.state.Messages = append(s.state.Messages[:idx], s.state.Messages[idx+1:]...)
+		deleted = true
+		result.Successful = append(result.Successful, contracts.DeleteMessageBatchResultEntry{Id: id})
+	}
+
+	if deleted {
+		if err := s.commitStateLocked(); err != nil {
+			return contracts.DeleteMessageBatchResult{}, err
+		}
+	}
+
+	return result, nil
 }
 
 func (s *Service) ChangeMessageVisibilityBatch(queueName string, request contracts.ChangeMessageVisibilityBatchRequest) (contracts.ChangeMessageVisibilityBatchResult, error) {
@@ -573,7 +686,57 @@ func (s *Service) ChangeMessageVisibilityBatch(queueName string, request contrac
 	if queueName == "" {
 		return contracts.ChangeMessageVisibilityBatchResult{}, fmt.Errorf("sqs: queue name is required")
 	}
-	return contracts.ChangeMessageVisibilityBatchResult{}, contracts.ErrSQSOperationDeferred
+	if len(request.Entries) == 0 {
+		return contracts.ChangeMessageVisibilityBatchResult{}, errEmptyBatchRequest
+	}
+	if len(request.Entries) > 10 {
+		return contracts.ChangeMessageVisibilityBatchResult{}, errTooManyBatchEntries
+	}
+	if hasDuplicateBatchEntryIDsByID(request.Entries, func(entry contracts.ChangeMessageVisibilityBatchRequestEntry) string { return entry.Id }) {
+		return contracts.ChangeMessageVisibilityBatchResult{}, errDuplicateBatchEntryIDs
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.activeQueueByNameLocked(queueName); !ok {
+		return contracts.ChangeMessageVisibilityBatchResult{}, errQueueNotFound
+	}
+
+	result := contracts.ChangeMessageVisibilityBatchResult{
+		Successful: make([]contracts.ChangeMessageVisibilityBatchResultEntry, 0, len(request.Entries)),
+		Failed:     make([]contracts.BatchResultErrorEntry, 0),
+	}
+	changed := false
+	for _, entry := range request.Entries {
+		id := trimName(entry.Id)
+		receiptHandle := trimName(entry.ReceiptHandle)
+		if id == "" || receiptHandle == "" {
+			result.Failed = append(result.Failed, batchFailureEntry(entry.Id, "receipt handle is required", true))
+			continue
+		}
+
+		if entry.VisibilityTimeout < 0 {
+			result.Failed = append(result.Failed, batchFailureEntry(entry.Id, "visibility timeout must be non-negative", true))
+			continue
+		}
+
+		if err := s.changeMessageVisibilityLocked(queueName, receiptHandle, time.Duration(entry.VisibilityTimeout)*time.Second); err != nil {
+			result.Failed = append(result.Failed, batchFailureEntry(entry.Id, err.Error(), true))
+			continue
+		}
+
+		changed = true
+		result.Successful = append(result.Successful, contracts.ChangeMessageVisibilityBatchResultEntry{Id: id})
+	}
+
+	if changed {
+		if err := s.commitStateLocked(); err != nil {
+			return contracts.ChangeMessageVisibilityBatchResult{}, err
+		}
+	}
+
+	return result, nil
 }
 
 func (s *Service) commitStateLocked() error {
@@ -741,6 +904,9 @@ func (s *Service) receiveReadyMessagesLocked(queueName string, maxMessages int, 
 		if message.Metadata == nil {
 			message.Metadata = map[string]string{}
 		}
+		if trimName(message.Metadata["approximate_first_receive_timestamp"]) == "" {
+			message.Metadata["approximate_first_receive_timestamp"] = strconv.FormatInt(now.UnixMilli(), 10)
+		}
 		timeout := queueVisibilityTimeout(queue, *message)
 		message.ReceivedAt = now
 		message.Recovery.Attempts++
@@ -760,6 +926,235 @@ func (s *Service) receiveReadyMessagesLocked(queueName string, maxMessages int, 
 	}
 
 	return selected, nil
+}
+
+func (s *Service) enqueueMessageLocked(queueName string, queue domain.Queue, request contracts.SendMessageRequest, batchID string, batchEntryID string, batchEntryIndex int, batchEntryCount int) (domain.Message, contracts.SendMessageResult, error) {
+	messageGroupID := trimName(request.MessageGroupId)
+	if IsFIFOQueue(queue) && messageGroupID == "" {
+		return domain.Message{}, contracts.SendMessageResult{}, fmt.Errorf("sqs: message group id is required for fifo queues")
+	}
+
+	now := s.clock.Now()
+	message := domain.Message{
+		Queue:           queueName,
+		MessageID:       uuid.NewString(),
+		Body:            request.MessageBody,
+		Attributes:      messageAttributesToStrings(request.MessageAttributes),
+		Metadata:        messageSystemAttributesToStrings(request.MessageSystemAttributes),
+		MessageGroupID:  messageGroupID,
+		BatchID:         trimName(batchID),
+		BatchEntryID:    trimName(batchEntryID),
+		BatchEntryIndex: batchEntryIndex,
+		BatchEntryCount: batchEntryCount,
+		SentAt:          now,
+	}
+
+	if request.DelaySeconds > 0 {
+		message.AvailableAt = now.Add(time.Duration(request.DelaySeconds) * time.Second)
+	}
+	if message.Metadata == nil {
+		message.Metadata = map[string]string{}
+	}
+	if request.MessageDeduplicationId != "" {
+		message.Metadata["MessageDeduplicationId"] = request.MessageDeduplicationId
+	}
+
+	if IsFIFOQueue(queue) {
+		message.SequenceNumber = s.nextSequenceNumberLocked(queueName, messageGroupID)
+	}
+
+	result := contracts.SendMessageResult{
+		MD5OfMessageBody: md5OfString(request.MessageBody),
+		MessageId:        message.MessageID,
+	}
+	if message.SequenceNumber > 0 {
+		result.SequenceNumber = strconv.FormatInt(message.SequenceNumber, 10)
+	}
+	if len(request.MessageAttributes) > 0 {
+		result.MD5OfMessageAttributes = md5OfMap(message.Attributes)
+	}
+	if len(request.MessageSystemAttributes) > 0 {
+		result.MD5OfMessageSystemAttributes = md5OfMap(message.Metadata)
+	}
+
+	return message, result, nil
+}
+
+func (s *Service) enqueueBatchMessageLocked(queueName string, queue domain.Queue, entry contracts.SendMessageBatchRequestEntry, batchIndex int, batchCount int) (contracts.SendMessageBatchResultEntry, domain.Message, error) {
+	if trimName(entry.Id) == "" {
+		return contracts.SendMessageBatchResultEntry{}, domain.Message{}, fmt.Errorf("sqs: batch entry id is required")
+	}
+	if trimName(entry.MessageBody) == "" {
+		return contracts.SendMessageBatchResultEntry{}, domain.Message{}, fmt.Errorf("sqs: message body is required")
+	}
+
+	message, result, err := s.enqueueMessageLocked(queueName, queue, contracts.SendMessageRequest{
+		DelaySeconds:            entry.DelaySeconds,
+		MessageAttributes:       entry.MessageAttributes,
+		MessageBody:             entry.MessageBody,
+		MessageDeduplicationId:  entry.MessageDeduplicationId,
+		MessageGroupId:          entry.MessageGroupId,
+		MessageSystemAttributes: entry.MessageSystemAttributes,
+	}, "", entry.Id, batchIndex, batchCount)
+	if err != nil {
+		return contracts.SendMessageBatchResultEntry{}, domain.Message{}, err
+	}
+
+	return contracts.SendMessageBatchResultEntry{
+		Id:                           trimName(entry.Id),
+		MD5OfMessageAttributes:       result.MD5OfMessageAttributes,
+		MD5OfMessageBody:             result.MD5OfMessageBody,
+		MD5OfMessageSystemAttributes: result.MD5OfMessageSystemAttributes,
+		MessageId:                    result.MessageId,
+		SequenceNumber:               result.SequenceNumber,
+	}, message, nil
+}
+
+func (s *Service) changeMessageVisibilityLocked(queueName, receiptHandle string, visibility time.Duration) error {
+	if visibility < 0 {
+		return errInvalidVisibilityWindow
+	}
+	idx, ok := s.findMessageByReceiptLocked(queueName, receiptHandle)
+	if !ok {
+		return errReceiptHandleMismatch
+	}
+
+	message := &s.state.Messages[idx]
+	if message.Metadata == nil {
+		message.Metadata = map[string]string{}
+	}
+	if visibility == 0 {
+		message.ReceivedAt = time.Time{}
+		message.AvailableAt = s.clock.Now()
+		message.Metadata[leaseVisibilityTimeoutMetaKey] = "0"
+		return nil
+	}
+
+	message.ReceivedAt = s.clock.Now()
+	message.Metadata[leaseVisibilityTimeoutMetaKey] = strconv.FormatInt(int64(visibility/time.Second), 10)
+	return nil
+}
+
+func (s *Service) nextSequenceNumberLocked(queueName, groupID string) int64 {
+	var maxSequence int64
+	for _, message := range s.state.Messages {
+		if trimName(message.Queue) != queueName {
+			continue
+		}
+		if trimName(groupID) != "" && trimName(message.MessageGroupID) != trimName(groupID) {
+			continue
+		}
+		if message.SequenceNumber > maxSequence {
+			maxSequence = message.SequenceNumber
+		}
+	}
+	return maxSequence + 1
+}
+
+func md5OfString(value string) string {
+	sum := md5.Sum([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func md5OfMap(values map[string]string) string {
+	if len(values) == 0 {
+		return ""
+	}
+
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	builder := strings.Builder{}
+	for _, key := range keys {
+		builder.WriteString(key)
+		builder.WriteString("=")
+		builder.WriteString(values[key])
+		builder.WriteString(";")
+	}
+	return md5OfString(builder.String())
+}
+
+func messageAttributesToStrings(attributes map[string]contracts.MessageAttributeValue) map[string]string {
+	if len(attributes) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(attributes))
+	for key := range attributes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		value := attributes[key]
+		switch {
+		case value.StringValue != "":
+			values[key] = value.StringValue
+		case len(value.BinaryValue) > 0:
+			values[key] = string(value.BinaryValue)
+		case value.DataType != "":
+			values[key] = value.DataType
+		default:
+			values[key] = ""
+		}
+	}
+	return values
+}
+
+func messageSystemAttributesToStrings(attributes map[string]contracts.MessageAttributeValue) map[string]string {
+	if len(attributes) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(attributes))
+	for key := range attributes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		value := attributes[key]
+		switch {
+		case value.StringValue != "":
+			values[key] = value.StringValue
+		case len(value.BinaryValue) > 0:
+			values[key] = string(value.BinaryValue)
+		case value.DataType != "":
+			values[key] = value.DataType
+		default:
+			values[key] = ""
+		}
+	}
+	return values
+}
+
+func hasDuplicateBatchEntryIDsByID[T any](entries []T, getID func(T) string) bool {
+	seen := map[string]struct{}{}
+	for _, entry := range entries {
+		id := trimName(getID(entry))
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			return true
+		}
+		seen[id] = struct{}{}
+	}
+	return false
+}
+
+func batchFailureEntry(id, message string, senderFault bool) contracts.BatchResultErrorEntry {
+	return contracts.BatchResultErrorEntry{
+		Code:        "InvalidParameterValue",
+		Id:          trimName(id),
+		Message:     message,
+		SenderFault: senderFault,
+	}
 }
 
 func (s *Service) findMessageByReceiptLocked(queueName, receiptHandle string) (int, bool) {

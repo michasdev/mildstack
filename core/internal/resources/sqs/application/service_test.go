@@ -2,7 +2,8 @@ package application
 
 import (
 	"context"
-	"errors"
+	"crypto/md5"
+	"encoding/hex"
 	"testing"
 	"time"
 
@@ -268,17 +269,134 @@ func TestSQSServiceExposesMessageSurfaceSeams(t *testing.T) {
 		t.Fatal("expected service to expose the message surface API")
 	}
 
-	if _, err := service.SendMessage("queue-a", contracts.SendMessageRequest{QueueUrl: service.QueueURL("queue-a")}); !errors.Is(err, contracts.ErrSQSOperationDeferred) {
-		t.Fatalf("expected send message seam to remain deferred, got %v", err)
+	if _, err := service.CreateQueue("queue-a", nil); err != nil {
+		t.Fatalf("create queue: %v", err)
 	}
-	if _, err := service.SendMessageBatch("queue-a", contracts.SendMessageBatchRequest{QueueUrl: service.QueueURL("queue-a")}); !errors.Is(err, contracts.ErrSQSOperationDeferred) {
-		t.Fatalf("expected send message batch seam to remain deferred, got %v", err)
+
+	sendResult, err := service.SendMessage("queue-a", contracts.SendMessageRequest{
+		MessageBody: "payload",
+		QueueUrl:    service.QueueURL("queue-a"),
+	})
+	if err != nil {
+		t.Fatalf("send message: %v", err)
 	}
-	if _, err := service.DeleteMessageBatch("queue-a", contracts.DeleteMessageBatchRequest{QueueUrl: service.QueueURL("queue-a")}); !errors.Is(err, contracts.ErrSQSOperationDeferred) {
-		t.Fatalf("expected delete message batch seam to remain deferred, got %v", err)
+	if sendResult.MessageId == "" {
+		t.Fatal("expected send message to return a message id")
 	}
-	if _, err := service.ChangeMessageVisibilityBatch("queue-a", contracts.ChangeMessageVisibilityBatchRequest{QueueUrl: service.QueueURL("queue-a")}); !errors.Is(err, contracts.ErrSQSOperationDeferred) {
-		t.Fatalf("expected visibility batch seam to remain deferred, got %v", err)
+	expectedBodyDigest := md5.Sum([]byte("payload"))
+	if got, want := sendResult.MD5OfMessageBody, hex.EncodeToString(expectedBodyDigest[:]); got != want {
+		t.Fatalf("unexpected message digest: got %q want %q", got, want)
+	}
+	if got, want := len(service.state.Messages), 1; got != want {
+		t.Fatalf("unexpected stored message count: got %d want %d", got, want)
+	}
+	if got, want := service.state.Messages[0].Body, "payload"; got != want {
+		t.Fatalf("unexpected stored message body: got %q want %q", got, want)
+	}
+
+	batchResult, err := service.SendMessageBatch("queue-a", contracts.SendMessageBatchRequest{
+		QueueUrl: service.QueueURL("queue-a"),
+		Entries: []contracts.SendMessageBatchRequestEntry{
+			{Id: "entry-1", MessageBody: "one"},
+			{Id: "entry-2", MessageBody: "two"},
+			{Id: "entry-3", MessageBody: ""},
+		},
+	})
+	if err != nil {
+		t.Fatalf("send message batch: %v", err)
+	}
+	if got, want := len(batchResult.Successful), 2; got != want {
+		t.Fatalf("unexpected successful batch count: got %d want %d", got, want)
+	}
+	if got, want := len(batchResult.Failed), 1; got != want {
+		t.Fatalf("unexpected failed batch count: got %d want %d", got, want)
+	}
+	if got, want := batchResult.Successful[0].Id, "entry-1"; got != want {
+		t.Fatalf("unexpected first batch id: got %q want %q", got, want)
+	}
+	if got, want := batchResult.Failed[0].Id, "entry-3"; got != want {
+		t.Fatalf("unexpected failed batch id: got %q want %q", got, want)
+	}
+	if got, want := len(service.state.Messages), 3; got != want {
+		t.Fatalf("unexpected stored message count after batch send: got %d want %d", got, want)
+	}
+}
+
+func TestSQSServiceBatchMessageHelpersReturnPairedResults(t *testing.T) {
+	t.Helper()
+
+	clock := newManualClock(time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC))
+	service := newServiceWithClock(domain.NewState(), nil, clock)
+	if _, err := service.CreateQueue("queue-a", map[string]string{"VisibilityTimeout": "30"}); err != nil {
+		t.Fatalf("create queue: %v", err)
+	}
+
+	sendResult, err := service.SendMessageBatch("queue-a", contracts.SendMessageBatchRequest{
+		QueueUrl: service.QueueURL("queue-a"),
+		Entries: []contracts.SendMessageBatchRequestEntry{
+			{Id: "entry-1", MessageBody: "one"},
+			{Id: "entry-2", MessageBody: "two"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("send batch: %v", err)
+	}
+	if got, want := len(sendResult.Successful), 2; got != want {
+		t.Fatalf("unexpected send batch success count: got %d want %d", got, want)
+	}
+
+	messages, err := service.ReceiveMessage("queue-a", 2, 0)
+	if err != nil {
+		t.Fatalf("receive messages: %v", err)
+	}
+	if got, want := len(messages), 2; got != want {
+		t.Fatalf("unexpected receive count: got %d want %d", got, want)
+	}
+
+	deleteResult, err := service.DeleteMessageBatch("queue-a", contracts.DeleteMessageBatchRequest{
+		QueueUrl: service.QueueURL("queue-a"),
+		Entries: []contracts.DeleteMessageBatchRequestEntry{
+			{Id: "delete-1", ReceiptHandle: CurrentReceiptHandle(messages[0])},
+			{Id: "delete-2", ReceiptHandle: "missing"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("delete batch: %v", err)
+	}
+	if got, want := len(deleteResult.Successful), 1; got != want {
+		t.Fatalf("unexpected delete success count: got %d want %d", got, want)
+	}
+	if got, want := len(deleteResult.Failed), 1; got != want {
+		t.Fatalf("unexpected delete failure count: got %d want %d", got, want)
+	}
+	if got, want := deleteResult.Successful[0].Id, "delete-1"; got != want {
+		t.Fatalf("unexpected delete success id: got %q want %q", got, want)
+	}
+	if got, want := deleteResult.Failed[0].Id, "delete-2"; got != want {
+		t.Fatalf("unexpected delete failure id: got %q want %q", got, want)
+	}
+
+	visibilityResult, err := service.ChangeMessageVisibilityBatch("queue-a", contracts.ChangeMessageVisibilityBatchRequest{
+		QueueUrl: service.QueueURL("queue-a"),
+		Entries: []contracts.ChangeMessageVisibilityBatchRequestEntry{
+			{Id: "vis-1", ReceiptHandle: CurrentReceiptHandle(messages[1]), VisibilityTimeout: 120},
+			{Id: "vis-2", ReceiptHandle: "missing", VisibilityTimeout: 120},
+		},
+	})
+	if err != nil {
+		t.Fatalf("change visibility batch: %v", err)
+	}
+	if got, want := len(visibilityResult.Successful), 1; got != want {
+		t.Fatalf("unexpected visibility success count: got %d want %d", got, want)
+	}
+	if got, want := len(visibilityResult.Failed), 1; got != want {
+		t.Fatalf("unexpected visibility failure count: got %d want %d", got, want)
+	}
+	if got, want := visibilityResult.Successful[0].Id, "vis-1"; got != want {
+		t.Fatalf("unexpected visibility success id: got %q want %q", got, want)
+	}
+	if got, want := visibilityResult.Failed[0].Id, "vis-2"; got != want {
+		t.Fatalf("unexpected visibility failure id: got %q want %q", got, want)
 	}
 }
 
