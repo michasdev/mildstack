@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/contracts"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/domain"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/infrastructure"
@@ -35,6 +36,7 @@ const (
 	maxLongPollWait               = 20 * time.Second
 	workerPollInterval            = 50 * time.Millisecond
 	leaseVisibilityTimeoutMetaKey = "visibility_timeout_seconds"
+	queueLifecycleCooldown        = 60 * time.Second
 )
 
 var (
@@ -139,6 +141,269 @@ func (s *Service) Metadata() orchestrator.Metadata {
 
 func (s *Service) Policy() orchestrator.EmulationPolicy {
 	return s.policy.Clone()
+}
+
+func (s *Service) QueueURL(queueName string) string {
+	return queueURLForAccount(queueName, "")
+}
+
+func (s *Service) QueueARN(queueName string) string {
+	return queueARNForAccount(queueName, "")
+}
+
+func (s *Service) CreateQueue(queueName string, attributes map[string]string) (domain.Queue, error) {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return domain.Queue{}, fmt.Errorf("sqs: queue name is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := s.clock.Now()
+	normalizedAttributes := cloneMap(attributes)
+	if normalizedAttributes == nil {
+		normalizedAttributes = map[string]string{}
+	}
+
+	if index, queue, ok := s.queueRecordByNameLocked(queueName); ok {
+		if queue.DeletedAt.IsZero() {
+			if equalStringMaps(queue.Attributes, normalizedAttributes) {
+				return s.queueResponse(queueName, queue, normalizedAttributes), nil
+			}
+			return domain.Queue{}, fmt.Errorf("sqs: queue %q already exists with different attributes", queueName)
+		}
+		if now.Sub(queue.DeletedAt) < queueLifecycleCooldown {
+			return domain.Queue{}, fmt.Errorf("sqs: queue %q is still in delete cooldown", queueName)
+		}
+
+		queue.URL = s.QueueURL(queueName)
+		queue.Attributes = normalizedAttributes
+		queue.OrderingHint = orderingHintFromAttributes(normalizedAttributes, queue.OrderingHint)
+		queue.CreatedAt = now
+		queue.UpdatedAt = now
+		queue.DeletedAt = time.Time{}
+		queue.PurgedAt = time.Time{}
+		s.state.Queues[index] = queue
+		if err := s.commitStateLocked(); err != nil {
+			return domain.Queue{}, err
+		}
+		return s.queueResponse(queueName, queue, normalizedAttributes), nil
+	}
+
+	queue := domain.Queue{
+		Name:         queueName,
+		URL:          s.QueueURL(queueName),
+		Attributes:   normalizedAttributes,
+		OrderingHint: orderingHintFromAttributes(normalizedAttributes, ""),
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	s.state.Queues = append(s.state.Queues, queue)
+	if err := s.commitStateLocked(); err != nil {
+		return domain.Queue{}, err
+	}
+	return s.queueResponse(queueName, queue, normalizedAttributes), nil
+}
+
+func (s *Service) DeleteQueue(queueName string) error {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return fmt.Errorf("sqs: queue name is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	index, queue, ok := s.queueRecordByNameLocked(queueName)
+	if !ok {
+		return errQueueNotFound
+	}
+	now := s.clock.Now()
+	if !queue.DeletedAt.IsZero() {
+		if now.Sub(queue.DeletedAt) < queueLifecycleCooldown {
+			return fmt.Errorf("sqs: queue %q is still in delete cooldown", queueName)
+		}
+		return errQueueNotFound
+	}
+
+	queue.DeletedAt = now
+	queue.UpdatedAt = now
+	queue.PurgedAt = time.Time{}
+	s.state.Queues[index] = queue
+	s.removeMessagesForQueueLocked(queueName)
+	return s.commitStateLocked()
+}
+
+func (s *Service) GetQueueUrl(queueName, ownerAccountID string) (string, error) {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return "", fmt.Errorf("sqs: queue name is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	queue, ok := s.activeQueueByNameLocked(queueName)
+	if !ok || !ownerAccountMatches(ownerAccountID) {
+		return "", errQueueNotFound
+	}
+	if queue.URL == "" {
+		return queueURLForAccount(queueName, ownerAccountID), nil
+	}
+	return queue.URL, nil
+}
+
+func (s *Service) ListQueues(queueNamePrefix string, maxResults int, nextToken, ownerAccountID string) ([]domain.Queue, string, error) {
+	queueNamePrefix = trimName(queueNamePrefix)
+	nextToken = trimName(nextToken)
+	ownerAccountID = trimName(ownerAccountID)
+	if maxResults < 0 {
+		maxResults = 0
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !ownerAccountMatches(ownerAccountID) {
+		return nil, "", errQueueNotFound
+	}
+
+	activeQueues := make([]domain.Queue, 0, len(s.state.Queues))
+	for _, queue := range s.state.ListQueues() {
+		if !queue.DeletedAt.IsZero() {
+			continue
+		}
+		if queueNamePrefix != "" && !strings.HasPrefix(queue.Name, queueNamePrefix) {
+			continue
+		}
+		if queue.URL == "" {
+			queue.URL = s.QueueURL(queue.Name)
+		}
+		activeQueues = append(activeQueues, queue)
+	}
+
+	startIndex := 0
+	if nextToken != "" {
+		startIndex = len(activeQueues)
+		for i, queue := range activeQueues {
+			if queue.Name > nextToken {
+				startIndex = i
+				break
+			}
+			if queue.Name == nextToken {
+				startIndex = i + 1
+			}
+		}
+	}
+	if startIndex > len(activeQueues) {
+		startIndex = len(activeQueues)
+	}
+
+	endIndex := len(activeQueues)
+	if maxResults > 0 && startIndex+maxResults < endIndex {
+		endIndex = startIndex + maxResults
+	}
+
+	page := append([]domain.Queue(nil), activeQueues[startIndex:endIndex]...)
+	nextPageToken := ""
+	if endIndex < len(activeQueues) {
+		nextPageToken = activeQueues[endIndex-1].Name
+	}
+
+	return page, nextPageToken, nil
+}
+
+func (s *Service) PurgeQueue(queueName string) error {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return fmt.Errorf("sqs: queue name is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	index, queue, ok := s.queueRecordByNameLocked(queueName)
+	if !ok || !queue.DeletedAt.IsZero() {
+		return errQueueNotFound
+	}
+	now := s.clock.Now()
+	if !queue.PurgedAt.IsZero() && now.Sub(queue.PurgedAt) < queueLifecycleCooldown {
+		return fmt.Errorf("sqs: queue %q is still in purge cooldown", queueName)
+	}
+
+	s.removeMessagesForQueueLocked(queueName)
+	queue.PurgedAt = now
+	queue.UpdatedAt = now
+	s.state.Queues[index] = queue
+	return s.commitStateLocked()
+}
+
+func (s *Service) GetQueueAttributes(queueName string, attributeNames []string, ownerAccountID string) (contracts.QueueAttributesView, error) {
+	queueName = trimName(queueName)
+	ownerAccountID = trimName(ownerAccountID)
+	if queueName == "" {
+		return contracts.QueueAttributesView{}, fmt.Errorf("sqs: queue name is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	queue, ok := s.activeQueueByNameLocked(queueName)
+	if !ok || !ownerAccountMatches(ownerAccountID) {
+		return contracts.QueueAttributesView{}, errQueueNotFound
+	}
+
+	attributes := selectQueueAttributes(queue.Attributes, attributeNames, s.QueueARN(queueName))
+	if attributes == nil {
+		attributes = map[string]string{}
+	}
+
+	return contracts.QueueAttributesView{
+		QueueName:  queueName,
+		QueueURL:   queueURLForAccount(queueName, ownerAccountID),
+		QueueARN:   queueARNForAccount(queueName, ownerAccountID),
+		Attributes: attributes,
+	}, nil
+}
+
+func (s *Service) SetQueueAttributes(queueName string, attributes map[string]string) (contracts.QueueAttributesView, error) {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return contracts.QueueAttributesView{}, fmt.Errorf("sqs: queue name is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	index, queue, ok := s.queueRecordByNameLocked(queueName)
+	if !ok || !queue.DeletedAt.IsZero() {
+		return contracts.QueueAttributesView{}, errQueueNotFound
+	}
+
+	normalizedAttributes := cloneMap(queue.Attributes)
+	if normalizedAttributes == nil {
+		normalizedAttributes = map[string]string{}
+	}
+	for key, value := range attributes {
+		normalizedAttributes[trimName(key)] = value
+	}
+
+	queue.Attributes = normalizedAttributes
+	queue.OrderingHint = orderingHintFromAttributes(normalizedAttributes, queue.OrderingHint)
+	queue.UpdatedAt = s.clock.Now()
+	s.state.Queues[index] = queue
+
+	if err := s.commitStateLocked(); err != nil {
+		return contracts.QueueAttributesView{}, err
+	}
+
+	return contracts.QueueAttributesView{
+		QueueName:  queueName,
+		QueueURL:   queueURLForAccount(queueName, ""),
+		QueueARN:   queueARNForAccount(queueName, ""),
+		Attributes: cloneMap(normalizedAttributes),
+	}, nil
 }
 
 func (s *Service) RegisterRoutes(registrar orchestrator.RouteRegistrar) error {
@@ -289,13 +554,129 @@ func (s *Service) commitStateLocked() error {
 	return nil
 }
 
-func (s *Service) queueByNameLocked(name string) (domain.Queue, bool) {
-	for _, queue := range s.state.Queues {
+func (s *Service) queueResponse(queueName string, queue domain.Queue, attributes map[string]string) domain.Queue {
+	queue.Name = trimName(queue.Name)
+	if queue.Name == "" {
+		queue.Name = trimName(queueName)
+	}
+	queue.URL = queueURLForAccount(queue.Name, "")
+	if len(attributes) == 0 && queue.Attributes == nil {
+		queue.Attributes = map[string]string{}
+		return queue
+	}
+	queue.Attributes = cloneMap(attributes)
+	if queue.Attributes == nil {
+		queue.Attributes = map[string]string{}
+	}
+	return queue
+}
+
+func (s *Service) queueRecordByNameLocked(name string) (int, domain.Queue, bool) {
+	for idx, queue := range s.state.Queues {
 		if queue.Name == name {
+			return idx, queue, true
+		}
+	}
+	return -1, domain.Queue{}, false
+}
+
+func (s *Service) queueByNameLocked(name string) (domain.Queue, bool) {
+	queue, ok := s.activeQueueByNameLocked(name)
+	return queue, ok
+}
+
+func (s *Service) activeQueueByNameLocked(name string) (domain.Queue, bool) {
+	for _, queue := range s.state.Queues {
+		if queue.Name == name && queue.DeletedAt.IsZero() {
 			return queue, true
 		}
 	}
 	return domain.Queue{}, false
+}
+
+func (s *Service) removeMessagesForQueueLocked(queueName string) {
+	filtered := s.state.Messages[:0]
+	for _, message := range s.state.Messages {
+		if trimName(message.Queue) == queueName {
+			continue
+		}
+		filtered = append(filtered, message)
+	}
+	s.state.Messages = filtered
+
+	if len(s.state.RecoveryMetadata) == 0 {
+		return
+	}
+	for key, metadata := range s.state.RecoveryMetadata {
+		if metadata.Queue == queueName || strings.HasPrefix(key, queueName+"/") {
+			delete(s.state.RecoveryMetadata, key)
+		}
+	}
+}
+
+func ownerAccountMatches(ownerAccountID string) bool {
+	ownerAccountID = trimName(ownerAccountID)
+	if ownerAccountID == "" {
+		return true
+	}
+	return ownerAccountID == awscontext.Default().AccountID
+}
+
+func selectQueueAttributes(attributes map[string]string, attributeNames []string, queueARN string) map[string]string {
+	if len(attributes) == 0 && len(attributeNames) == 0 {
+		return map[string]string{"QueueArn": queueARN}
+	}
+
+	selected := map[string]string{}
+	includeAll := len(attributeNames) == 0
+	for _, name := range attributeNames {
+		if strings.EqualFold(trimName(name), "All") {
+			includeAll = true
+			break
+		}
+	}
+	if includeAll {
+		for key, value := range attributes {
+			selected[key] = value
+		}
+	} else {
+		allowed := map[string]struct{}{}
+		for _, name := range attributeNames {
+			allowed[trimName(name)] = struct{}{}
+		}
+		for key, value := range attributes {
+			if _, ok := allowed[key]; ok {
+				selected[key] = value
+			}
+		}
+	}
+	selected["QueueArn"] = queueARN
+	return selected
+}
+
+func orderingHintFromAttributes(attributes map[string]string, fallback string) string {
+	if strings.EqualFold(trimName(attributes["FifoQueue"]), "true") {
+		return "fifo"
+	}
+	if strings.EqualFold(fallback, "fifo") {
+		return "fifo"
+	}
+	return "standard"
+}
+
+func equalStringMaps(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		if len(left) == 0 && len(right) == 0 {
+			return true
+		}
+		return false
+	}
+	for key, leftValue := range left {
+		if right[key] != leftValue {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Service) receiveReadyMessagesLocked(queueName string, maxMessages int, now time.Time) ([]domain.Message, error) {
@@ -350,6 +731,9 @@ func (s *Service) receiveReadyMessagesLocked(queueName string, maxMessages int, 
 }
 
 func (s *Service) findMessageByReceiptLocked(queueName, receiptHandle string) (int, bool) {
+	if _, ok := s.activeQueueByNameLocked(queueName); !ok {
+		return -1, false
+	}
 	for idx, message := range s.state.Messages {
 		if !messageVisibleInQueue(message, queueName) {
 			continue
@@ -435,6 +819,32 @@ func cloneMap(values map[string]string) map[string]string {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func queueURLForAccount(queueName, ownerAccountID string) string {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return ""
+	}
+
+	aws := awscontext.Default()
+	if ownerAccountID = trimName(ownerAccountID); ownerAccountID != "" {
+		aws = aws.WithAccountID(ownerAccountID)
+	}
+	return fmt.Sprintf("https://sqs.%s.amazonaws.com/%s/%s", aws.Region, aws.AccountID, queueName)
+}
+
+func queueARNForAccount(queueName, ownerAccountID string) string {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return ""
+	}
+
+	aws := awscontext.Default()
+	if ownerAccountID = trimName(ownerAccountID); ownerAccountID != "" {
+		aws = aws.WithAccountID(ownerAccountID)
+	}
+	return aws.ServiceARN("sqs", queueName)
 }
 
 func messageVisibleInQueue(message domain.Message, queueName string) bool {

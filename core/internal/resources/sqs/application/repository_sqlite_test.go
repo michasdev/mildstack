@@ -81,6 +81,8 @@ func TestSQLiteRepositoryPersistsQueueAndMessageStateAcrossRestart(t *testing.T)
 		},
 		CreatedAt: createdAt,
 		UpdatedAt: createdAt.Add(time.Minute),
+		DeletedAt: createdAt.Add(2 * time.Minute),
+		PurgedAt:  createdAt.Add(3 * time.Minute),
 	})
 	state.Messages = append(state.Messages, domain.Message{
 		Queue:                 "queue-a",
@@ -150,6 +152,12 @@ func TestSQLiteRepositoryPersistsQueueAndMessageStateAcrossRestart(t *testing.T)
 	}
 	if got, want := queue.Recovery.DeadLetterQueue, "queue-dlq"; got != want {
 		t.Fatalf("unexpected dead-letter queue after restart: got %q want %q", got, want)
+	}
+	if got, want := queue.DeletedAt, createdAt.Add(2*time.Minute); !got.Equal(want) {
+		t.Fatalf("unexpected deleted_at after restart: got %v want %v", got, want)
+	}
+	if got, want := queue.PurgedAt, createdAt.Add(3*time.Minute); !got.Equal(want) {
+		t.Fatalf("unexpected purged_at after restart: got %v want %v", got, want)
 	}
 
 	message := loaded.Messages[0]

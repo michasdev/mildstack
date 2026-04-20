@@ -8,6 +8,7 @@ import (
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
+	"github.com/michasdev/mildstack/core/internal/resources/sqs/contracts"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/domain"
 )
 
@@ -79,6 +80,173 @@ func TestSQSServiceMetadataRoutesAndPolicy(t *testing.T) {
 	assertRouteExists(t, entry.Routes, "GET", "/api/v1/runtime/services/sqs/queues/:queue/messages")
 	assertRouteExists(t, entry.Routes, "POST", "/api/v1/runtime/services/sqs/queues/:queue/messages")
 	assertRouteExists(t, entry.Routes, "DELETE", "/api/v1/runtime/services/sqs/queues/:queue/messages/:receiptHandle")
+}
+
+func TestSQSServiceExposesQueueLifecycleAPI(t *testing.T) {
+	t.Helper()
+
+	clock := newManualClock(time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC))
+	service := newServiceWithClock(domain.NewState(), nil, clock)
+	type lifecycleAPI interface {
+		QueueURL(string) string
+		QueueARN(string) string
+		CreateQueue(string, map[string]string) (domain.Queue, error)
+		DeleteQueue(string) error
+		GetQueueUrl(string, string) (string, error)
+		ListQueues(string, int, string, string) ([]domain.Queue, string, error)
+		PurgeQueue(string) error
+		GetQueueAttributes(string, []string, string) (contracts.QueueAttributesView, error)
+		SetQueueAttributes(string, map[string]string) (contracts.QueueAttributesView, error)
+	}
+
+	if _, ok := any(service).(lifecycleAPI); !ok {
+		t.Fatal("expected service to expose queue lifecycle API")
+	}
+
+	if got, want := service.QueueURL("orders"), "https://sqs.us-east-1.amazonaws.com/123456789012/orders"; got != want {
+		t.Fatalf("unexpected queue url helper: got %q want %q", got, want)
+	}
+	if got, want := service.QueueARN("orders"), "arn:aws:sqs:us-east-1:123456789012:orders"; got != want {
+		t.Fatalf("unexpected queue arn helper: got %q want %q", got, want)
+	}
+
+	queue, err := service.CreateQueue("orders", map[string]string{
+		"VisibilityTimeout": "30",
+		"RedrivePolicy":     `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:orders-dlq"}`,
+	})
+	if err != nil {
+		t.Fatalf("create queue: %v", err)
+	}
+	if got, want := queue.URL, service.QueueURL("orders"); got != want {
+		t.Fatalf("unexpected queue url: got %q want %q", got, want)
+	}
+	if got, want := queue.Attributes["VisibilityTimeout"], "30"; got != want {
+		t.Fatalf("unexpected queue attribute: got %q want %q", got, want)
+	}
+
+	sameQueue, err := service.CreateQueue("orders", map[string]string{
+		"VisibilityTimeout": "30",
+		"RedrivePolicy":     `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:orders-dlq"}`,
+	})
+	if err != nil {
+		t.Fatalf("idempotent create: %v", err)
+	}
+	if got, want := sameQueue.URL, queue.URL; got != want {
+		t.Fatalf("unexpected idempotent queue url: got %q want %q", got, want)
+	}
+	if _, err := service.CreateQueue("orders", map[string]string{"VisibilityTimeout": "45"}); err == nil {
+		t.Fatal("expected create with different attributes to fail")
+	}
+
+	archiveQueue, err := service.CreateQueue("orders-archive", map[string]string{"VisibilityTimeout": "45"})
+	if err != nil {
+		t.Fatalf("create archive queue: %v", err)
+	}
+	if got, want := archiveQueue.URL, service.QueueURL("orders-archive"); got != want {
+		t.Fatalf("unexpected archive queue url: got %q want %q", got, want)
+	}
+
+	list, nextToken, err := service.ListQueues("ord", 1, "", "")
+	if err != nil {
+		t.Fatalf("list queues: %v", err)
+	}
+	if got, want := len(list), 1; got != want {
+		t.Fatalf("unexpected paged queue count: got %d want %d", got, want)
+	}
+	if got, want := list[0].Name, "orders"; got != want {
+		t.Fatalf("unexpected first page queue: got %q want %q", got, want)
+	}
+	if got, want := nextToken, "orders"; got != want {
+		t.Fatalf("unexpected next token: got %q want %q", got, want)
+	}
+
+	nextPage, nextToken, err := service.ListQueues("ord", 10, nextToken, "")
+	if err != nil {
+		t.Fatalf("second page list queues: %v", err)
+	}
+	if got, want := len(nextPage), 1; got != want {
+		t.Fatalf("unexpected second page queue count: got %d want %d", got, want)
+	}
+	if got, want := nextPage[0].Name, "orders-archive"; got != want {
+		t.Fatalf("unexpected second page queue: got %q want %q", got, want)
+	}
+	if got, want := nextToken, ""; got != want {
+		t.Fatalf("unexpected terminal next token: got %q want %q", got, want)
+	}
+
+	queueURL, err := service.GetQueueUrl("orders", "")
+	if err != nil {
+		t.Fatalf("get queue url: %v", err)
+	}
+	if got, want := queueURL, service.QueueURL("orders"); got != want {
+		t.Fatalf("unexpected get queue url result: got %q want %q", got, want)
+	}
+
+	if _, err := service.SetQueueAttributes("orders", map[string]string{
+		"VisibilityTimeout":   "45",
+		"RedriveAllowPolicy":  `{"redrivePermission":"byQueue"}`,
+		"RedrivePolicy":       `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:orders-dlq"}`,
+		"ContentBasedDeduplication": "true",
+	}); err != nil {
+		t.Fatalf("set queue attributes: %v", err)
+	}
+
+	attrView, err := service.GetQueueAttributes("orders", []string{"All"}, "")
+	if err != nil {
+		t.Fatalf("get queue attributes: %v", err)
+	}
+	if got, want := attrView.QueueURL, service.QueueURL("orders"); got != want {
+		t.Fatalf("unexpected queue attribute url: got %q want %q", got, want)
+	}
+	if got, want := attrView.QueueARN, service.QueueARN("orders"); got != want {
+		t.Fatalf("unexpected queue attribute arn: got %q want %q", got, want)
+	}
+	if got, want := attrView.Attributes["VisibilityTimeout"], "45"; got != want {
+		t.Fatalf("unexpected queue attribute value: got %q want %q", got, want)
+	}
+	if got, want := attrView.Attributes["RedriveAllowPolicy"], `{"redrivePermission":"byQueue"}`; got != want {
+		t.Fatalf("unexpected opaque attribute value: got %q want %q", got, want)
+	}
+	if got, want := attrView.Attributes["QueueArn"], service.QueueARN("orders"); got != want {
+		t.Fatalf("unexpected queue arn attribute: got %q want %q", got, want)
+	}
+
+	if err := service.DeleteQueue("orders"); err != nil {
+		t.Fatalf("delete queue: %v", err)
+	}
+	if _, err := service.GetQueueUrl("orders", ""); err == nil {
+		t.Fatal("expected deleted queue url lookup to fail")
+	}
+	if _, _, err := service.ListQueues("ord", 10, "", ""); err != nil {
+		t.Fatalf("list queues after delete: %v", err)
+	}
+	if _, err := service.CreateQueue("orders", map[string]string{"VisibilityTimeout": "30"}); err == nil {
+		t.Fatal("expected recreate during delete cooldown to fail")
+	}
+
+	clock.Sleep(queueLifecycleCooldown + time.Second)
+	recreated, err := service.CreateQueue("orders", map[string]string{"VisibilityTimeout": "30"})
+	if err != nil {
+		t.Fatalf("recreate after cooldown: %v", err)
+	}
+	if got, want := recreated.URL, service.QueueURL("orders"); got != want {
+		t.Fatalf("unexpected recreated queue url: got %q want %q", got, want)
+	}
+
+	service.state.Messages = append(service.state.Messages, domain.Message{
+		Queue:     "orders-archive",
+		MessageID: "message-1",
+		Body:      "payload",
+	})
+	if err := service.PurgeQueue("orders-archive"); err != nil {
+		t.Fatalf("purge queue: %v", err)
+	}
+	if got, want := len(service.state.Messages), 0; got != want {
+		t.Fatalf("expected purge to delete queue messages, got %d", got)
+	}
+	if err := service.PurgeQueue("orders-archive"); err == nil {
+		t.Fatal("expected back-to-back purge to fail")
+	}
 }
 
 func TestSQSServiceAttachStateUsesNamespacedCopySafeSnapshot(t *testing.T) {

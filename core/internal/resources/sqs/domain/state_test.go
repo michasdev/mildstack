@@ -24,6 +24,8 @@ func TestStateSnapshotCopiesLiveData(t *testing.T) {
 		},
 		CreatedAt: time.Date(2026, time.April, 19, 10, 0, 0, 0, time.UTC),
 		UpdatedAt: time.Date(2026, time.April, 19, 10, 1, 0, 0, time.UTC),
+		DeletedAt: time.Date(2026, time.April, 19, 10, 2, 0, 0, time.UTC),
+		PurgedAt:  time.Date(2026, time.April, 19, 10, 3, 0, 0, time.UTC),
 	})
 	state.Messages = append(state.Messages, Message{
 		Queue:                 "queue-a",
@@ -85,6 +87,12 @@ func TestStateSnapshotCopiesLiveData(t *testing.T) {
 	if got, want := state.Queues[0].OrderingHint, "fifo"; got != want {
 		t.Fatalf("queue ordering hint was aliased: got %q want %q", got, want)
 	}
+	if got, want := state.Queues[0].DeletedAt, time.Date(2026, time.April, 19, 10, 2, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("queue deleted at was aliased: got %v want %v", got, want)
+	}
+	if got, want := state.Queues[0].PurgedAt, time.Date(2026, time.April, 19, 10, 3, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("queue purged at was aliased: got %v want %v", got, want)
+	}
 	if got, want := state.Messages[0].Body, "payload"; got != want {
 		t.Fatalf("message body was aliased: got %q want %q", got, want)
 	}
@@ -115,6 +123,8 @@ func TestStateCloneReturnsDeepCopy(t *testing.T) {
 			"DelaySeconds": "0",
 		},
 		OrderingHint: "standard",
+		DeletedAt:    time.Date(2026, time.April, 19, 11, 0, 0, 0, time.UTC),
+		PurgedAt:     time.Date(2026, time.April, 19, 11, 1, 0, 0, time.UTC),
 		Recovery: QueueRecovery{
 			Policy: map[string]string{"enabled": "true"},
 		},
@@ -165,6 +175,12 @@ func TestStateCloneReturnsDeepCopy(t *testing.T) {
 	if got, want := state.Queues[0].Recovery.Policy["enabled"], "true"; got != want {
 		t.Fatalf("queue policy was shared with clone: got %q want %q", got, want)
 	}
+	if got, want := state.Queues[0].DeletedAt, time.Date(2026, time.April, 19, 11, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("queue deleted at was shared with clone: got %v want %v", got, want)
+	}
+	if got, want := state.Queues[0].PurgedAt, time.Date(2026, time.April, 19, 11, 1, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("queue purged at was shared with clone: got %v want %v", got, want)
+	}
 	if got, want := state.Messages[0].Tags[0], "alpha"; got != want {
 		t.Fatalf("message tags were shared with clone: got %q want %q", got, want)
 	}
@@ -202,6 +218,8 @@ func TestStateKeepsRoomForRecoveryMetadataAndAttributes(t *testing.T) {
 			"RedrivePolicy": "present",
 		},
 		OrderingHint: "fifo",
+		DeletedAt:    time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC),
+		PurgedAt:     time.Date(2026, time.April, 19, 12, 1, 0, 0, time.UTC),
 		Recovery: QueueRecovery{
 			DeadLetterQueue: "queue-dlq",
 		},
@@ -217,6 +235,12 @@ func TestStateKeepsRoomForRecoveryMetadataAndAttributes(t *testing.T) {
 	}
 	if got, want := state.Queues[0].OrderingHint, "fifo"; got != want {
 		t.Fatalf("unexpected queue ordering hint: got %q want %q", got, want)
+	}
+	if got, want := state.Queues[0].DeletedAt, time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("unexpected queue deleted at: got %v want %v", got, want)
+	}
+	if got, want := state.Queues[0].PurgedAt, time.Date(2026, time.April, 19, 12, 1, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("unexpected queue purged at: got %v want %v", got, want)
 	}
 	if got, want := state.RecoveryMetadata["queue-a"].Detail["state"], "ready"; got != want {
 		t.Fatalf("unexpected recovery detail: got %q want %q", got, want)
