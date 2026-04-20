@@ -2,6 +2,7 @@ package application
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/domain"
@@ -38,6 +39,10 @@ func (v DeliveryView) Redeliver() bool {
 	return CanRedeliver(v.Message, v.Queue, v.Now)
 }
 
+func (v DeliveryView) DeadLetterEligible() bool {
+	return IsDeadLetterEligible(v.Message, v.Queue, v.Now)
+}
+
 func IsDelayed(message domain.Message, now time.Time) bool {
 	return !message.AvailableAt.IsZero() && now.Before(message.AvailableAt)
 }
@@ -71,6 +76,35 @@ func CanRedeliver(message domain.Message, queue domain.Queue, now time.Time) boo
 	return !message.ReceivedAt.IsZero() && !deadline.IsZero() && !now.Before(deadline)
 }
 
+func IsFIFOQueue(queue domain.Queue) bool {
+	if strings.EqualFold(trimName(queue.OrderingHint), "fifo") {
+		return true
+	}
+	return strings.EqualFold(trimName(queue.Attributes["FifoQueue"]), "true")
+}
+
+func MessageGroupID(message domain.Message) string {
+	return trimName(message.MessageGroupID)
+}
+
+func MessageSequenceNumber(message domain.Message) int64 {
+	return message.SequenceNumber
+}
+
+func MessageBatchState(message domain.Message) (string, string, int, int) {
+	return trimName(message.BatchID), trimName(message.BatchEntryID), message.BatchEntryIndex, message.BatchEntryCount
+}
+
+func IsDeadLetterEligible(message domain.Message, queue domain.Queue, now time.Time) bool {
+	if trimName(message.DeadLetterQueue) != "" {
+		return false
+	}
+	if !CanRedeliver(message, queue, now) {
+		return false
+	}
+	return deadLetterThreshold(queue) > 0 && message.Recovery.Attempts >= deadLetterThreshold(queue)
+}
+
 func leaseDeadline(message domain.Message, queue domain.Queue) time.Time {
 	timeout := visibilityTimeout(queue, message)
 	if timeout <= 0 || message.ReceivedAt.IsZero() {
@@ -95,4 +129,15 @@ func parseTimeoutSeconds(raw string) time.Duration {
 		return 0
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+func deadLetterThreshold(queue domain.Queue) int {
+	if queue.Recovery.Policy == nil {
+		return 0
+	}
+	threshold, err := strconv.Atoi(trimName(queue.Recovery.Policy["max_receive_count"]))
+	if err != nil || threshold <= 0 {
+		return 0
+	}
+	return threshold
 }

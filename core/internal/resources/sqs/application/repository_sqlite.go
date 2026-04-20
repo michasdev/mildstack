@@ -21,7 +21,7 @@ import (
 const (
 	sqliteFileName   = "state.db"
 	schemaVersionKey = "schema_version"
-	schemaVersion    = "1"
+	schemaVersion    = "2"
 )
 
 type SQLiteRepository struct {
@@ -129,6 +129,7 @@ func (r *SQLiteRepository) bootstrap() error {
 			name TEXT PRIMARY KEY,
 			url TEXT NOT NULL,
 			attributes_json TEXT NOT NULL,
+			ordering_hint TEXT NOT NULL DEFAULT '',
 			dead_letter_queue TEXT NOT NULL DEFAULT '',
 			policy_json TEXT NOT NULL,
 			created_at_ns INTEGER NOT NULL DEFAULT 0,
@@ -142,6 +143,15 @@ func (r *SQLiteRepository) bootstrap() error {
 			metadata_json TEXT NOT NULL,
 			tags_json TEXT NOT NULL,
 			receipt_keys_json TEXT NOT NULL,
+			message_group_id TEXT NOT NULL DEFAULT '',
+			sequence_number INTEGER NOT NULL DEFAULT 0,
+			batch_id TEXT NOT NULL DEFAULT '',
+			batch_entry_id TEXT NOT NULL DEFAULT '',
+			batch_entry_index INTEGER NOT NULL DEFAULT 0,
+			batch_entry_count INTEGER NOT NULL DEFAULT 0,
+			dead_letter_queue TEXT NOT NULL DEFAULT '',
+			dead_letter_source_queue TEXT NOT NULL DEFAULT '',
+			dead_lettered_at_ns INTEGER NOT NULL DEFAULT 0,
 			sent_at_ns INTEGER NOT NULL DEFAULT 0,
 			available_at_ns INTEGER NOT NULL DEFAULT 0,
 			received_at_ns INTEGER NOT NULL DEFAULT 0,
@@ -166,6 +176,47 @@ func (r *SQLiteRepository) bootstrap() error {
 		}
 	}
 
+	if err := ensureColumn(ctx, tx, "sqs_queues", "ordering_hint TEXT NOT NULL DEFAULT ''"); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: ensure queue ordering column: %w", err)
+	}
+	if err := ensureColumn(ctx, tx, "sqs_messages", "message_group_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: ensure message group column: %w", err)
+	}
+	if err := ensureColumn(ctx, tx, "sqs_messages", "sequence_number INTEGER NOT NULL DEFAULT 0"); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: ensure message sequence column: %w", err)
+	}
+	if err := ensureColumn(ctx, tx, "sqs_messages", "batch_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: ensure batch id column: %w", err)
+	}
+	if err := ensureColumn(ctx, tx, "sqs_messages", "batch_entry_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: ensure batch entry id column: %w", err)
+	}
+	if err := ensureColumn(ctx, tx, "sqs_messages", "batch_entry_index INTEGER NOT NULL DEFAULT 0"); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: ensure batch entry index column: %w", err)
+	}
+	if err := ensureColumn(ctx, tx, "sqs_messages", "batch_entry_count INTEGER NOT NULL DEFAULT 0"); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: ensure batch entry count column: %w", err)
+	}
+	if err := ensureColumn(ctx, tx, "sqs_messages", "dead_letter_queue TEXT NOT NULL DEFAULT ''"); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: ensure dead letter queue column: %w", err)
+	}
+	if err := ensureColumn(ctx, tx, "sqs_messages", "dead_letter_source_queue TEXT NOT NULL DEFAULT ''"); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: ensure dead letter source column: %w", err)
+	}
+	if err := ensureColumn(ctx, tx, "sqs_messages", "dead_lettered_at_ns INTEGER NOT NULL DEFAULT 0"); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: ensure dead lettered at column: %w", err)
+	}
+
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO sqs_meta(key, value)
 		VALUES (?, ?)
@@ -187,7 +238,7 @@ func (r *SQLiteRepository) loadLocked() (domain.State, error) {
 	state := domain.NewState()
 
 	queueRows, err := r.db.QueryContext(ctx, `
-		SELECT name, url, attributes_json, dead_letter_queue, policy_json, created_at_ns, updated_at_ns
+		SELECT name, url, attributes_json, ordering_hint, dead_letter_queue, policy_json, created_at_ns, updated_at_ns
 		FROM sqs_queues
 		ORDER BY name
 	`)
@@ -200,11 +251,12 @@ func (r *SQLiteRepository) loadLocked() (domain.State, error) {
 		var (
 			queue       domain.Queue
 			attributes  string
+			ordering    string
 			policy      string
 			createdAtNS int64
 			updatedAtNS int64
 		)
-		if err := queueRows.Scan(&queue.Name, &queue.URL, &attributes, &queue.Recovery.DeadLetterQueue, &policy, &createdAtNS, &updatedAtNS); err != nil {
+		if err := queueRows.Scan(&queue.Name, &queue.URL, &attributes, &ordering, &queue.Recovery.DeadLetterQueue, &policy, &createdAtNS, &updatedAtNS); err != nil {
 			return domain.State{}, fmt.Errorf("sqs: scan queue: %w", err)
 		}
 		queue.Attributes, err = decodeStringMap(attributes)
@@ -215,6 +267,7 @@ func (r *SQLiteRepository) loadLocked() (domain.State, error) {
 		if err != nil {
 			return domain.State{}, fmt.Errorf("sqs: decode queue policy: %w", err)
 		}
+		queue.OrderingHint = ordering
 		queue.CreatedAt = unixNanoToTime(createdAtNS)
 		queue.UpdatedAt = unixNanoToTime(updatedAtNS)
 		state.Queues = append(state.Queues, queue)
@@ -225,6 +278,8 @@ func (r *SQLiteRepository) loadLocked() (domain.State, error) {
 
 	messageRows, err := r.db.QueryContext(ctx, `
 		SELECT queue_name, message_id, body, attributes_json, metadata_json, tags_json, receipt_keys_json,
+		       message_group_id, sequence_number, batch_id, batch_entry_id, batch_entry_index, batch_entry_count,
+		       dead_letter_queue, dead_letter_source_queue, dead_lettered_at_ns,
 		       sent_at_ns, available_at_ns, received_at_ns, recovery_attempts, recovery_detail_json
 		FROM sqs_messages
 		ORDER BY queue_name, message_id
@@ -236,15 +291,24 @@ func (r *SQLiteRepository) loadLocked() (domain.State, error) {
 
 	for messageRows.Next() {
 		var (
-			message        domain.Message
-			attributes     string
-			metadata       string
-			tags           string
-			receiptKeys    string
-			sentAtNS       int64
-			availableAtNS  int64
-			receivedAtNS   int64
-			recoveryDetail string
+			message          domain.Message
+			attributes       string
+			metadata         string
+			tags             string
+			receiptKeys      string
+			messageGroupID   string
+			sequenceNumber   int64
+			batchID          string
+			batchEntryID     string
+			batchEntryIndex  int
+			batchEntryCount  int
+			deadLetterQueue  string
+			deadLetterSource string
+			deadLetteredAtNS int64
+			sentAtNS         int64
+			availableAtNS    int64
+			receivedAtNS     int64
+			recoveryDetail   string
 		)
 		if err := messageRows.Scan(
 			&message.Queue,
@@ -254,6 +318,15 @@ func (r *SQLiteRepository) loadLocked() (domain.State, error) {
 			&metadata,
 			&tags,
 			&receiptKeys,
+			&messageGroupID,
+			&sequenceNumber,
+			&batchID,
+			&batchEntryID,
+			&batchEntryIndex,
+			&batchEntryCount,
+			&deadLetterQueue,
+			&deadLetterSource,
+			&deadLetteredAtNS,
 			&sentAtNS,
 			&availableAtNS,
 			&receivedAtNS,
@@ -278,6 +351,15 @@ func (r *SQLiteRepository) loadLocked() (domain.State, error) {
 		if err != nil {
 			return domain.State{}, fmt.Errorf("sqs: decode receipt keys: %w", err)
 		}
+		message.MessageGroupID = messageGroupID
+		message.SequenceNumber = sequenceNumber
+		message.BatchID = batchID
+		message.BatchEntryID = batchEntryID
+		message.BatchEntryIndex = batchEntryIndex
+		message.BatchEntryCount = batchEntryCount
+		message.DeadLetterQueue = deadLetterQueue
+		message.DeadLetterSourceQueue = deadLetterSource
+		message.DeadLetteredAt = unixNanoToTime(deadLetteredAtNS)
 		message.SentAt = unixNanoToTime(sentAtNS)
 		message.AvailableAt = unixNanoToTime(availableAtNS)
 		message.ReceivedAt = unixNanoToTime(receivedAtNS)
@@ -348,8 +430,8 @@ func (r *SQLiteRepository) saveLocked(state domain.State) error {
 
 	queueStmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO sqs_queues (
-			name, url, attributes_json, dead_letter_queue, policy_json, created_at_ns, updated_at_ns
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
+			name, url, attributes_json, ordering_hint, dead_letter_queue, policy_json, created_at_ns, updated_at_ns
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		_ = tx.Rollback()
@@ -372,6 +454,7 @@ func (r *SQLiteRepository) saveLocked(state domain.State) error {
 			queue.Name,
 			queue.URL,
 			attributes,
+			queue.OrderingHint,
 			queue.Recovery.DeadLetterQueue,
 			policy,
 			timeToUnixNano(queue.CreatedAt),
@@ -385,8 +468,10 @@ func (r *SQLiteRepository) saveLocked(state domain.State) error {
 	messageStmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO sqs_messages (
 			queue_name, message_id, body, attributes_json, metadata_json, tags_json, receipt_keys_json,
+			message_group_id, sequence_number, batch_id, batch_entry_id, batch_entry_index, batch_entry_count,
+			dead_letter_queue, dead_letter_source_queue, dead_lettered_at_ns,
 			sent_at_ns, available_at_ns, received_at_ns, recovery_attempts, recovery_detail_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		_ = tx.Rollback()
@@ -428,6 +513,15 @@ func (r *SQLiteRepository) saveLocked(state domain.State) error {
 			metadata,
 			tags,
 			receiptKeys,
+			message.MessageGroupID,
+			message.SequenceNumber,
+			message.BatchID,
+			message.BatchEntryID,
+			message.BatchEntryIndex,
+			message.BatchEntryCount,
+			message.DeadLetterQueue,
+			message.DeadLetterSourceQueue,
+			timeToUnixNano(message.DeadLetteredAt),
 			timeToUnixNano(message.SentAt),
 			timeToUnixNano(message.AvailableAt),
 			timeToUnixNano(message.ReceivedAt),
@@ -527,6 +621,43 @@ func decodeStringSlice(encoded string) ([]string, error) {
 		return nil, err
 	}
 	return values, nil
+}
+
+func ensureColumn(ctx context.Context, tx *sql.Tx, tableName, definition string) error {
+	columnName := definition
+	if idx := strings.IndexAny(columnName, " \t"); idx >= 0 {
+		columnName = columnName[:idx]
+	}
+
+	query := fmt.Sprintf("PRAGMA table_info(%s)", tableName)
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid          int
+			name         string
+			colType      string
+			notNull      int
+			defaultValue sql.NullString
+			pk           int
+		)
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == columnName {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s", tableName, definition))
+	return err
 }
 
 func timeToUnixNano(value time.Time) int64 {
