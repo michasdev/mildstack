@@ -146,6 +146,18 @@ func TestSQLiteRepositoryPersistsQueueAndMessageStateAcrossRestart(t *testing.T)
 	if got, want := message.Tags[0], "alpha"; got != want {
 		t.Fatalf("unexpected message tag after restart: got %q want %q", got, want)
 	}
+	if got, want := message.AvailableAt, createdAt.Add(3*time.Minute); !got.Equal(want) {
+		t.Fatalf("unexpected available_at after restart: got %v want %v", got, want)
+	}
+	if got, want := message.ReceivedAt, createdAt.Add(4*time.Minute); !got.Equal(want) {
+		t.Fatalf("unexpected received_at after restart: got %v want %v", got, want)
+	}
+	if got, want := len(message.ReceiptKeys), 2; got != want {
+		t.Fatalf("unexpected receipt key count after restart: got %d want %d", got, want)
+	}
+	if got, want := message.ReceiptKeys[1], "r-2"; got != want {
+		t.Fatalf("unexpected latest receipt key after restart: got %q want %q", got, want)
+	}
 	if got, want := message.Recovery.Detail["state"], "pending"; got != want {
 		t.Fatalf("unexpected message recovery detail after restart: got %q want %q", got, want)
 	}

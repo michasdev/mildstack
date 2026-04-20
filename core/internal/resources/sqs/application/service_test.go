@@ -177,10 +177,13 @@ func TestSQSServiceNewWithPersistenceLoadsRepositoryState(t *testing.T) {
 		CreatedAt: time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC),
 	})
 	state.Messages = append(state.Messages, domain.Message{
-		Queue:     "queue-a",
-		MessageID: "message-1",
-		Body:      "payload",
-		Tags:      []string{"persisted"},
+		Queue:       "queue-a",
+		MessageID:   "message-1",
+		Body:        "payload",
+		Tags:        []string{"persisted"},
+		AvailableAt: time.Date(2026, time.April, 19, 12, 3, 0, 0, time.UTC),
+		ReceivedAt:  time.Date(2026, time.April, 19, 12, 4, 0, 0, time.UTC),
+		ReceiptKeys: []string{"r-1", "r-2"},
 	})
 	if err := repo.Save(state); err != nil {
 		_ = repo.Close()
@@ -212,6 +215,15 @@ func TestSQSServiceNewWithPersistenceLoadsRepositoryState(t *testing.T) {
 	if got, want := service.state.Messages[0].MessageID, "message-1"; got != want {
 		t.Fatalf("unexpected message id after load: got %q want %q", got, want)
 	}
+	if got, want := service.state.Messages[0].AvailableAt, time.Date(2026, time.April, 19, 12, 3, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("unexpected available_at after load: got %v want %v", got, want)
+	}
+	if got, want := service.state.Messages[0].ReceivedAt, time.Date(2026, time.April, 19, 12, 4, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("unexpected received_at after load: got %v want %v", got, want)
+	}
+	if got, want := service.state.Messages[0].ReceiptKeys[1], "r-2"; got != want {
+		t.Fatalf("unexpected receipt handle history after load: got %q want %q", got, want)
+	}
 }
 
 func TestSQSServiceStopClosesRepositoryIdempotently(t *testing.T) {
@@ -232,6 +244,219 @@ func TestSQSServiceStopClosesRepositoryIdempotently(t *testing.T) {
 	if service.repo != nil {
 		t.Fatal("expected repository handle to be cleared after stop")
 	}
+}
+
+func TestSQSServiceReceiveMessageHonorsDelayAndBoundsLongPoll(t *testing.T) {
+	t.Helper()
+
+	clock := newManualClock(time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC))
+	service := newServiceWithClock(domain.State{
+		Service: "sqs",
+		Queues: []domain.Queue{
+			{
+				Name: "queue-a",
+				Attributes: map[string]string{
+					"VisibilityTimeout": "30",
+				},
+			},
+		},
+		Messages: []domain.Message{
+			{
+				Queue:       "queue-a",
+				MessageID:   "message-1",
+				Body:        "payload",
+				SentAt:      clock.Now(),
+				AvailableAt: clock.Now().Add(150 * time.Millisecond),
+			},
+		},
+	}, nil, clock)
+
+	messages, err := service.ReceiveMessage("queue-a", 1, 2*time.Second)
+	if err != nil {
+		t.Fatalf("receive message: %v", err)
+	}
+	if got, want := len(messages), 1; got != want {
+		t.Fatalf("unexpected message count: got %d want %d", got, want)
+	}
+	if got, want := messages[0].MessageID, "message-1"; got != want {
+		t.Fatalf("unexpected message id: got %q want %q", got, want)
+	}
+	if got := CurrentReceiptHandle(messages[0]); got == "" {
+		t.Fatal("expected receive to issue a receipt handle")
+	}
+	if got := clock.SleepCount(); got == 0 {
+		t.Fatal("expected long poll to sleep at least once")
+	}
+	if !messages[0].ReceivedAt.After(time.Time{}) {
+		t.Fatal("expected receive to stamp the delivery time")
+	}
+}
+
+func TestSQSServiceCapsLongPollAtTwentySeconds(t *testing.T) {
+	t.Helper()
+
+	clock := newManualClock(time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC))
+	service := newServiceWithClock(domain.State{
+		Service: "sqs",
+		Queues: []domain.Queue{
+			{
+				Name: "queue-a",
+			},
+		},
+	}, nil, clock)
+
+	messages, err := service.ReceiveMessage("queue-a", 1, 30*time.Second)
+	if err != nil {
+		t.Fatalf("receive message: %v", err)
+	}
+	if got, want := len(messages), 0; got != want {
+		t.Fatalf("expected no messages, got %d", got)
+	}
+	if got, want := clock.totalSleep, 20*time.Second; got != want {
+		t.Fatalf("unexpected capped sleep total: got %v want %v", got, want)
+	}
+}
+
+func TestSQSServiceRejectsStaleReceiptHandlesAfterRedelivery(t *testing.T) {
+	t.Helper()
+
+	now := time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC)
+	clock := newManualClock(now)
+	service := newServiceWithClock(domain.State{
+		Service: "sqs",
+		Queues: []domain.Queue{
+			{
+				Name: "queue-a",
+				Attributes: map[string]string{
+					"VisibilityTimeout": "30",
+				},
+			},
+		},
+		Messages: []domain.Message{
+			{
+				Queue:     "queue-a",
+				MessageID: "message-1",
+				Body:      "payload",
+				SentAt:    now,
+			},
+		},
+	}, nil, clock)
+
+	first, err := service.ReceiveMessage("queue-a", 1, 0)
+	if err != nil {
+		t.Fatalf("first receive: %v", err)
+	}
+	if got, want := len(first), 1; got != want {
+		t.Fatalf("unexpected first receive count: got %d want %d", got, want)
+	}
+	firstHandle := CurrentReceiptHandle(first[0])
+	if firstHandle == "" {
+		t.Fatal("expected first receive to issue a receipt handle")
+	}
+
+	clock.Sleep(31 * time.Second)
+	second, err := service.ReceiveMessage("queue-a", 1, 0)
+	if err != nil {
+		t.Fatalf("second receive: %v", err)
+	}
+	if got, want := len(second), 1; got != want {
+		t.Fatalf("unexpected second receive count: got %d want %d", got, want)
+	}
+	secondHandle := CurrentReceiptHandle(second[0])
+	if secondHandle == "" || secondHandle == firstHandle {
+		t.Fatalf("expected a rotated receipt handle, got %q and %q", firstHandle, secondHandle)
+	}
+
+	if err := service.DeleteMessage("queue-a", firstHandle); err == nil {
+		t.Fatal("expected stale receipt handle delete to fail")
+	}
+	if err := service.DeleteMessage("queue-a", secondHandle); err != nil {
+		t.Fatalf("delete with current handle: %v", err)
+	}
+}
+
+func TestSQSServiceChangeMessageVisibilityPostponesRedelivery(t *testing.T) {
+	t.Helper()
+
+	now := time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC)
+	clock := newManualClock(now)
+	service := newServiceWithClock(domain.State{
+		Service: "sqs",
+		Queues: []domain.Queue{
+			{
+				Name: "queue-a",
+				Attributes: map[string]string{
+					"VisibilityTimeout": "30",
+				},
+			},
+		},
+		Messages: []domain.Message{
+			{
+				Queue:     "queue-a",
+				MessageID: "message-1",
+				Body:      "payload",
+				SentAt:    now,
+			},
+		},
+	}, nil, clock)
+
+	first, err := service.ReceiveMessage("queue-a", 1, 0)
+	if err != nil {
+		t.Fatalf("first receive: %v", err)
+	}
+	handle := CurrentReceiptHandle(first[0])
+	if handle == "" {
+		t.Fatal("expected first receive to issue a receipt handle")
+	}
+
+	if err := service.ChangeMessageVisibility("queue-a", handle, 2*time.Minute); err != nil {
+		t.Fatalf("change visibility: %v", err)
+	}
+
+	clock.Sleep(31 * time.Second)
+	messages, err := service.ReceiveMessage("queue-a", 1, 0)
+	if err != nil {
+		t.Fatalf("receive before extended visibility expires: %v", err)
+	}
+	if got, want := len(messages), 0; got != want {
+		t.Fatalf("expected message to remain hidden, got %d message(s)", got)
+	}
+
+	clock.Sleep(90 * time.Second)
+	messages, err = service.ReceiveMessage("queue-a", 1, 0)
+	if err != nil {
+		t.Fatalf("receive after extended visibility expires: %v", err)
+	}
+	if got, want := len(messages), 1; got != want {
+		t.Fatalf("expected message to redeliver after visibility change, got %d message(s)", got)
+	}
+}
+
+type manualClock struct {
+	now        time.Time
+	sleepCount int
+	totalSleep time.Duration
+}
+
+func newManualClock(now time.Time) *manualClock {
+	return &manualClock{now: now}
+}
+
+func (c *manualClock) Now() time.Time {
+	return c.now
+}
+
+func (c *manualClock) Sleep(duration time.Duration) {
+	if duration <= 0 {
+		return
+	}
+	c.sleepCount++
+	c.totalSleep += duration
+	c.now = c.now.Add(duration)
+}
+
+func (c *manualClock) SleepCount() int {
+	return c.sleepCount
 }
 
 func assertRouteExists(t *testing.T, routes []deliveryhttp.RegisteredRoute, method, path string) {
