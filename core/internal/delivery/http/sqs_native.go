@@ -55,23 +55,14 @@ func RegisterSQSNativeRoutes(engine *gin.Engine, service SQSNativeService) {
 }
 
 type sqsNativeHandler struct {
-	service   SQSNativeService
-	registry  SQSRegistry
-	supported map[string]struct{}
+	service  SQSNativeService
+	registry SQSRegistry
 }
 
 func newSQSNativeHandler(service SQSNativeService) sqsNativeHandler {
-	supported := make(map[string]struct{})
-	if service != nil {
-		for _, action := range service.Policy().Supported {
-			supported[action] = struct{}{}
-		}
-	}
-
 	return sqsNativeHandler{
-		service:   service,
-		registry:  NewSQSRegistry(),
-		supported: supported,
+		service:  service,
+		registry: NewSQSRegistry(),
 	}
 }
 
@@ -105,7 +96,7 @@ func (h sqsNativeHandler) dispatch(c *gin.Context) bool {
 		return true
 	}
 
-	if _, ok := h.supported[spec.Action]; !ok || spec.DomainDeferred {
+	if !spec.Supported || spec.DomainDeferred {
 		writeSQSError(c, ErrSQSUnsupported, requestIDFromContext(c))
 		return true
 	}
