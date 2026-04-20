@@ -195,6 +195,99 @@ func TestSQSSDKSmokeReceivesAWSCompatibleSuccess(t *testing.T) {
 	if got, want := aws.ToString(receiveOutput.Messages[0].Body), "hello"; got != want {
 		t.Fatalf("unexpected receive body: got %q want %q", got, want)
 	}
+
+	receiptHandle := aws.ToString(receiveOutput.Messages[0].ReceiptHandle)
+	if receiptHandle == "" {
+		t.Fatal("expected receive message to include a receipt handle")
+	}
+
+	if _, err := client.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
+		QueueUrl:          aws.String(service.QueueURL("orders")),
+		ReceiptHandle:     aws.String(receiptHandle),
+		VisibilityTimeout: 0,
+	}); err != nil {
+		t.Fatalf("expected change message visibility to return successfully: %v", err)
+	}
+
+	visibleAgain, err := client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+		QueueUrl:            aws.String(service.QueueURL("orders")),
+		MaxNumberOfMessages: 1,
+	})
+	if err != nil {
+		t.Fatalf("expected message to become visible again: %v", err)
+	}
+	if got, want := len(visibleAgain.Messages), 1; got != want {
+		t.Fatalf("unexpected redelivery count: got %d want %d", got, want)
+	}
+	if got, want := aws.ToString(visibleAgain.Messages[0].Body), "hello"; got != want {
+		t.Fatalf("unexpected redelivery body: got %q want %q", got, want)
+	}
+
+	if _, err := client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+		QueueUrl:      aws.String(service.QueueURL("orders")),
+		ReceiptHandle: visibleAgain.Messages[0].ReceiptHandle,
+	}); err != nil {
+		t.Fatalf("expected delete message to return successfully: %v", err)
+	}
+
+	cleared, err := client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+		QueueUrl:            aws.String(service.QueueURL("orders")),
+		MaxNumberOfMessages: 1,
+	})
+	if err != nil {
+		t.Fatalf("expected empty queue receive to succeed: %v", err)
+	}
+	if got, want := len(cleared.Messages), 0; got != want {
+		t.Fatalf("unexpected post-delete receive count: got %d want %d", got, want)
+	}
+}
+
+func TestSQSSDKSmokePreservesBatchEntrySemantics(t *testing.T) {
+	t.Helper()
+
+	service := sqsapplication.New()
+
+	if _, err := service.CreateQueue("orders", nil); err != nil {
+		t.Fatalf("create queue: %v", err)
+	}
+
+	result, err := service.SendMessageBatch("orders", contracts.SendMessageBatchRequest{
+		QueueUrl: service.QueueURL("orders"),
+		Entries: []contracts.SendMessageBatchRequestEntry{
+			{Id: "entry-1", MessageBody: "one"},
+			{Id: "entry-2", MessageBody: "two"},
+			{Id: "entry-3", MessageBody: ""},
+		},
+	})
+	if err != nil {
+		t.Fatalf("send message batch: %v", err)
+	}
+	if got, want := len(result.Successful), 2; got != want {
+		t.Fatalf("unexpected batch send success count: got %d want %d", got, want)
+	}
+	if got, want := len(result.Failed), 1; got != want {
+		t.Fatalf("unexpected batch send failure count: got %d want %d", got, want)
+	}
+	if got, want := result.Successful[0].Id, "entry-1"; got != want {
+		t.Fatalf("unexpected first batch success id: got %q want %q", got, want)
+	}
+	if got, want := result.Failed[0].Id, "entry-3"; got != want {
+		t.Fatalf("unexpected batch failure id: got %q want %q", got, want)
+	}
+
+	messages, err := service.ReceiveMessage("orders", 2, 0)
+	if err != nil {
+		t.Fatalf("receive queued batch messages: %v", err)
+	}
+	if got, want := len(messages), 2; got != want {
+		t.Fatalf("unexpected queued message count after batch send: got %d want %d", got, want)
+	}
+	if got, want := messages[0].Body, "one"; got != want {
+		t.Fatalf("unexpected first queued batch body: got %q want %q", got, want)
+	}
+	if got, want := messages[1].Body, "two"; got != want {
+		t.Fatalf("unexpected second queued batch body: got %q want %q", got, want)
+	}
 }
 
 func TestSQSNativeMiddlewareRoutesLifecycleActionThroughService(t *testing.T) {
