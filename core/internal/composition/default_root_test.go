@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
 	dynamodbapp "github.com/michasdev/mildstack/core/internal/resources/dynamodb/application"
 	dynamodbdomain "github.com/michasdev/mildstack/core/internal/resources/dynamodb/domain"
@@ -37,17 +38,21 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 		S3StorageBaseDir:       baseDir,
 		DynamoDBStorageBaseDir: baseDir,
 	})
-	if got, want := len(root.Services), 2; got != want {
+	if got, want := len(root.Services), 3; got != want {
 		t.Fatalf("unexpected service count: got %d want %d", got, want)
 	}
 
 	first := root.Services[0]
 	second := root.Services[1]
+	third := root.Services[2]
 	if got, want := first.Metadata().Name, "s3"; got != want {
 		t.Fatalf("unexpected first service name: got %q want %q", got, want)
 	}
 	if got, want := second.Metadata().Name, "dynamodb"; got != want {
 		t.Fatalf("unexpected second service name: got %q want %q", got, want)
+	}
+	if got, want := third.Metadata().Name, "sqs"; got != want {
+		t.Fatalf("unexpected third service name: got %q want %q", got, want)
 	}
 
 	registrar := deliveryhttp.NewRegistrar()
@@ -58,7 +63,7 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	}
 
 	entries := registrar.Services()
-	if got, want := len(entries), 2; got != want {
+	if got, want := len(entries), 3; got != want {
 		t.Fatalf("unexpected catalog size: got %d want %d", got, want)
 	}
 	if got, want := entries[0].Name, "dynamodb"; got != want {
@@ -66,6 +71,9 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	}
 	if got, want := entries[1].Name, "s3"; got != want {
 		t.Fatalf("unexpected second catalog service: got %q want %q", got, want)
+	}
+	if got, want := entries[2].Name, "sqs"; got != want {
+		t.Fatalf("unexpected third catalog service: got %q want %q", got, want)
 	}
 
 	s3Entry, ok := registrar.Service("s3")
@@ -125,6 +133,9 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	if _, ok := root.Services[1].(deliveryhttp.DynamoDBNativeService); !ok {
 		t.Fatal("expected dynamodb service to expose the native http surface")
 	}
+	if _, ok := root.Services[2].(deliveryhttp.SQSNativeService); !ok {
+		t.Fatal("expected sqs service to expose the native http surface")
+	}
 
 	if value, ok := hook.Get(dynamodbdomain.StateKey); !ok {
 		t.Fatalf("expected state for %q to be present", dynamodbdomain.StateKey)
@@ -142,6 +153,19 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	state := value.(map[string]any)
 	if got, want := state["service"], "s3"; got != want {
 		t.Fatalf("unexpected s3 state: got %v want %v", got, want)
+	}
+
+	if value, ok := hook.Get("sqs"); !ok {
+		t.Fatal("expected state for sqs to be present")
+	} else {
+		state := value.(map[string]any)
+		if got, want := state["service"], "sqs"; got != want {
+			t.Fatalf("unexpected sqs state: got %v want %v", got, want)
+		}
+		routes := state["routes"].([]orchestrator.Route)
+		if got, want := len(routes), 7; got != want {
+			t.Fatalf("unexpected sqs route count: got %d want %d", got, want)
+		}
 	}
 
 	dynamoDBPath := filepath.Join(baseDir, "instances", "test-instance", "dynamodb", "state.db")
@@ -187,7 +211,7 @@ func TestDefaultRootUsesInstanceScopedDynamoDBStorage(t *testing.T) {
 		S3StorageBaseDir:       baseDir,
 		DynamoDBStorageBaseDir: baseDir,
 	})
-	if got, want := len(root.Services), 2; got != want {
+	if got, want := len(root.Services), 3; got != want {
 		t.Fatalf("unexpected service count: got %d want %d", got, want)
 	}
 
