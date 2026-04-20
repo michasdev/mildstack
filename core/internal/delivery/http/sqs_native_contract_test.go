@@ -11,7 +11,7 @@ func TestSQSNativeContractParsesQueryAndFormValues(t *testing.T) {
 	t.Helper()
 
 	req := httptest.NewRequest(http.MethodPost, "/123456789012/orders/", strings.NewReader(
-		"Action=SendMessage&Version=2012-11-05&QueueUrl=https%3A%2F%2Flocalhost%2F123456789012%2Forders&Attribute.1.Name=DelaySeconds&Attribute.1.Value.StringValue=5",
+		"Action=SendMessage&Version=2012-11-05&QueueUrl=https%3A%2F%2Flocalhost%2F123456789012%2Forders&QueueNamePrefix=ord&QueueOwnerAWSAccountId=123456789012&Attribute.1.Name=DelaySeconds&Attribute.1.Value.StringValue=5",
 	))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -45,6 +45,43 @@ func TestSQSNativeContractParsesQueryAndFormValues(t *testing.T) {
 	}
 	if got, want := ctx.Values.Get("QueueUrl"), "https://localhost/123456789012/orders"; got != want {
 		t.Fatalf("unexpected queue url: got %q want %q", got, want)
+	}
+	if got, want := ctx.Values.Get("QueueNamePrefix"), "ord"; got != want {
+		t.Fatalf("unexpected queue name prefix: got %q want %q", got, want)
+	}
+	if got, want := ctx.Values.Get("QueueOwnerAWSAccountId"), "123456789012"; got != want {
+		t.Fatalf("unexpected queue owner account id: got %q want %q", got, want)
+	}
+}
+
+func TestSQSNativeContractParsesTargetStyleJsonRequests(t *testing.T) {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"QueueNamePrefix":"ord","MaxResults":2,"NextToken":"token-1"}`))
+	req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+	req.Header.Set("X-Amz-Target", "AmazonSQS.ListQueues")
+
+	ctx, err := ParseSQSRequest(req)
+	if err != nil {
+		t.Fatalf("parse target-style request: %v", err)
+	}
+	if !ctx.TargetStyle {
+		t.Fatal("expected target-style request to be marked as such")
+	}
+	if got, want := ctx.Action, "ListQueues"; got != want {
+		t.Fatalf("unexpected action: got %q want %q", got, want)
+	}
+	if got, want := ctx.Version, sqsQueryVersion; got != want {
+		t.Fatalf("unexpected version: got %q want %q", got, want)
+	}
+	if got, want := ctx.Values.Get("QueueNamePrefix"), "ord"; got != want {
+		t.Fatalf("unexpected queue name prefix: got %q want %q", got, want)
+	}
+	if got, want := ctx.Values.Get("MaxResults"), "2"; got != want {
+		t.Fatalf("unexpected max results: got %q want %q", got, want)
+	}
+	if got, want := ctx.Values.Get("NextToken"), "token-1"; got != want {
+		t.Fatalf("unexpected next token: got %q want %q", got, want)
 	}
 }
 

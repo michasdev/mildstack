@@ -15,9 +15,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/gin-gonic/gin"
+	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	"github.com/michasdev/mildstack/core/internal/composition"
-	sqsresource "github.com/michasdev/mildstack/core/internal/resources/sqs"
+	sqsapplication "github.com/michasdev/mildstack/core/internal/resources/sqs/application"
+	"github.com/michasdev/mildstack/core/internal/resources/sqs/contracts"
+	"github.com/michasdev/mildstack/core/internal/resources/sqs/domain"
 )
 
 func TestSQSNativeMiddlewareInterceptsQueryRequestsAndLeavesRuntimeRoutesUntouched(t *testing.T) {
@@ -28,7 +31,7 @@ func TestSQSNativeMiddlewareInterceptsQueryRequestsAndLeavesRuntimeRoutesUntouch
 	manager := runtime.New(root.Services)
 	router := NewRouter(DefaultConfig(), manager)
 
-	RegisterSQSNativeRoutes(router.Engine(), sqsresource.New())
+	RegisterSQSNativeRoutes(router.Engine(), sqsapplication.New())
 
 	healthRecorder := httptest.NewRecorder()
 	healthRequest := httptest.NewRequest(http.MethodGet, "/api/v1/runtime/health", nil)
@@ -40,14 +43,14 @@ func TestSQSNativeMiddlewareInterceptsQueryRequestsAndLeavesRuntimeRoutesUntouch
 	rootRecorder := httptest.NewRecorder()
 	rootRequest := httptest.NewRequest(http.MethodGet, "/?Action=ListQueues&Version=2012-11-05", nil)
 	router.Engine().ServeHTTP(rootRecorder, rootRequest)
-	if got, want := rootRecorder.Code, http.StatusBadRequest; got != want {
+	if got, want := rootRecorder.Code, http.StatusOK; got != want {
 		t.Fatalf("unexpected root status: got %d want %d", got, want)
 	}
 	if ct := rootRecorder.Header().Get("Content-Type"); !strings.Contains(ct, "application/xml") {
 		t.Fatalf("unexpected root content type: got %q", ct)
 	}
-	if !strings.Contains(rootRecorder.Body.String(), "UnsupportedOperation") {
-		t.Fatalf("expected unsupported operation XML, got %q", rootRecorder.Body.String())
+	if !strings.Contains(rootRecorder.Body.String(), "ListQueuesResponse") {
+		t.Fatalf("expected list queues XML, got %q", rootRecorder.Body.String())
 	}
 
 	queueRecorder := httptest.NewRecorder()
@@ -72,14 +75,14 @@ func TestSQSNativeMiddlewareInterceptsQueryRequestsAndLeavesRuntimeRoutesUntouch
 	}
 }
 
-func TestSQSSDKSmokeReceivesAWSCompatibleXMLError(t *testing.T) {
+func TestSQSSDKSmokeReceivesAWSCompatibleSuccess(t *testing.T) {
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
 	root := composition.DefaultRoot("test-instance")
 	manager := runtime.New(root.Services)
 	router := NewRouter(DefaultConfig(), manager)
-	RegisterSQSNativeRoutes(router.Engine(), sqsresource.New())
+	RegisterSQSNativeRoutes(router.Engine(), sqsapplication.New())
 
 	server := httptest.NewServer(router.Engine())
 	t.Cleanup(server.Close)
@@ -102,15 +105,109 @@ func TestSQSSDKSmokeReceivesAWSCompatibleXMLError(t *testing.T) {
 	})
 
 	_, err = client.ListQueues(ctx, &sqs.ListQueuesInput{})
-	if err == nil {
-		t.Fatal("expected list queues to return an AWS-compatible error")
+	if err != nil {
+		t.Fatalf("expected list queues to return successfully: %v", err)
 	}
-	if !strings.Contains(string(transport.body), "<ErrorResponse>") {
-		t.Fatalf("expected captured xml error body, got %q", string(transport.body))
+	if !strings.Contains(string(transport.body), "\"QueueUrls\"") {
+		t.Fatalf("expected captured json body, got %q", string(transport.body))
 	}
-	if !strings.Contains(string(transport.body), "UnsupportedOperation") && !strings.Contains(string(transport.body), "InvalidQueryParameter") {
-		t.Fatalf("expected captured xml error body to contain an SQS error code, got %q", string(transport.body))
+}
+
+func TestSQSNativeMiddlewareRoutesLifecycleActionThroughService(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+
+	service := &stubSQSNativeService{}
+	router := gin.New()
+	RegisterSQSNativeRoutes(router, service)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/?Action=ListQueues&Version=2012-11-05&QueueNamePrefix=ord&MaxResults=2&NextToken=token-1&QueueOwnerAWSAccountId=123456789012", nil)
+	router.ServeHTTP(recorder, request)
+
+	if !service.listQueuesCalled {
+		t.Fatal("expected lifecycle request to reach the service")
 	}
+	if got, want := service.queueNamePrefix, "ord"; got != want {
+		t.Fatalf("unexpected queue name prefix: got %q want %q", got, want)
+	}
+	if got, want := service.maxResults, 2; got != want {
+		t.Fatalf("unexpected max results: got %d want %d", got, want)
+	}
+	if got, want := service.nextToken, "token-1"; got != want {
+		t.Fatalf("unexpected next token: got %q want %q", got, want)
+	}
+	if got, want := recorder.Code, http.StatusBadRequest; got != want {
+		t.Fatalf("unexpected lifecycle response status: got %d want %d", got, want)
+	}
+	if !strings.Contains(recorder.Body.String(), "UnsupportedOperation") {
+		t.Fatalf("expected deferred lifecycle response, got %q", recorder.Body.String())
+	}
+}
+
+type stubSQSNativeService struct {
+	listQueuesCalled bool
+	queueNamePrefix  string
+	maxResults       int
+	nextToken        string
+}
+
+func (s *stubSQSNativeService) Policy() orchestrator.EmulationPolicy {
+	return orchestrator.NewEmulationPolicy(orchestrator.FidelityExemplar, contracts.ActionNames(), nil, "sqs")
+}
+
+func (s *stubSQSNativeService) Metadata() orchestrator.Metadata {
+	return orchestrator.Metadata{Name: "sqs"}
+}
+
+func (s *stubSQSNativeService) QueueURL(queueName string) string {
+	return "https://sqs.us-east-1.amazonaws.com/123456789012/" + queueName
+}
+
+func (s *stubSQSNativeService) QueueARN(queueName string) string {
+	return "arn:aws:sqs:us-east-1:123456789012:" + queueName
+}
+
+func (s *stubSQSNativeService) CreateQueue(queueName string, attributes map[string]string) (domain.Queue, error) {
+	return domain.Queue{Name: queueName, URL: s.QueueURL(queueName)}, contracts.ErrSQSOperationDeferred
+}
+
+func (s *stubSQSNativeService) DeleteQueue(queueName string) error {
+	return contracts.ErrSQSOperationDeferred
+}
+
+func (s *stubSQSNativeService) GetQueueUrl(queueName, ownerAccountID string) (string, error) {
+	return s.QueueURL(queueName), contracts.ErrSQSOperationDeferred
+}
+
+func (s *stubSQSNativeService) ListQueues(queueNamePrefix string, maxResults int, nextToken, ownerAccountID string) ([]domain.Queue, string, error) {
+	s.listQueuesCalled = true
+	s.queueNamePrefix = queueNamePrefix
+	s.maxResults = maxResults
+	s.nextToken = nextToken
+	return nil, "", contracts.ErrSQSOperationDeferred
+}
+
+func (s *stubSQSNativeService) PurgeQueue(queueName string) error {
+	return contracts.ErrSQSOperationDeferred
+}
+
+func (s *stubSQSNativeService) GetQueueAttributes(queueName string, attributeNames []string, ownerAccountID string) (contracts.QueueAttributesView, error) {
+	return contracts.QueueAttributesView{
+		QueueName: queueName,
+		QueueURL:  s.QueueURL(queueName),
+		QueueARN:  s.QueueARN(queueName),
+	}, contracts.ErrSQSOperationDeferred
+}
+
+func (s *stubSQSNativeService) SetQueueAttributes(queueName string, attributes map[string]string) (contracts.QueueAttributesView, error) {
+	return contracts.QueueAttributesView{
+		QueueName:  queueName,
+		QueueURL:   s.QueueURL(queueName),
+		QueueARN:   s.QueueARN(queueName),
+		Attributes: attributes,
+	}, contracts.ErrSQSOperationDeferred
 }
 
 type captureTransport struct {
