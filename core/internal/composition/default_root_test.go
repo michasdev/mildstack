@@ -5,11 +5,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
 	dynamodbapp "github.com/michasdev/mildstack/core/internal/resources/dynamodb/application"
 	dynamodbdomain "github.com/michasdev/mildstack/core/internal/resources/dynamodb/domain"
 	s3domain "github.com/michasdev/mildstack/core/internal/resources/s3/domain"
+	sqsdomain "github.com/michasdev/mildstack/core/internal/resources/sqs/domain"
 )
 
 type stateHookStub struct {
@@ -37,6 +37,7 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 		InstanceID:             "test-instance",
 		S3StorageBaseDir:       baseDir,
 		DynamoDBStorageBaseDir: baseDir,
+		SQSStorageBaseDir:      baseDir,
 	})
 	if got, want := len(root.Services), 3; got != want {
 		t.Fatalf("unexpected service count: got %d want %d", got, want)
@@ -155,16 +156,15 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 		t.Fatalf("unexpected s3 state: got %v want %v", got, want)
 	}
 
-	if value, ok := hook.Get("sqs"); !ok {
-		t.Fatal("expected state for sqs to be present")
+	if value, ok := hook.Get(sqsdomain.StateKey); !ok {
+		t.Fatalf("expected state for %q to be present", sqsdomain.StateKey)
 	} else {
 		state := value.(map[string]any)
 		if got, want := state["service"], "sqs"; got != want {
 			t.Fatalf("unexpected sqs state: got %v want %v", got, want)
 		}
-		routes := state["routes"].([]orchestrator.Route)
-		if got, want := len(routes), 7; got != want {
-			t.Fatalf("unexpected sqs route count: got %d want %d", got, want)
+		if got, want := len(state["queues"].([]any)), 0; got != want {
+			t.Fatalf("unexpected sqs queue count: got %d want %d", got, want)
 		}
 	}
 
@@ -210,6 +210,7 @@ func TestDefaultRootUsesInstanceScopedDynamoDBStorage(t *testing.T) {
 		InstanceID:             "instance-a",
 		S3StorageBaseDir:       baseDir,
 		DynamoDBStorageBaseDir: baseDir,
+		SQSStorageBaseDir:      baseDir,
 	})
 	if got, want := len(root.Services), 3; got != want {
 		t.Fatalf("unexpected service count: got %d want %d", got, want)
