@@ -3,7 +3,7 @@ import { motion, AnimatePresence, useScroll, useMotionValueEvent } from 'motion/
 import { Star, Download, Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import logoFullWhite from '@/assets/logos/mildstack-logo-full-white.svg'
+import logoFullWhite from '@/assets/logos/mildstack-logo-full-white.png'
 
 const NAV_LINKS = [
   { label: 'Home', variant: 'outline' },
@@ -85,7 +85,7 @@ export const Navbar: React.FC = () => {
         transition={{ duration: 0.5 }}
         className={cn(
           "px-4 backdrop-blur-3xl rounded-full py-4 flex justify-between items-center transition-all duration-300",
-          scrolled ? 'bg-background/80 border border-white/10 shadow-2xl shadow-white/5' : 'bg-background/50'
+          scrolled ? 'bg-background/80 border shadow-2xl shadow-white/5' : 'bg-background/50'
         )}
       >
         <div className="flex items-center">

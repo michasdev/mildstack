@@ -318,7 +318,7 @@ export const HeroSection: React.FC = () => {
                         variants={itemVariants}
                         className="text-center text-gray-400 mb-9 max-w-2xl leading-relaxed font-light"
                     >
-                        High-performance and lightweight local AWS emulator for <span className="font-normal text-foreground">S3</span>, <span className="font-normal text-foreground">DynamoDB</span>, <span className="font-normal text-foreground">SQS</span>, and more. Includes an intuitive <span className="font-normal text-foreground">Desktop App</span> to manage and browse your local cloud resources from a single place.
+                        High-performance and lightweight local AWS emulator for <span className="font-normal text-foreground">S3</span>, <span className="font-normal text-foreground">DynamoDB</span>, <span className="font-normal text-foreground">SQS</span>, and more. Includes an intuitive <span className="font-normal text-foreground">Desktop App</span> to manage and browse your local cloud resources from a single place. No docker required!
                     </motion.p>
                 </motion.div>
 
