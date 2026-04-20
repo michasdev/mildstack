@@ -65,6 +65,33 @@ interface InstanceApi {
   setSelected(port: number): Promise<void>
 }
 
+interface MildStackInstance {
+  instanceId: string
+  port: number
+  pid?: number
+  status: 'running' | 'not_started' | 'errored'
+  error?: string
+}
+
+interface MildStackInstancesResponse {
+  state: string
+  services: Array<{
+    name: string
+    version: string
+    tags: string[]
+  }>
+  instances: MildStackInstance[]
+  ports: number[] | null
+}
+
+interface MildStackApi {
+  instances(): Promise<MildStackInstancesResponse>
+  serve(port: number): Promise<{ success: boolean; error?: string }>
+  stop(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
+  delete(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
+  validateInstance(): Promise<{ valid: boolean; error?: string }>
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI
@@ -72,6 +99,7 @@ declare global {
       s3: S3BrowserApi
       dynamodb: DynamoDBBrowserApi
       instance: InstanceApi
+      mildstack: MildStackApi
     }
   }
 }

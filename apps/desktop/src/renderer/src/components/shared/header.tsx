@@ -12,6 +12,13 @@ import mildstackLightLogo from "@renderer/assets/logos/mildstack-logo-full-white
 import { Separator } from "@renderer/components/ui/separator";
 import { useInstanceStore } from "@/store/instance-store";
 import { Badge } from "@renderer/components/ui/badge";
+
+const statusBadgeVariant = {
+    running: "success",
+    not_started: "secondary",
+    errored: "error",
+} as const
+
 const Header = () => {
     const currentPath = useLocation();
     const { getSelectedInstance } = useInstanceStore();
@@ -27,7 +34,7 @@ const Header = () => {
 
     segments.forEach((segment, index) => {
         if (index === 0 && segment.toLowerCase().startsWith("instances")) return;
-        if (selectedInstance && segment === selectedInstance.id) return;
+        if (selectedInstance && segment === selectedInstance.instanceId) return;
 
         const url = `/${segments.slice(0, index + 1).join('/')}`;
         breadcrumbTree.push({
@@ -42,8 +49,8 @@ const Header = () => {
             <Separator orientation="vertical" className="h-6" />
             {selectedInstance && (
                 <div className="flex flex-row items-center gap-2">
-                    <span className="text-sm font-semibold">{selectedInstance.name}</span>
-                    <Badge variant={selectedInstance.status === 'running' ? 'success' : 'secondary'} className="text-[10px] h-4">
+                    <span className="text-sm font-semibold">Instance {selectedInstance.port}</span>
+                    <Badge variant={statusBadgeVariant[selectedInstance.status] ?? 'secondary'} className="text-[10px] h-4">
                         {selectedInstance.status}
                     </Badge>
                     <Separator orientation="vertical" className="h-6" />

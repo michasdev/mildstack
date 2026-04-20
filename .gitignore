@@ -16,3 +16,6 @@ AGENTS.md
 
 # go binary
 mildstack
+
+*.env*
+!.env.example
