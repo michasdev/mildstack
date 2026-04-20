@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	sqssdk "github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	"github.com/michasdev/mildstack/core/internal/composition"
@@ -686,6 +689,93 @@ func TestInstanceRegistrarServeSkipsDuplicateLoadedPort(t *testing.T) {
 	if _, err := os.Stat(savedPath); err != nil {
 		t.Fatalf("expected saved instance file: %v", err)
 	}
+}
+
+func TestRegisterNativeSQSRoutesExposesAwsCompatibleSmokeSurface(t *testing.T) {
+	t.Helper()
+
+	root := composition.DefaultRoot("test-instance")
+	manager := runtime.New(root.Services)
+	router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
+
+	if err := registerNativeSQSRoutes(router, root.Services); err != nil {
+		t.Fatalf("register native sqs routes: %v", err)
+	}
+
+	healthRecorder := httptest.NewRecorder()
+	healthRequest := httptest.NewRequest(http.MethodGet, "/api/v1/runtime/health", nil)
+	router.Engine().ServeHTTP(healthRecorder, healthRequest)
+	if got, want := healthRecorder.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected health status: got %d want %d", got, want)
+	}
+
+	rootRecorder := httptest.NewRecorder()
+	rootRequest := httptest.NewRequest(http.MethodGet, "/?Action=ListQueues&Version=2012-11-05", nil)
+	router.Engine().ServeHTTP(rootRecorder, rootRequest)
+	if got, want := rootRecorder.Code, http.StatusBadRequest; got != want {
+		t.Fatalf("unexpected sqs root status: got %d want %d", got, want)
+	}
+	if !strings.Contains(rootRecorder.Body.String(), "<ErrorResponse>") {
+		t.Fatalf("expected sqs error response xml, got %q", rootRecorder.Body.String())
+	}
+	if !strings.Contains(rootRecorder.Body.String(), "UnsupportedOperation") {
+		t.Fatalf("expected unsupported operation xml, got %q", rootRecorder.Body.String())
+	}
+
+	server := httptest.NewServer(router.Engine())
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+
+	transport := &captureTransport{base: http.DefaultTransport}
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion("us-east-1"),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "test")),
+		config.WithHTTPClient(&http.Client{Transport: transport}),
+	)
+	if err != nil {
+		t.Fatalf("load aws config: %v", err)
+	}
+
+	client := sqssdk.NewFromConfig(cfg, func(o *sqssdk.Options) {
+		o.BaseEndpoint = aws.String(server.URL)
+	})
+
+	_, err = client.ListQueues(ctx, &sqssdk.ListQueuesInput{})
+	if err == nil {
+		t.Fatal("expected list queues to return an error")
+	}
+	if !strings.Contains(string(transport.body), "<ErrorResponse>") {
+		t.Fatalf("expected captured sqs xml body, got %q", string(transport.body))
+	}
+	if !strings.Contains(string(transport.body), "UnsupportedOperation") && !strings.Contains(string(transport.body), "InvalidQueryParameter") {
+		t.Fatalf("expected captured sqs xml body to contain an SQS error code, got %q", string(transport.body))
+	}
+}
+
+type captureTransport struct {
+	base http.RoundTripper
+	body []byte
+}
+
+func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Body == nil {
+		return resp, nil
+	}
+
+	data, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	t.body = append([]byte(nil), data...)
+	resp.Body = io.NopCloser(bytes.NewReader(data))
+	return resp, nil
 }
 
 func newDynamoDBSmokeClient(t *testing.T, endpoint string) *dynamodb.Client {

@@ -9,6 +9,7 @@ import (
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	"github.com/michasdev/mildstack/core/internal/resources/dynamodb"
 	"github.com/michasdev/mildstack/core/internal/resources/s3"
+	"github.com/michasdev/mildstack/core/internal/resources/sqs"
 )
 
 type DefaultRootConfig struct {
@@ -48,7 +49,9 @@ func defaultRootWithHook(hook orchestrator.StateHook, config DefaultRootConfig) 
 		panic(fmt.Sprintf("composition: init dynamodb service: %v", err))
 	}
 
-	services := []orchestrator.Service{s3Service, dynamoService}
+	sqsService := sqs.New()
+
+	services := []orchestrator.Service{s3Service, dynamoService, sqsService}
 	for _, service := range services {
 		if err := service.AttachState(hook); err != nil {
 			for _, candidate := range services {
