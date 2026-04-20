@@ -13,6 +13,7 @@ type SQSRegistrySpec struct {
 	Version          string
 	Supported        bool
 	DomainDeferred   bool
+	MessageSurface   bool
 	ReturnsQueueURL  bool
 	UsesQueueContext bool
 }
@@ -33,7 +34,8 @@ func NewSQSRegistry() SQSRegistry {
 			Scope:            spec.Scope,
 			Version:          spec.Version,
 			Supported:        true,
-			DomainDeferred:   !isQueueLifecycleAction(spec.Action),
+			DomainDeferred:   !isQueueLifecycleAction(spec.Action) && !spec.MessageSurface,
+			MessageSurface:   spec.MessageSurface,
 			ReturnsQueueURL:  spec.ReturnsQueueURL,
 			UsesQueueContext: spec.UsesQueueContext,
 		}

@@ -28,6 +28,15 @@ func TestSQSNativeRegistryDerivesSpecsFromCatalog(t *testing.T) {
 			if spec.DomainDeferred {
 				t.Fatalf("expected action %s to be routed to the service, not deferred", spec.Action)
 			}
+			if spec.MessageSurface {
+				t.Fatalf("did not expect lifecycle action %s to be marked as message surface", spec.Action)
+			}
+			continue
+		}
+		if spec.MessageSurface {
+			if spec.DomainDeferred {
+				t.Fatalf("expected message action %s to be routed to the service seam, not deferred", spec.Action)
+			}
 			continue
 		}
 		if !spec.DomainDeferred {
@@ -49,6 +58,24 @@ func TestSQSNativeRegistryRecognizesQueueLifecycleActions(t *testing.T) {
 	}
 	if isQueueLifecycleAction("SendMessage") {
 		t.Fatal("did not expect SendMessage to be treated as a queue lifecycle action")
+	}
+}
+
+func TestSQSNativeRegistryMarksPhase39MessageSurfaceActions(t *testing.T) {
+	t.Helper()
+
+	registry := NewSQSRegistry()
+	for _, action := range []string{"ChangeMessageVisibility", "ChangeMessageVisibilityBatch", "DeleteMessage", "DeleteMessageBatch", "ReceiveMessage", "SendMessage", "SendMessageBatch"} {
+		spec, ok := registry.Lookup(action)
+		if !ok {
+			t.Fatalf("expected registry action %s", action)
+		}
+		if !spec.MessageSurface {
+			t.Fatalf("expected %s to be marked as message surface", action)
+		}
+		if spec.DomainDeferred {
+			t.Fatalf("expected %s to be routed away from domain deferral", action)
+		}
 	}
 }
 
