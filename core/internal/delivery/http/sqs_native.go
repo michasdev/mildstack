@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
@@ -26,6 +27,13 @@ type SQSNativeService interface {
 	PurgeQueue(queueName string) error
 	GetQueueAttributes(queueName string, attributeNames []string, ownerAccountID string) (contracts.QueueAttributesView, error)
 	SetQueueAttributes(queueName string, attributes map[string]string) (contracts.QueueAttributesView, error)
+	ReceiveMessage(queueName string, maxMessages int, waitTime time.Duration) ([]domain.Message, error)
+	DeleteMessage(queueName string, receiptHandle string) error
+	ChangeMessageVisibility(queueName string, receiptHandle string, visibility time.Duration) error
+	SendMessage(queueName string, request contracts.SendMessageRequest) (contracts.SendMessageResult, error)
+	SendMessageBatch(queueName string, request contracts.SendMessageBatchRequest) (contracts.SendMessageBatchResult, error)
+	DeleteMessageBatch(queueName string, request contracts.DeleteMessageBatchRequest) (contracts.DeleteMessageBatchResult, error)
+	ChangeMessageVisibilityBatch(queueName string, request contracts.ChangeMessageVisibilityBatchRequest) (contracts.ChangeMessageVisibilityBatchResult, error)
 }
 
 func RegisterSQSNativeRoutes(engine *gin.Engine, service SQSNativeService) {
@@ -219,9 +227,9 @@ func requestIDFromContext(c *gin.Context) string {
 }
 
 type sqsQueueUrlResponse struct {
-	XMLName           xml.Name             `xml:"GetQueueUrlResponse"`
-	GetQueueUrlResult  sqsQueueUrlResult    `xml:"GetQueueUrlResult"`
-	ResponseMetadata   sqsResponseMetadata  `xml:"ResponseMetadata"`
+	XMLName           xml.Name            `xml:"GetQueueUrlResponse"`
+	GetQueueUrlResult sqsQueueUrlResult   `xml:"GetQueueUrlResult"`
+	ResponseMetadata  sqsResponseMetadata `xml:"ResponseMetadata"`
 }
 
 type sqsQueueUrlResult struct {
@@ -229,15 +237,15 @@ type sqsQueueUrlResult struct {
 }
 
 type sqsCreateQueueResponse struct {
-	XMLName          xml.Name            `xml:"CreateQueueResponse"`
+	XMLName           xml.Name            `xml:"CreateQueueResponse"`
 	CreateQueueResult sqsQueueUrlResult   `xml:"CreateQueueResult"`
 	ResponseMetadata  sqsResponseMetadata `xml:"ResponseMetadata"`
 }
 
 type sqsListQueuesResponse struct {
-	XMLName          xml.Name              `xml:"ListQueuesResponse"`
-	ListQueuesResult  sqsListQueuesResult   `xml:"ListQueuesResult"`
-	ResponseMetadata  sqsResponseMetadata   `xml:"ResponseMetadata"`
+	XMLName          xml.Name            `xml:"ListQueuesResponse"`
+	ListQueuesResult sqsListQueuesResult `xml:"ListQueuesResult"`
+	ResponseMetadata sqsResponseMetadata `xml:"ResponseMetadata"`
 }
 
 type sqsListQueuesResult struct {
@@ -251,9 +259,9 @@ type sqsListQueuesJSONResponse struct {
 }
 
 type sqsGetQueueAttributesResponse struct {
-	XMLName                 xml.Name                   `xml:"GetQueueAttributesResponse"`
+	XMLName                  xml.Name                    `xml:"GetQueueAttributesResponse"`
 	GetQueueAttributesResult sqsGetQueueAttributesResult `xml:"GetQueueAttributesResult"`
-	ResponseMetadata        sqsResponseMetadata        `xml:"ResponseMetadata"`
+	ResponseMetadata         sqsResponseMetadata         `xml:"ResponseMetadata"`
 }
 
 type sqsGetQueueAttributesResult struct {
@@ -266,8 +274,8 @@ type sqsQueueAttributeXML struct {
 }
 
 type sqsSetQueueAttributesResponse struct {
-	XMLName               xml.Name            `xml:"SetQueueAttributesResponse"`
-	ResponseMetadata      sqsResponseMetadata `xml:"ResponseMetadata"`
+	XMLName          xml.Name            `xml:"SetQueueAttributesResponse"`
+	ResponseMetadata sqsResponseMetadata `xml:"ResponseMetadata"`
 }
 
 type sqsDeleteQueueResponse struct {

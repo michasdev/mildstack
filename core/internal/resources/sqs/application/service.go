@@ -544,6 +544,38 @@ func (s *Service) ChangeMessageVisibility(queueName string, receiptHandle string
 	return s.commitStateLocked()
 }
 
+func (s *Service) SendMessage(queueName string, request contracts.SendMessageRequest) (contracts.SendMessageResult, error) {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return contracts.SendMessageResult{}, fmt.Errorf("sqs: queue name is required")
+	}
+	return contracts.SendMessageResult{}, contracts.ErrSQSOperationDeferred
+}
+
+func (s *Service) SendMessageBatch(queueName string, request contracts.SendMessageBatchRequest) (contracts.SendMessageBatchResult, error) {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return contracts.SendMessageBatchResult{}, fmt.Errorf("sqs: queue name is required")
+	}
+	return contracts.SendMessageBatchResult{}, contracts.ErrSQSOperationDeferred
+}
+
+func (s *Service) DeleteMessageBatch(queueName string, request contracts.DeleteMessageBatchRequest) (contracts.DeleteMessageBatchResult, error) {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return contracts.DeleteMessageBatchResult{}, fmt.Errorf("sqs: queue name is required")
+	}
+	return contracts.DeleteMessageBatchResult{}, contracts.ErrSQSOperationDeferred
+}
+
+func (s *Service) ChangeMessageVisibilityBatch(queueName string, request contracts.ChangeMessageVisibilityBatchRequest) (contracts.ChangeMessageVisibilityBatchResult, error) {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return contracts.ChangeMessageVisibilityBatchResult{}, fmt.Errorf("sqs: queue name is required")
+	}
+	return contracts.ChangeMessageVisibilityBatchResult{}, contracts.ErrSQSOperationDeferred
+}
+
 func (s *Service) commitStateLocked() error {
 	if s.repo != nil {
 		if err := s.repo.Save(s.state.Clone()); err != nil {

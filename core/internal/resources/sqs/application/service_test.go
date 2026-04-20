@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -183,9 +184,9 @@ func TestSQSServiceExposesQueueLifecycleAPI(t *testing.T) {
 	}
 
 	if _, err := service.SetQueueAttributes("orders", map[string]string{
-		"VisibilityTimeout":   "45",
-		"RedriveAllowPolicy":  `{"redrivePermission":"byQueue"}`,
-		"RedrivePolicy":       `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:orders-dlq"}`,
+		"VisibilityTimeout":         "45",
+		"RedriveAllowPolicy":        `{"redrivePermission":"byQueue"}`,
+		"RedrivePolicy":             `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:orders-dlq"}`,
 		"ContentBasedDeduplication": "true",
 	}); err != nil {
 		t.Fatalf("set queue attributes: %v", err)
@@ -246,6 +247,38 @@ func TestSQSServiceExposesQueueLifecycleAPI(t *testing.T) {
 	}
 	if err := service.PurgeQueue("orders-archive"); err == nil {
 		t.Fatal("expected back-to-back purge to fail")
+	}
+}
+
+func TestSQSServiceExposesMessageSurfaceSeams(t *testing.T) {
+	t.Helper()
+
+	service := newService(domain.NewState(), nil)
+	type messageAPI interface {
+		ReceiveMessage(string, int, time.Duration) ([]domain.Message, error)
+		DeleteMessage(string, string) error
+		ChangeMessageVisibility(string, string, time.Duration) error
+		SendMessage(string, contracts.SendMessageRequest) (contracts.SendMessageResult, error)
+		SendMessageBatch(string, contracts.SendMessageBatchRequest) (contracts.SendMessageBatchResult, error)
+		DeleteMessageBatch(string, contracts.DeleteMessageBatchRequest) (contracts.DeleteMessageBatchResult, error)
+		ChangeMessageVisibilityBatch(string, contracts.ChangeMessageVisibilityBatchRequest) (contracts.ChangeMessageVisibilityBatchResult, error)
+	}
+
+	if _, ok := any(service).(messageAPI); !ok {
+		t.Fatal("expected service to expose the message surface API")
+	}
+
+	if _, err := service.SendMessage("queue-a", contracts.SendMessageRequest{QueueUrl: service.QueueURL("queue-a")}); !errors.Is(err, contracts.ErrSQSOperationDeferred) {
+		t.Fatalf("expected send message seam to remain deferred, got %v", err)
+	}
+	if _, err := service.SendMessageBatch("queue-a", contracts.SendMessageBatchRequest{QueueUrl: service.QueueURL("queue-a")}); !errors.Is(err, contracts.ErrSQSOperationDeferred) {
+		t.Fatalf("expected send message batch seam to remain deferred, got %v", err)
+	}
+	if _, err := service.DeleteMessageBatch("queue-a", contracts.DeleteMessageBatchRequest{QueueUrl: service.QueueURL("queue-a")}); !errors.Is(err, contracts.ErrSQSOperationDeferred) {
+		t.Fatalf("expected delete message batch seam to remain deferred, got %v", err)
+	}
+	if _, err := service.ChangeMessageVisibilityBatch("queue-a", contracts.ChangeMessageVisibilityBatchRequest{QueueUrl: service.QueueURL("queue-a")}); !errors.Is(err, contracts.ErrSQSOperationDeferred) {
+		t.Fatalf("expected visibility batch seam to remain deferred, got %v", err)
 	}
 }
 

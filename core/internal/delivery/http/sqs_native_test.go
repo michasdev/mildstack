@@ -210,6 +210,34 @@ func (s *stubSQSNativeService) SetQueueAttributes(queueName string, attributes m
 	}, contracts.ErrSQSOperationDeferred
 }
 
+func (s *stubSQSNativeService) ReceiveMessage(queueName string, maxMessages int, waitTime time.Duration) ([]domain.Message, error) {
+	return nil, contracts.ErrSQSOperationDeferred
+}
+
+func (s *stubSQSNativeService) DeleteMessage(queueName string, receiptHandle string) error {
+	return contracts.ErrSQSOperationDeferred
+}
+
+func (s *stubSQSNativeService) ChangeMessageVisibility(queueName string, receiptHandle string, visibility time.Duration) error {
+	return contracts.ErrSQSOperationDeferred
+}
+
+func (s *stubSQSNativeService) SendMessage(queueName string, request contracts.SendMessageRequest) (contracts.SendMessageResult, error) {
+	return contracts.SendMessageResult{}, contracts.ErrSQSOperationDeferred
+}
+
+func (s *stubSQSNativeService) SendMessageBatch(queueName string, request contracts.SendMessageBatchRequest) (contracts.SendMessageBatchResult, error) {
+	return contracts.SendMessageBatchResult{}, contracts.ErrSQSOperationDeferred
+}
+
+func (s *stubSQSNativeService) DeleteMessageBatch(queueName string, request contracts.DeleteMessageBatchRequest) (contracts.DeleteMessageBatchResult, error) {
+	return contracts.DeleteMessageBatchResult{}, contracts.ErrSQSOperationDeferred
+}
+
+func (s *stubSQSNativeService) ChangeMessageVisibilityBatch(queueName string, request contracts.ChangeMessageVisibilityBatchRequest) (contracts.ChangeMessageVisibilityBatchResult, error) {
+	return contracts.ChangeMessageVisibilityBatchResult{}, contracts.ErrSQSOperationDeferred
+}
+
 type captureTransport struct {
 	base http.RoundTripper
 	body []byte
