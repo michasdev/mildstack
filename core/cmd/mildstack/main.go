@@ -45,6 +45,9 @@ func main() {
 		if err := registerNativeS3Routes(router, root.Services); err != nil {
 			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port, instanceID: instanceID}
 		}
+		if err := registerNativeSQSRoutes(router, root.Services); err != nil {
+			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port, instanceID: instanceID}
+		}
 		registrar := instanceRegistrar{manager: manager, storage: storage, instanceID: instanceID}
 		return recordingHTTPServer{server: deliveryhttp.NewServer(registrar, router, port), storage: storage, port: port, instanceID: instanceID}
 	}
@@ -172,6 +175,27 @@ func registerNativeDynamoDBRoutes(router *deliveryhttp.Router, services []orches
 			return fmt.Errorf("dynamodb service does not expose the native http surface")
 		}
 		deliveryhttp.RegisterDynamoDBNativeRoutes(router.Engine(), dynamoDBService)
+		return nil
+	}
+
+	return nil
+}
+
+func registerNativeSQSRoutes(router *deliveryhttp.Router, services []orchestrator.Service) error {
+	if router == nil {
+		return nil
+	}
+
+	for _, service := range services {
+		if service == nil || service.Metadata().Name != "sqs" {
+			continue
+		}
+
+		sqsService, ok := service.(deliveryhttp.SQSNativeService)
+		if !ok {
+			return fmt.Errorf("sqs service does not expose the native http surface")
+		}
+		deliveryhttp.RegisterSQSNativeRoutes(router.Engine(), sqsService)
 		return nil
 	}
 
