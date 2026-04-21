@@ -20,7 +20,7 @@
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
-    "build:mac": "electron-vite build && electron-builder --mac",
+    "build:mac": "electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
     "test": "vitest run"
   },
@@ -54,7 +54,7 @@
     "@vitest/ui": "^4.1.2",
     "clsx": "^2.1.1",
     "electron": "^39.2.6",
-    "electron-builder": "^26.0.12",
+    "electron-builder": "^26.8.1",
     "electron-icon-builder": "^2.0.1",
     "electron-vite": "^5.0.0",
     "eslint": "^9.39.1",
