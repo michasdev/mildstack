@@ -43,7 +43,7 @@ function expectDefined(actual, message) {
 }
 
 async function main() {
-  const endpoint = process.env.MILDSTACK_S3_ENDPOINT || process.env.AWS_S3_ENDPOINT || `http://localhost:${port}`;
+  const endpoint = process.env.MILDSTACK_S3_ENDPOINT || `http://localhost:${port}`;
   
   console.log(`Running S3 behavioral validation against ${endpoint}`);
   const client = new S3Client({
