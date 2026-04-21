@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/contracts"
 )
 
@@ -200,7 +201,7 @@ func TestSQSNativeRegistryRoutesMessageActionsEvenWhenPolicyOmitsThem(t *testing
 	RegisterSQSNativeRoutes(router, service)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/123456789012/orders/", strings.NewReader("Action=SendMessage&Version=2012-11-05&MessageBody=hello"))
+	request := httptest.NewRequest(http.MethodPost, "/"+awscontext.Default().AccountID+"/orders/", strings.NewReader("Action=SendMessage&Version=2012-11-05&MessageBody=hello"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	router.ServeHTTP(recorder, request)
 

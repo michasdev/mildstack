@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -788,8 +789,7 @@ func writeSQSGetQueueAttributesJSONResponse(c *gin.Context, view contracts.Queue
 func queueURLOrDefault(queue domain.Queue) string {
 	queueURL := queue.URL
 	if queueURL == "" {
-		aws := awscontext.Default()
-		queueURL = "https://sqs." + aws.Region + ".amazonaws.com/" + aws.AccountID + "/" + queue.Name
+		queueURL = queueURLForName(queue.Name)
 	}
 	return queueURL
 }
@@ -806,8 +806,7 @@ func writeSQSListQueuesResponse(c *gin.Context, queues []domain.Queue, nextToken
 	for _, queue := range queues {
 		queueURL := queue.URL
 		if queueURL == "" {
-			aws := awscontext.Default()
-			queueURL = "https://sqs." + aws.Region + ".amazonaws.com/" + aws.AccountID + "/" + queue.Name
+			queueURL = queueURLForName(queue.Name)
 		}
 		urls = append(urls, queueURL)
 	}
@@ -825,8 +824,7 @@ func writeSQSListQueuesJSONResponse(c *gin.Context, queues []domain.Queue, nextT
 	for _, queue := range queues {
 		queueURL := queue.URL
 		if queueURL == "" {
-			aws := awscontext.Default()
-			queueURL = "https://sqs." + aws.Region + ".amazonaws.com/" + aws.AccountID + "/" + queue.Name
+			queueURL = queueURLForName(queue.Name)
 		}
 		urls = append(urls, queueURL)
 	}
@@ -844,6 +842,20 @@ func writeSQSGetQueueAttributesResponse(c *gin.Context, view contracts.QueueAttr
 		},
 		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
 	})
+}
+
+func queueURLForName(queueName string) string {
+	queueName = strings.TrimSpace(queueName)
+	if queueName == "" {
+		return ""
+	}
+
+	aws := awscontext.Default()
+	endpoint := strings.TrimRight(strings.TrimSpace(aws.Endpoint), "/")
+	if endpoint == "" {
+		endpoint = "http://127.0.0.1:4566"
+	}
+	return fmt.Sprintf("%s/%s/%s", endpoint, aws.AccountID, queueName)
 }
 
 func writeSQSSetQueueAttributesResponse(c *gin.Context, _ contracts.QueueAttributesView) {

@@ -1728,7 +1728,11 @@ func queueURLForAccount(queueName, ownerAccountID string) string {
 	if ownerAccountID = trimName(ownerAccountID); ownerAccountID != "" {
 		aws = aws.WithAccountID(ownerAccountID)
 	}
-	return fmt.Sprintf("https://sqs.%s.amazonaws.com/%s/%s", aws.Region, aws.AccountID, queueName)
+	endpoint := strings.TrimRight(strings.TrimSpace(aws.Endpoint), "/")
+	if endpoint == "" {
+		endpoint = "http://127.0.0.1:4566"
+	}
+	return fmt.Sprintf("%s/%s/%s", endpoint, aws.AccountID, queueName)
 }
 
 func queueARNForAccount(queueName, ownerAccountID string) string {
