@@ -3,15 +3,23 @@ package http
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 )
+
+func defaultSQSQueueURLForContract(queueName string) string {
+	aws := awscontext.Default()
+	return strings.TrimRight(aws.Endpoint, "/") + "/" + aws.AccountID + "/" + queueName
+}
 
 func TestSQSNativeContractParsesQueryAndFormValues(t *testing.T) {
 	t.Helper()
 
-	req := httptest.NewRequest(http.MethodPost, "/123456789012/orders/", strings.NewReader(
-		"Action=SendMessage&Version=2012-11-05&QueueUrl=https%3A%2F%2Flocalhost%2F123456789012%2Forders&QueueNamePrefix=ord&QueueOwnerAWSAccountId=123456789012&Attribute.1.Name=DelaySeconds&Attribute.1.Value.StringValue=5",
+	req := httptest.NewRequest(http.MethodPost, "/"+awscontext.Default().AccountID+"/orders/", strings.NewReader(
+		"Action=SendMessage&Version=2012-11-05&QueueUrl="+url.QueryEscape(defaultSQSQueueURLForContract("orders"))+"&QueueNamePrefix=ord&QueueOwnerAWSAccountId="+awscontext.Default().AccountID+"&Attribute.1.Name=DelaySeconds&Attribute.1.Value.StringValue=5",
 	))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -22,13 +30,13 @@ func TestSQSNativeContractParsesQueryAndFormValues(t *testing.T) {
 	if got, want := ctx.Kind, SQSRequestKindQueue; got != want {
 		t.Fatalf("unexpected kind: got %q want %q", got, want)
 	}
-	if got, want := ctx.AccountID, "123456789012"; got != want {
+	if got, want := ctx.AccountID, awscontext.Default().AccountID; got != want {
 		t.Fatalf("unexpected account id: got %q want %q", got, want)
 	}
 	if got, want := ctx.QueueName, "orders"; got != want {
 		t.Fatalf("unexpected queue name: got %q want %q", got, want)
 	}
-	if got, want := ctx.NormalizedPath, "/123456789012/orders"; got != want {
+	if got, want := ctx.NormalizedPath, "/"+awscontext.Default().AccountID+"/orders"; got != want {
 		t.Fatalf("unexpected normalized path: got %q want %q", got, want)
 	}
 	if got, want := ctx.Action, "SendMessage"; got != want {
@@ -43,13 +51,13 @@ func TestSQSNativeContractParsesQueryAndFormValues(t *testing.T) {
 	if got, want := ctx.Values.Get("Attribute.1.Value.StringValue"), "5"; got != want {
 		t.Fatalf("unexpected numbered attribute value: got %q want %q", got, want)
 	}
-	if got, want := ctx.Values.Get("QueueUrl"), "https://localhost/123456789012/orders"; got != want {
+	if got, want := ctx.Values.Get("QueueUrl"), defaultSQSQueueURLForContract("orders"); got != want {
 		t.Fatalf("unexpected queue url: got %q want %q", got, want)
 	}
 	if got, want := ctx.Values.Get("QueueNamePrefix"), "ord"; got != want {
 		t.Fatalf("unexpected queue name prefix: got %q want %q", got, want)
 	}
-	if got, want := ctx.Values.Get("QueueOwnerAWSAccountId"), "123456789012"; got != want {
+	if got, want := ctx.Values.Get("QueueOwnerAWSAccountId"), awscontext.Default().AccountID; got != want {
 		t.Fatalf("unexpected queue owner account id: got %q want %q", got, want)
 	}
 }
@@ -88,7 +96,7 @@ func TestSQSNativeContractParsesTargetStyleJsonRequests(t *testing.T) {
 func TestSQSNativeContractInfersQueueContextFromTargetStyleQueueURL(t *testing.T) {
 	t.Helper()
 
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"QueueUrl":"https://sqs.us-east-1.amazonaws.com/123456789012/orders","Attributes":{"DelaySeconds":"0"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"QueueUrl":"`+defaultSQSQueueURLForContract("orders")+`","Attributes":{"DelaySeconds":"0"}}`))
 	req.Header.Set("Content-Type", "application/x-amz-json-1.0")
 	req.Header.Set("X-Amz-Target", "AmazonSQS.SetQueueAttributes")
 
@@ -102,7 +110,7 @@ func TestSQSNativeContractInfersQueueContextFromTargetStyleQueueURL(t *testing.T
 	if got, want := ctx.QueueName, "orders"; got != want {
 		t.Fatalf("unexpected queue name: got %q want %q", got, want)
 	}
-	if got, want := ctx.AccountID, "123456789012"; got != want {
+	if got, want := ctx.AccountID, awscontext.Default().AccountID; got != want {
 		t.Fatalf("unexpected account id: got %q want %q", got, want)
 	}
 	if got, want := ctx.Values.Get("Attribute.1.Name"), "DelaySeconds"; got != want {
@@ -117,7 +125,7 @@ func TestSQSNativeContractParsesTargetStyleMessageAttributes(t *testing.T) {
 	t.Helper()
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{
-		"QueueUrl":"https://sqs.us-east-1.amazonaws.com/123456789012/orders",
+		"QueueUrl":"`+defaultSQSQueueURLForContract("orders")+`",
 		"MessageBody":"hello",
 		"MessageAttributes":{
 			"Author":{"DataType":"String","StringValue":"MildStack"}
@@ -143,7 +151,7 @@ func TestSQSNativeContractParsesTargetStyleBatchEntries(t *testing.T) {
 	t.Helper()
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{
-		"QueueUrl":"https://sqs.us-east-1.amazonaws.com/123456789012/orders",
+		"QueueUrl":"`+defaultSQSQueueURLForContract("orders")+`",
 		"Entries":[
 			{"Id":"msg1","MessageBody":"one"},
 			{"Id":"msg2","MessageBody":"two"}
@@ -183,7 +191,7 @@ func TestSQSNativeContractClassifiesRootAndQueuePaths(t *testing.T) {
 		t.Fatalf("unexpected root normalized path: got %q", rootCtx.NormalizedPath)
 	}
 
-	queueReq := httptest.NewRequest(http.MethodGet, "/123456789012/orders/?Action=GetQueueAttributes&Version=2012-11-05", nil)
+	queueReq := httptest.NewRequest(http.MethodGet, "/"+awscontext.Default().AccountID+"/orders/?Action=GetQueueAttributes&Version=2012-11-05", nil)
 	queueCtx, err := ParseSQSRequest(queueReq)
 	if err != nil {
 		t.Fatalf("parse queue request: %v", err)
@@ -191,7 +199,7 @@ func TestSQSNativeContractClassifiesRootAndQueuePaths(t *testing.T) {
 	if queueCtx.Kind != SQSRequestKindQueue {
 		t.Fatalf("unexpected queue kind: got %q", queueCtx.Kind)
 	}
-	if queueCtx.NormalizedPath != "/123456789012/orders" {
+	if queueCtx.NormalizedPath != "/"+awscontext.Default().AccountID+"/orders" {
 		t.Fatalf("unexpected queue normalized path: got %q", queueCtx.NormalizedPath)
 	}
 

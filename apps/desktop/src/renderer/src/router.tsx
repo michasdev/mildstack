@@ -9,6 +9,9 @@ import { BucketDetails } from '@renderer/features/s3-browser/components/bucket-d
 import { DynamoDBLayout } from '@renderer/features/dynamodb-browser/dynamodb-layout'
 import { TablesList } from '@renderer/features/dynamodb-browser/components/tables-list'
 import { TableDetails } from '@renderer/features/dynamodb-browser/components/table-details'
+import { SQSLayout } from '@renderer/features/sqs-browser/sqs-layout'
+import { QueuesList } from '@renderer/features/sqs-browser/components/queues-list'
+import { QueueDetails } from '@renderer/features/sqs-browser/components/queue-details'
 
 export const router = createHashRouter([
   {
@@ -31,6 +34,14 @@ export const router = createHashRouter([
         children: [
           { index: true, element: <TablesList /> },
           { path: ':tableName/*', element: <TableDetails /> }
+        ]
+      },
+      {
+        path: '/resources/sqs',
+        element: <SQSLayout />,
+        children: [
+          { index: true, element: <QueuesList /> },
+          { path: ':queueName/*', element: <QueueDetails /> }
         ]
       },
       { path: '/instances/:instanceid/resources', element: <ResourcesPage /> },

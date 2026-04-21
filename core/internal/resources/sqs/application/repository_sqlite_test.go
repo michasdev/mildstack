@@ -120,7 +120,7 @@ func TestSQLiteRepositoryPersistsQueueAndMessageStateAcrossRestart(t *testing.T)
 	state.QueuePermissions["queue-a"] = map[string]domain.QueuePermission{
 		"label-a": {
 			Label:         "label-a",
-			AWSAccountIDs: []string{"123456789012"},
+			AWSAccountIDs: []string{defaultSQSAccountID},
 			Actions:       []string{"SendMessage"},
 		},
 	}
@@ -128,8 +128,8 @@ func TestSQLiteRepositoryPersistsQueueAndMessageStateAcrossRestart(t *testing.T)
 		"task-1": {
 			TaskHandle:                       "task-1",
 			SourceQueue:                      "queue-a",
-			SourceArn:                        "arn:aws:sqs:us-east-1:123456789012:queue-a",
-			DestinationArn:                   "arn:aws:sqs:us-east-1:123456789012:queue-dlq",
+			SourceArn:                        defaultSQSQueueARN("queue-a"),
+			DestinationArn:                   defaultSQSQueueARN("queue-dlq"),
 			MaxNumberOfMessagesPerSecond:     10,
 			ApproximateNumberOfMessagesMoved: 2,
 			Status:                           "RUNNING",

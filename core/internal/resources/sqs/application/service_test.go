@@ -4,15 +4,28 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	deliveryhttp "github.com/michasdev/mildstack/core/internal/delivery/http"
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/contracts"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/domain"
 )
+
+var defaultSQSAccountID = awscontext.Default().AccountID
+
+func defaultSQSQueueURL(queueName string) string {
+	aws := awscontext.Default()
+	return strings.TrimRight(aws.Endpoint, "/") + "/" + aws.AccountID + "/" + queueName
+}
+
+func defaultSQSQueueARN(queueName string) string {
+	return awscontext.Default().ServiceARN("sqs", queueName)
+}
 
 func TestSQSServiceMetadataRoutesAndPolicy(t *testing.T) {
 	t.Helper()
@@ -105,16 +118,16 @@ func TestSQSServiceExposesQueueLifecycleAPI(t *testing.T) {
 		t.Fatal("expected service to expose queue lifecycle API")
 	}
 
-	if got, want := service.QueueURL("orders"), "https://sqs.us-east-1.amazonaws.com/123456789012/orders"; got != want {
+	if got, want := service.QueueURL("orders"), defaultSQSQueueURL("orders"); got != want {
 		t.Fatalf("unexpected queue url helper: got %q want %q", got, want)
 	}
-	if got, want := service.QueueARN("orders"), "arn:aws:sqs:us-east-1:123456789012:orders"; got != want {
+	if got, want := service.QueueARN("orders"), defaultSQSQueueARN("orders"); got != want {
 		t.Fatalf("unexpected queue arn helper: got %q want %q", got, want)
 	}
 
 	queue, err := service.CreateQueue("orders", map[string]string{
 		"VisibilityTimeout": "30",
-		"RedrivePolicy":     `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:orders-dlq"}`,
+		"RedrivePolicy":     `{"deadLetterTargetArn":"` + defaultSQSQueueARN("orders-dlq") + `"}`,
 	})
 	if err != nil {
 		t.Fatalf("create queue: %v", err)
@@ -128,7 +141,7 @@ func TestSQSServiceExposesQueueLifecycleAPI(t *testing.T) {
 
 	sameQueue, err := service.CreateQueue("orders", map[string]string{
 		"VisibilityTimeout": "30",
-		"RedrivePolicy":     `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:orders-dlq"}`,
+		"RedrivePolicy":     `{"deadLetterTargetArn":"` + defaultSQSQueueARN("orders-dlq") + `"}`,
 	})
 	if err != nil {
 		t.Fatalf("idempotent create: %v", err)
@@ -187,7 +200,7 @@ func TestSQSServiceExposesQueueLifecycleAPI(t *testing.T) {
 	if _, err := service.SetQueueAttributes("orders", map[string]string{
 		"VisibilityTimeout":         "45",
 		"RedriveAllowPolicy":        `{"redrivePermission":"byQueue"}`,
-		"RedrivePolicy":             `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:orders-dlq"}`,
+		"RedrivePolicy":             `{"deadLetterTargetArn":"` + defaultSQSQueueARN("orders-dlq") + `"}`,
 		"ContentBasedDeduplication": "true",
 	}); err != nil {
 		t.Fatalf("set queue attributes: %v", err)
@@ -417,7 +430,7 @@ func TestSQSServiceExposesGovernanceAndRedriveSeams(t *testing.T) {
 	if err := service.TagQueue("queue-a", map[string]string{"env": "dev"}); err != nil {
 		t.Fatalf("tag queue: %v", err)
 	}
-	if err := service.AddPermission("queue-a", "label-a", []string{"123456789012"}, []string{"SendMessage"}); err != nil {
+	if err := service.AddPermission("queue-a", "label-a", []string{defaultSQSAccountID}, []string{"SendMessage"}); err != nil {
 		t.Fatalf("add permission: %v", err)
 	}
 
@@ -428,11 +441,11 @@ func TestSQSServiceExposesGovernanceAndRedriveSeams(t *testing.T) {
 	if got, want := tags["env"], "dev"; got != want {
 		t.Fatalf("unexpected queue tag value: got %q want %q", got, want)
 	}
-	if got, want := service.state.QueuePermissions["queue-a"]["label-a"].AWSAccountIDs[0], "123456789012"; got != want {
+	if got, want := service.state.QueuePermissions["queue-a"]["label-a"].AWSAccountIDs[0], defaultSQSAccountID; got != want {
 		t.Fatalf("unexpected permission account after add: got %q want %q", got, want)
 	}
 
-	handle, err := service.StartMessageMoveTask("arn:aws:sqs:us-east-1:123456789012:queue-dlq", "", 10)
+	handle, err := service.StartMessageMoveTask(defaultSQSQueueARN("queue-dlq"), "", 10)
 	if err != nil {
 		t.Fatalf("start message move task: %v", err)
 	}
@@ -596,7 +609,7 @@ func TestSQSServiceAttachStateUsesNamespacedCopySafeSnapshot(t *testing.T) {
 			"queue-a": map[string]domain.QueuePermission{
 				"label-a": {
 					Label:         "label-a",
-					AWSAccountIDs: []string{"123456789012"},
+					AWSAccountIDs: []string{defaultSQSAccountID},
 					Actions:       []string{"SendMessage"},
 				},
 			},
@@ -606,8 +619,8 @@ func TestSQSServiceAttachStateUsesNamespacedCopySafeSnapshot(t *testing.T) {
 				"task-1": {
 					TaskHandle:                       "task-1",
 					SourceQueue:                      "queue-a",
-					SourceArn:                        "arn:aws:sqs:us-east-1:123456789012:queue-a",
-					DestinationArn:                   "arn:aws:sqs:us-east-1:123456789012:queue-dlq",
+					SourceArn:                        defaultSQSQueueARN("queue-a"),
+					DestinationArn:                   defaultSQSQueueARN("queue-dlq"),
 					MaxNumberOfMessagesPerSecond:     10,
 					ApproximateNumberOfMessagesMoved: 2,
 					Status:                           "RUNNING",
@@ -788,7 +801,7 @@ func TestSQSServiceQueueAttributesPopulateDeadLetterRecovery(t *testing.T) {
 		t.Fatalf("create dlq: %v", err)
 	}
 	if _, err := service.CreateQueue("queue-a", map[string]string{
-		"RedrivePolicy": `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:queue-dlq","maxReceiveCount":"2"}`,
+		"RedrivePolicy": `{"deadLetterTargetArn":"` + defaultSQSQueueARN("queue-dlq") + `","maxReceiveCount":"2"}`,
 	}); err != nil {
 		t.Fatalf("create source queue: %v", err)
 	}
@@ -805,7 +818,7 @@ func TestSQSServiceQueueAttributesPopulateDeadLetterRecovery(t *testing.T) {
 	}
 
 	if _, err := service.SetQueueAttributes("queue-a", map[string]string{
-		"RedrivePolicy": `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:queue-dlq","maxReceiveCount":"3"}`,
+		"RedrivePolicy": `{"deadLetterTargetArn":"` + defaultSQSQueueARN("queue-dlq") + `","maxReceiveCount":"3"}`,
 	}); err != nil {
 		t.Fatalf("set queue attributes: %v", err)
 	}
@@ -931,7 +944,7 @@ func TestSQSServiceNewWithPersistenceLoadsRepositoryState(t *testing.T) {
 	state.QueuePermissions["queue-a"] = map[string]domain.QueuePermission{
 		"label-a": {
 			Label:         "label-a",
-			AWSAccountIDs: []string{"123456789012"},
+			AWSAccountIDs: []string{defaultSQSAccountID},
 			Actions:       []string{"SendMessage"},
 		},
 	}
@@ -939,8 +952,8 @@ func TestSQSServiceNewWithPersistenceLoadsRepositoryState(t *testing.T) {
 		"task-1": {
 			TaskHandle:                       "task-1",
 			SourceQueue:                      "queue-a",
-			SourceArn:                        "arn:aws:sqs:us-east-1:123456789012:queue-a",
-			DestinationArn:                   "arn:aws:sqs:us-east-1:123456789012:queue-dlq",
+			SourceArn:                        defaultSQSQueueARN("queue-a"),
+			DestinationArn:                   defaultSQSQueueARN("queue-dlq"),
 			MaxNumberOfMessagesPerSecond:     10,
 			ApproximateNumberOfMessagesMoved: 2,
 			Status:                           "RUNNING",
@@ -997,7 +1010,7 @@ func TestSQSServiceNewWithPersistenceLoadsRepositoryState(t *testing.T) {
 	if got, want := service.state.QueueTags["queue-a"]["env"], "dev"; got != want {
 		t.Fatalf("unexpected queue tags after load: got %q want %q", got, want)
 	}
-	if got, want := service.state.QueuePermissions["queue-a"]["label-a"].AWSAccountIDs[0], "123456789012"; got != want {
+	if got, want := service.state.QueuePermissions["queue-a"]["label-a"].AWSAccountIDs[0], defaultSQSAccountID; got != want {
 		t.Fatalf("unexpected queue permission after load: got %q want %q", got, want)
 	}
 	if got, want := service.state.MoveTasks["queue-a"]["task-1"].Status, "RUNNING"; got != want {

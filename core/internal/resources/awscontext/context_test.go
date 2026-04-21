@@ -15,6 +15,9 @@ func TestDefaultReturnsLocalIdentity(t *testing.T) {
 	if got, want := ctx.Partition, defaultPartition; got != want {
 		t.Fatalf("unexpected default partition: got %q want %q", got, want)
 	}
+	if got, want := ctx.Endpoint, defaultEndpoint; got != want {
+		t.Fatalf("unexpected default endpoint: got %q want %q", got, want)
+	}
 }
 
 func TestContextCopyHelpersDoNotMutateOriginal(t *testing.T) {
@@ -34,6 +37,9 @@ func TestContextCopyHelpersDoNotMutateOriginal(t *testing.T) {
 	}
 	if got, want := base.Partition, defaultPartition; got != want {
 		t.Fatalf("base partition mutated: got %q want %q", got, want)
+	}
+	if got, want := base.Endpoint, defaultEndpoint; got != want {
+		t.Fatalf("base endpoint mutated: got %q want %q", got, want)
 	}
 	if got, want := accountOverride.AccountID, "111122223333"; got != want {
 		t.Fatalf("unexpected overridden account id: got %q want %q", got, want)

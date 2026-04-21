@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	defaultAccountID = "123456789012"
+	defaultAccountID = "00000000000"
 	defaultRegion    = "us-east-1"
 	defaultPartition = "aws"
+	defaultEndpoint  = "http://127.0.0.1:4566"
 )
 
 // Context carries the AWS-facing identity used by local services.
@@ -25,6 +26,7 @@ func Default() Context {
 		AccountID: defaultAccountID,
 		Region:    defaultRegion,
 		Partition: defaultPartition,
+		Endpoint:  defaultEndpoint,
 	}
 }
 
@@ -38,6 +40,9 @@ func (c Context) Normalize() Context {
 	}
 	if strings.TrimSpace(c.Partition) == "" {
 		c.Partition = defaultPartition
+	}
+	if strings.TrimSpace(c.Endpoint) == "" {
+		c.Endpoint = defaultEndpoint
 	}
 	c.Endpoint = strings.TrimSpace(c.Endpoint)
 	return c
