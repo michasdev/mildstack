@@ -21,14 +21,49 @@ type State struct {
 }
 
 type Table struct {
-	Name         string
-	PartitionKey string
-	SortKey      string
-	BillingMode  string
-	Status       string
-	CreatedAt    time.Time
-	ActivationAt time.Time
-	DeletedAt    time.Time
+	Name                   string
+	PartitionKey           string
+	SortKey                string
+	BillingMode            string
+	AttributeDefinitions   []AttributeDefinition
+	GlobalSecondaryIndexes []SecondaryIndex
+	LocalSecondaryIndexes  []SecondaryIndex
+	Status                 string
+	CreatedAt              time.Time
+	ActivationAt           time.Time
+	DeletedAt              time.Time
+}
+
+type AttributeDefinition struct {
+	Name string
+	Type string
+}
+
+type KeySchemaElement struct {
+	AttributeName string
+	KeyType       string
+}
+
+type Projection struct {
+	Type             string
+	NonKeyAttributes []string
+}
+
+type SecondaryIndex struct {
+	Name       string
+	KeySchema  []KeySchemaElement
+	Projection Projection
+}
+
+type CreateTableSpec struct {
+	AttributeDefinitions   []AttributeDefinition
+	GlobalSecondaryIndexes []SecondaryIndex
+	LocalSecondaryIndexes  []SecondaryIndex
+}
+
+type QueryOptions struct {
+	IndexName            string
+	ProjectionExpression string
 }
 
 type Item struct {
@@ -244,14 +279,17 @@ func (s State) Snapshot() map[string]any {
 	tables := make([]any, 0, len(s.Tables))
 	for _, table := range s.ListTables() {
 		tables = append(tables, map[string]any{
-			"name":          table.Name,
-			"partition_key": table.PartitionKey,
-			"sort_key":      table.SortKey,
-			"billing_mode":  table.BillingMode,
-			"status":        table.Status,
-			"created_at":    snapshotTime(table.CreatedAt),
-			"activation_at": snapshotTime(table.ActivationAt),
-			"deleted_at":    snapshotTime(table.DeletedAt),
+			"name":                     table.Name,
+			"partition_key":            table.PartitionKey,
+			"sort_key":                 table.SortKey,
+			"billing_mode":             table.BillingMode,
+			"attribute_definitions":    copyAttributeDefinitions(table.AttributeDefinitions),
+			"global_secondary_indexes": copySecondaryIndexes(table.GlobalSecondaryIndexes),
+			"local_secondary_indexes":  copySecondaryIndexes(table.LocalSecondaryIndexes),
+			"status":                   table.Status,
+			"created_at":               snapshotTime(table.CreatedAt),
+			"activation_at":            snapshotTime(table.ActivationAt),
+			"deleted_at":               snapshotTime(table.DeletedAt),
 		})
 	}
 
@@ -285,6 +323,11 @@ func (s State) Clone() State {
 			Attributes: cloneAttributes(item.Attributes),
 		}
 	}
+	for i := range cloned.Tables {
+		cloned.Tables[i].AttributeDefinitions = cloneAttributeDefinitions(cloned.Tables[i].AttributeDefinitions)
+		cloned.Tables[i].GlobalSecondaryIndexes = cloneSecondaryIndexes(cloned.Tables[i].GlobalSecondaryIndexes)
+		cloned.Tables[i].LocalSecondaryIndexes = cloneSecondaryIndexes(cloned.Tables[i].LocalSecondaryIndexes)
+	}
 	return cloned
 }
 
@@ -293,6 +336,9 @@ func normalizeTable(table Table) Table {
 	table.PartitionKey = strings.TrimSpace(table.PartitionKey)
 	table.SortKey = strings.TrimSpace(table.SortKey)
 	table.BillingMode = strings.TrimSpace(table.BillingMode)
+	table.AttributeDefinitions = normalizeAttributeDefinitions(table.AttributeDefinitions)
+	table.GlobalSecondaryIndexes = normalizeSecondaryIndexes(table.GlobalSecondaryIndexes)
+	table.LocalSecondaryIndexes = normalizeSecondaryIndexes(table.LocalSecondaryIndexes)
 	table.Status = strings.ToUpper(strings.TrimSpace(table.Status))
 
 	switch table.Status {
@@ -421,4 +467,196 @@ func attributeValueToAny(value AttributeValue) any {
 	default:
 		return nil
 	}
+}
+
+func cloneAttributeDefinitions(source []AttributeDefinition) []AttributeDefinition {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := make([]AttributeDefinition, len(source))
+	copy(cloned, source)
+	return cloned
+}
+
+func cloneSecondaryIndexes(source []SecondaryIndex) []SecondaryIndex {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := make([]SecondaryIndex, len(source))
+	for i, index := range source {
+		cloned[i] = cloneSecondaryIndex(index)
+	}
+	return cloned
+}
+
+func cloneSecondaryIndex(index SecondaryIndex) SecondaryIndex {
+	index.KeySchema = cloneKeySchema(index.KeySchema)
+	index.Projection = cloneProjection(index.Projection)
+	return index
+}
+
+func cloneKeySchema(source []KeySchemaElement) []KeySchemaElement {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := make([]KeySchemaElement, len(source))
+	copy(cloned, source)
+	return cloned
+}
+
+func cloneProjection(projection Projection) Projection {
+	projection.NonKeyAttributes = cloneStrings(projection.NonKeyAttributes)
+	return projection
+}
+
+func copyAttributeDefinitions(source []AttributeDefinition) []any {
+	if len(source) == 0 {
+		return nil
+	}
+	copied := make([]any, len(source))
+	for i, definition := range source {
+		copied[i] = map[string]any{
+			"name": definition.Name,
+			"type": definition.Type,
+		}
+	}
+	return copied
+}
+
+func copySecondaryIndexes(source []SecondaryIndex) []any {
+	if len(source) == 0 {
+		return nil
+	}
+	copied := make([]any, len(source))
+	for i, index := range source {
+		copied[i] = map[string]any{
+			"name":       index.Name,
+			"key_schema": copyKeySchema(index.KeySchema),
+			"projection": map[string]any{
+				"type":               index.Projection.Type,
+				"non_key_attributes": cloneStrings(index.Projection.NonKeyAttributes),
+			},
+		}
+	}
+	return copied
+}
+
+func copyKeySchema(source []KeySchemaElement) []any {
+	if len(source) == 0 {
+		return nil
+	}
+	copied := make([]any, len(source))
+	for i, element := range source {
+		copied[i] = map[string]any{
+			"attribute_name": element.AttributeName,
+			"key_type":       element.KeyType,
+		}
+	}
+	return copied
+}
+
+func normalizeAttributeDefinitions(source []AttributeDefinition) []AttributeDefinition {
+	if len(source) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(source))
+	normalized := make([]AttributeDefinition, 0, len(source))
+	for _, definition := range source {
+		definition.Name = strings.TrimSpace(definition.Name)
+		definition.Type = strings.ToUpper(strings.TrimSpace(definition.Type))
+		if definition.Name == "" {
+			continue
+		}
+		if _, ok := seen[definition.Name]; ok {
+			continue
+		}
+		seen[definition.Name] = struct{}{}
+		normalized = append(normalized, definition)
+	}
+	return normalized
+}
+
+func normalizeSecondaryIndexes(source []SecondaryIndex) []SecondaryIndex {
+	if len(source) == 0 {
+		return nil
+	}
+	normalized := make([]SecondaryIndex, 0, len(source))
+	for _, index := range source {
+		index.Name = strings.TrimSpace(index.Name)
+		index.KeySchema = normalizeKeySchema(index.KeySchema)
+		index.Projection = normalizeProjection(index.Projection)
+		if index.Name == "" {
+			continue
+		}
+		normalized = append(normalized, index)
+	}
+	return normalized
+}
+
+func normalizeKeySchema(source []KeySchemaElement) []KeySchemaElement {
+	if len(source) == 0 {
+		return nil
+	}
+	normalized := make([]KeySchemaElement, 0, len(source))
+	seen := map[string]struct{}{}
+	for _, element := range source {
+		element.AttributeName = strings.TrimSpace(element.AttributeName)
+		element.KeyType = strings.ToUpper(strings.TrimSpace(element.KeyType))
+		if element.AttributeName == "" || element.KeyType == "" {
+			continue
+		}
+		key := element.KeyType + ":" + element.AttributeName
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, element)
+	}
+	return normalized
+}
+
+func normalizeProjection(projection Projection) Projection {
+	projection.Type = strings.ToUpper(strings.TrimSpace(projection.Type))
+	switch projection.Type {
+	case "", "ALL":
+		projection.Type = "ALL"
+		projection.NonKeyAttributes = nil
+	case "KEYS_ONLY":
+		projection.NonKeyAttributes = nil
+	case "INCLUDE":
+		projection.NonKeyAttributes = uniqueStrings(projection.NonKeyAttributes)
+	default:
+		projection.Type = "ALL"
+		projection.NonKeyAttributes = nil
+	}
+	return projection
+}
+
+func cloneStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make([]string, len(values))
+	copy(cloned, values)
+	return cloned
+}
+
+func uniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	return unique
 }

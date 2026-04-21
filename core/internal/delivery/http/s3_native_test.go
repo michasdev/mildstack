@@ -6,10 +6,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
+	s3application "github.com/michasdev/mildstack/core/internal/resources/s3/application"
 	s3domain "github.com/michasdev/mildstack/core/internal/resources/s3/domain"
 )
 
@@ -140,5 +142,105 @@ func TestS3NativeListBucketsUsesSharedAWSAccountID(t *testing.T) {
 	}
 	if got, want := payload.Owner.ID, awscontext.Default().AccountID; got != want {
 		t.Fatalf("unexpected owner id: got %q want %q", got, want)
+	}
+}
+
+func TestS3NativeGetObjectReturnsStoredMetadataHeaders(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	service := s3application.New()
+	if _, err := service.CreateBucket("metadata-bucket", "us-east-1"); err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+
+	engine := gin.New()
+	RegisterS3NativeRoutes(engine, service)
+
+	putRequest := httptest.NewRequest(http.MethodPut, "/metadata-bucket/notes.txt", strings.NewReader("hello"))
+	putRequest.Header.Set("Content-Type", "text/plain")
+	putRequest.Header.Set("X-Amz-Meta-Custom-Author", "bot")
+	putRecorder := httptest.NewRecorder()
+	engine.ServeHTTP(putRecorder, putRequest)
+
+	if got, want := putRecorder.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected put status: got %d want %d", got, want)
+	}
+
+	getRequest := httptest.NewRequest(http.MethodGet, "/metadata-bucket/notes.txt", nil)
+	getRecorder := httptest.NewRecorder()
+	engine.ServeHTTP(getRecorder, getRequest)
+
+	if got, want := getRecorder.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected get status: got %d want %d", got, want)
+	}
+	if got, want := getRecorder.Header().Get("x-amz-meta-custom-author"), "bot"; got != want {
+		t.Fatalf("unexpected metadata header: got %q want %q", got, want)
+	}
+	if got, want := getRecorder.Body.String(), "hello"; got != want {
+		t.Fatalf("unexpected body: got %q want %q", got, want)
+	}
+}
+
+func TestS3NativeListObjectsV2AndDeleteObjectsReturnAWSXML(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	service := s3application.New()
+	if _, err := service.CreateBucket("listing-bucket", "us-east-1"); err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+	for _, key := range []string{"listing/a.txt", "listing/b.txt", "listing/c.txt"} {
+		if _, err := service.PutObject("listing-bucket", key, strings.NewReader(key), "text/plain"); err != nil {
+			t.Fatalf("put object %q: %v", key, err)
+		}
+	}
+
+	engine := gin.New()
+	RegisterS3NativeRoutes(engine, service)
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/listing-bucket?list-type=2&prefix=listing/&max-keys=2", nil)
+	listRecorder := httptest.NewRecorder()
+	engine.ServeHTTP(listRecorder, listRequest)
+
+	if got, want := listRecorder.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected list status: got %d want %d", got, want)
+	}
+	var listPayload struct {
+		XMLName               xml.Name `xml:"ListBucketResult"`
+		KeyCount              int      `xml:"KeyCount"`
+		IsTruncated           bool     `xml:"IsTruncated"`
+		NextContinuationToken string   `xml:"NextContinuationToken"`
+	}
+	if err := xml.Unmarshal(listRecorder.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("decode list xml: %v", err)
+	}
+	if got, want := listPayload.KeyCount, 2; got != want {
+		t.Fatalf("unexpected key count: got %d want %d", got, want)
+	}
+	if !listPayload.IsTruncated {
+		t.Fatal("expected truncated list response")
+	}
+	if strings.TrimSpace(listPayload.NextContinuationToken) == "" {
+		t.Fatal("expected continuation token")
+	}
+
+	deleteRequest := httptest.NewRequest(http.MethodPost, "/listing-bucket?delete", strings.NewReader(`
+<Delete>
+  <Quiet>true</Quiet>
+  <Object><Key>listing/a.txt</Key></Object>
+  <Object><Key>listing/b.txt</Key></Object>
+</Delete>`))
+	deleteRecorder := httptest.NewRecorder()
+	engine.ServeHTTP(deleteRecorder, deleteRequest)
+
+	if got, want := deleteRecorder.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected delete status: got %d want %d", got, want)
+	}
+	if !strings.Contains(deleteRecorder.Body.String(), "<DeleteResult") {
+		t.Fatalf("expected delete result xml, got %q", deleteRecorder.Body.String())
+	}
+	if strings.Contains(deleteRecorder.Body.String(), "<Deleted>") {
+		t.Fatalf("expected quiet delete response without deleted entries, got %q", deleteRecorder.Body.String())
 	}
 }

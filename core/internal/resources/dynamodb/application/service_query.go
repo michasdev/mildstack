@@ -28,6 +28,13 @@ type queryPlan struct {
 	sortPredicate    sortPredicate
 }
 
+type queryTarget struct {
+	Table        domain.Table
+	Index        *domain.SecondaryIndex
+	PartitionKey string
+	SortKey      string
+}
+
 type sortPredicate struct {
 	kind   string
 	values []domain.AttributeValue
@@ -40,7 +47,57 @@ type filterClause struct {
 	values []domain.AttributeValue
 }
 
-func buildQueryPlan(table domain.Table, keyConditionExpression string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]domain.AttributeValue) (queryPlan, error) {
+func resolveQueryTarget(table domain.Table, indexName string) (queryTarget, error) {
+	target := queryTarget{
+		Table:        table,
+		PartitionKey: table.PartitionKey,
+		SortKey:      table.SortKey,
+	}
+
+	indexName = strings.TrimSpace(indexName)
+	if indexName == "" {
+		return target, nil
+	}
+
+	if index, ok := findSecondaryIndex(table, indexName); ok {
+		target.Index = &index
+		hash, rangeKey := indexKeyNames(index)
+		target.PartitionKey = hash
+		target.SortKey = rangeKey
+		return target, nil
+	}
+
+	return queryTarget{}, fmt.Errorf("dynamodb: index %q not found on table %q", indexName, table.Name)
+}
+
+func findSecondaryIndex(table domain.Table, name string) (domain.SecondaryIndex, bool) {
+	for _, index := range table.GlobalSecondaryIndexes {
+		if strings.EqualFold(strings.TrimSpace(index.Name), name) {
+			return index, true
+		}
+	}
+	for _, index := range table.LocalSecondaryIndexes {
+		if strings.EqualFold(strings.TrimSpace(index.Name), name) {
+			return index, true
+		}
+	}
+	return domain.SecondaryIndex{}, false
+}
+
+func indexKeyNames(index domain.SecondaryIndex) (string, string) {
+	var partitionKey, sortKey string
+	for _, element := range index.KeySchema {
+		switch strings.ToUpper(strings.TrimSpace(element.KeyType)) {
+		case "HASH":
+			partitionKey = strings.TrimSpace(element.AttributeName)
+		case "RANGE":
+			sortKey = strings.TrimSpace(element.AttributeName)
+		}
+	}
+	return partitionKey, sortKey
+}
+
+func buildQueryPlan(target queryTarget, keyConditionExpression string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]domain.AttributeValue) (queryPlan, error) {
 	expression := strings.TrimSpace(keyConditionExpression)
 	if expression == "" {
 		return queryPlan{}, fmt.Errorf("dynamodb: key condition expression is required")
@@ -58,7 +115,7 @@ func buildQueryPlan(table domain.Table, keyConditionExpression string, expressio
 	if err != nil {
 		return queryPlan{}, err
 	}
-	if partitionKeyName != table.PartitionKey {
+	if partitionKeyName != target.PartitionKey {
 		return queryPlan{}, fmt.Errorf("dynamodb: unsupported key condition partition key %q", partitionKeyName)
 	}
 
@@ -76,15 +133,15 @@ func buildQueryPlan(table domain.Table, keyConditionExpression string, expressio
 	if sortExpression == "" {
 		return plan, nil
 	}
-	if table.SortKey == "" {
-		return queryPlan{}, fmt.Errorf("dynamodb: sort key conditions are not supported for table %q", table.Name)
+	if target.SortKey == "" {
+		return queryPlan{}, fmt.Errorf("dynamodb: sort key conditions are not supported for table %q", target.Table.Name)
 	}
 
 	sortPath, predicate, err := parseSortPredicate(sortExpression, expressionAttributeNames, expressionAttributeValues)
 	if err != nil {
 		return queryPlan{}, err
 	}
-	if sortPath != table.SortKey {
+	if sortPath != target.SortKey {
 		return queryPlan{}, fmt.Errorf("dynamodb: unsupported key condition sort key %q", sortPath)
 	}
 
@@ -140,7 +197,7 @@ func parseSortPredicate(expression string, expressionAttributeNames map[string]s
 	return "", sortPredicate{}, fmt.Errorf("dynamodb: unsupported sort key condition %q", expression)
 }
 
-func (p queryPlan) matches(item domain.Item, table domain.Table) (bool, error) {
+func (p queryPlan) matches(item domain.Item, target queryTarget) (bool, error) {
 	partitionValue, ok := item.Attributes[p.partitionKeyName]
 	if !ok || !attributeValueEquals(partitionValue, p.partitionValue) {
 		return false, nil
@@ -202,6 +259,102 @@ func buildExpressionFilter(filterExpression string, expressionAttributeNames map
 		}
 		return true, nil
 	}, nil
+}
+
+func buildProjection(projectionExpression string, expressionAttributeNames map[string]string, target queryTarget) (func(domain.Item) (domain.Item, error), error) {
+	requested := strings.TrimSpace(projectionExpression)
+	allowed := projectionAllowedAttributes(target)
+	if requested == "" {
+		if len(allowed) == 0 {
+			return func(item domain.Item) (domain.Item, error) {
+				return cloneProjectedItem(item, nil), nil
+			}, nil
+		}
+		keys := sortedSetKeys(allowed)
+		return func(item domain.Item) (domain.Item, error) {
+			return cloneProjectedItem(item, keys), nil
+		}, nil
+	}
+
+	paths := strings.Split(requested, ",")
+	keys := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, raw := range paths {
+		path, err := resolveExpressionPath(raw, expressionAttributeNames)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		if len(allowed) > 0 {
+			if _, ok := allowed[path]; !ok {
+				return nil, fmt.Errorf("dynamodb: projection path %q is not available for this index", path)
+			}
+		}
+		seen[path] = struct{}{}
+		keys = append(keys, path)
+	}
+
+	return func(item domain.Item) (domain.Item, error) {
+		return cloneProjectedItem(item, keys), nil
+	}, nil
+}
+
+func projectionAllowedAttributes(target queryTarget) map[string]struct{} {
+	if target.Index == nil {
+		return nil
+	}
+
+	projection := strings.ToUpper(strings.TrimSpace(target.Index.Projection.Type))
+	if projection == "" {
+		projection = "ALL"
+	}
+	if projection == "ALL" {
+		return nil
+	}
+
+	allowed := make(map[string]struct{})
+	for _, name := range targetKeyNames(target) {
+		allowed[name] = struct{}{}
+	}
+	switch projection {
+	case "KEYS_ONLY":
+		return allowed
+	case "INCLUDE":
+		for _, name := range target.Index.Projection.NonKeyAttributes {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			allowed[name] = struct{}{}
+		}
+		return allowed
+	default:
+		return nil
+	}
+}
+
+func cloneProjectedItem(item domain.Item, names []string) domain.Item {
+	if len(names) == 0 {
+		return domain.Item{
+			Table:      item.Table,
+			Key:        item.Key,
+			Attributes: cloneAttributeDocument(item.Attributes),
+		}
+	}
+
+	attributes := make(map[string]domain.AttributeValue, len(names))
+	for _, name := range names {
+		if value, ok := item.Attributes[name]; ok {
+			attributes[name] = value.Clone()
+		}
+	}
+	return domain.Item{
+		Table:      item.Table,
+		Key:        item.Key,
+		Attributes: attributes,
+	}
 }
 
 func parseFilterClauses(expression string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]domain.AttributeValue) ([]filterClause, error) {
@@ -366,7 +519,7 @@ func (c filterClause) matches(item domain.Item) (bool, error) {
 	}
 }
 
-func pageReadItems(items []domain.Item, table domain.Table, startIndex int, limit *int, filter func(domain.Item) (bool, error)) (domain.ReadPage, error) {
+func pageReadItems(items []domain.Item, target queryTarget, startIndex int, limit *int, filter func(domain.Item) (bool, error), project func(domain.Item) (domain.Item, error)) (domain.ReadPage, error) {
 	if limit != nil && *limit <= 0 {
 		return domain.ReadPage{}, fmt.Errorf("dynamodb: limit must be greater than zero")
 	}
@@ -396,13 +549,20 @@ func pageReadItems(items []domain.Item, table domain.Table, startIndex int, limi
 			}
 		}
 		if matches {
-			page.Items = append(page.Items, items[i])
+			projected := items[i]
+			if project != nil {
+				projected, err = project(items[i])
+				if err != nil {
+					return domain.ReadPage{}, err
+				}
+			}
+			page.Items = append(page.Items, projected)
 		}
 	}
 	page.Count = len(page.Items)
 
 	if end < len(items) {
-		cursor, err := keyAttributesForItem(table, items[end-1])
+		cursor, err := keyAttributesForItem(target, items[end-1])
 		if err != nil {
 			return domain.ReadPage{}, err
 		}
@@ -412,8 +572,8 @@ func pageReadItems(items []domain.Item, table domain.Table, startIndex int, limi
 	return page, nil
 }
 
-func locateExclusiveStartKey(items []domain.Item, table domain.Table, exclusiveStartKey map[string]domain.AttributeValue) (int, error) {
-	key, err := normalizeKeyAttributes(table, exclusiveStartKey)
+func locateExclusiveStartKey(items []domain.Item, target queryTarget, exclusiveStartKey map[string]domain.AttributeValue) (int, error) {
+	key, err := normalizeKeyAttributes(target, exclusiveStartKey)
 	if err != nil {
 		return 0, err
 	}
@@ -422,7 +582,7 @@ func locateExclusiveStartKey(items []domain.Item, table domain.Table, exclusiveS
 	}
 
 	for i, item := range items {
-		itemKey, err := keyAttributesForItem(table, item)
+		itemKey, err := keyAttributesForItem(target, item)
 		if err != nil {
 			return 0, err
 		}
@@ -434,7 +594,7 @@ func locateExclusiveStartKey(items []domain.Item, table domain.Table, exclusiveS
 	return 0, fmt.Errorf("dynamodb: exclusive start key not found")
 }
 
-func orderQueryItems(items []domain.Item, table domain.Table, scanIndexForward *bool) []domain.Item {
+func orderQueryItems(items []domain.Item, target queryTarget, scanIndexForward *bool) []domain.Item {
 	ordered := make([]domain.Item, len(items))
 	copy(ordered, items)
 
@@ -444,7 +604,7 @@ func orderQueryItems(items []domain.Item, table domain.Table, scanIndexForward *
 	}
 
 	sort.SliceStable(ordered, func(i, j int) bool {
-		cmp := compareQueryItems(ordered[i], ordered[j], table)
+		cmp := compareQueryItems(ordered[i], ordered[j], target)
 		if forward {
 			return cmp < 0
 		}
@@ -454,12 +614,12 @@ func orderQueryItems(items []domain.Item, table domain.Table, scanIndexForward *
 	return ordered
 }
 
-func compareQueryItems(left, right domain.Item, table domain.Table) int {
-	if table.SortKey != "" {
-		leftSort, leftOK := left.Attributes[table.SortKey]
-		rightSort, rightOK := right.Attributes[table.SortKey]
+func compareQueryItems(left, right domain.Item, target queryTarget) int {
+	for _, name := range orderingKeyNames(target) {
+		leftValue, leftOK := left.Attributes[name]
+		rightValue, rightOK := right.Attributes[name]
 		if leftOK && rightOK {
-			if cmp := compareAttributeValues(leftSort, rightSort); cmp != 0 {
+			if cmp := compareAttributeValues(leftValue, rightValue); cmp != 0 {
 				return cmp
 			}
 		}
@@ -480,39 +640,29 @@ func compareQueryItems(left, right domain.Item, table domain.Table) int {
 	return 0
 }
 
-func keyAttributesForItem(table domain.Table, item domain.Item) (map[string]domain.AttributeValue, error) {
-	if table.PartitionKey == "" {
-		return nil, fmt.Errorf("dynamodb: table %q has no partition key", table.Name)
+func keyAttributesForItem(target queryTarget, item domain.Item) (map[string]domain.AttributeValue, error) {
+	names := targetKeyNames(target)
+	if len(names) == 0 {
+		return nil, fmt.Errorf("dynamodb: table %q has no key attributes", target.Table.Name)
 	}
 
-	partitionValue, ok := item.Attributes[table.PartitionKey]
-	if !ok {
-		return nil, fmt.Errorf("dynamodb: item %s/%s is missing partition key %q", item.Table, item.Key, table.PartitionKey)
-	}
-
-	attributes := map[string]domain.AttributeValue{
-		table.PartitionKey: partitionValue.Clone(),
-	}
-	if table.SortKey != "" {
-		sortValue, ok := item.Attributes[table.SortKey]
+	attributes := make(map[string]domain.AttributeValue, len(names))
+	for _, name := range names {
+		value, ok := item.Attributes[name]
 		if !ok {
-			return nil, fmt.Errorf("dynamodb: item %s/%s is missing sort key %q", item.Table, item.Key, table.SortKey)
+			return nil, fmt.Errorf("dynamodb: item %s/%s is missing key attribute %q", item.Table, item.Key, name)
 		}
-		attributes[table.SortKey] = sortValue.Clone()
+		attributes[name] = value.Clone()
 	}
 	return attributes, nil
 }
 
-func normalizeKeyAttributes(table domain.Table, attributes map[string]domain.AttributeValue) (map[string]domain.AttributeValue, error) {
+func normalizeKeyAttributes(target queryTarget, attributes map[string]domain.AttributeValue) (map[string]domain.AttributeValue, error) {
 	if len(attributes) == 0 {
 		return nil, nil
 	}
 
-	expected := []string{table.PartitionKey}
-	if table.SortKey != "" {
-		expected = append(expected, table.SortKey)
-	}
-
+	expected := targetKeyNames(target)
 	if len(attributes) != len(expected) {
 		return nil, fmt.Errorf("dynamodb: unsupported key attributes %q", strings.Join(sortedMapKeys(attributes), ", "))
 	}
@@ -525,14 +675,58 @@ func normalizeKeyAttributes(table domain.Table, attributes map[string]domain.Att
 		}
 		normalized[name] = value.Clone()
 	}
+	return normalized, nil
+}
 
-	for name := range attributes {
-		if name != table.PartitionKey && (table.SortKey == "" || name != table.SortKey) {
-			return nil, fmt.Errorf("dynamodb: unsupported key attribute %q", name)
+func targetKeyNames(target queryTarget) []string {
+	names := []string{target.PartitionKey}
+	if target.SortKey != "" {
+		names = append(names, target.SortKey)
+	}
+	if target.Index != nil {
+		names = append(names, target.Table.PartitionKey)
+		if target.Table.SortKey != "" {
+			names = append(names, target.Table.SortKey)
 		}
 	}
+	return uniqueStrings(names)
+}
 
-	return normalized, nil
+func orderingKeyNames(target queryTarget) []string {
+	names := targetKeyNames(target)
+	return names
+}
+
+func uniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	return unique
+}
+
+func sortedSetKeys(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(values))
+	for value := range values {
+		keys = append(keys, value)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func attributeDocumentsEqual(left, right map[string]domain.AttributeValue) bool {

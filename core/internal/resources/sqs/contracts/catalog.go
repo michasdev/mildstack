@@ -13,16 +13,17 @@ type ActionSpec struct {
 	Version          string
 	ReturnsQueueURL  bool
 	UsesQueueContext bool
+	MessageSurface   bool
 }
 
 var catalog = []ActionSpec{
 	{Action: "AddPermission", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
 	{Action: "CancelMessageMoveTask", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
-	{Action: "ChangeMessageVisibility", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
-	{Action: "ChangeMessageVisibilityBatch", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
+	{Action: "ChangeMessageVisibility", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true, MessageSurface: true},
+	{Action: "ChangeMessageVisibilityBatch", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true, MessageSurface: true},
 	{Action: "CreateQueue", Scope: ScopeRoot, Version: "2012-11-05", ReturnsQueueURL: true},
-	{Action: "DeleteMessage", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
-	{Action: "DeleteMessageBatch", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
+	{Action: "DeleteMessage", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true, MessageSurface: true},
+	{Action: "DeleteMessageBatch", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true, MessageSurface: true},
 	{Action: "DeleteQueue", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
 	{Action: "GetQueueAttributes", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
 	{Action: "GetQueueUrl", Scope: ScopeRoot, Version: "2012-11-05", ReturnsQueueURL: true},
@@ -31,10 +32,10 @@ var catalog = []ActionSpec{
 	{Action: "ListQueues", Scope: ScopeRoot, Version: "2012-11-05", ReturnsQueueURL: true},
 	{Action: "ListQueueTags", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
 	{Action: "PurgeQueue", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
-	{Action: "ReceiveMessage", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
+	{Action: "ReceiveMessage", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true, MessageSurface: true},
 	{Action: "RemovePermission", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
-	{Action: "SendMessage", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
-	{Action: "SendMessageBatch", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
+	{Action: "SendMessage", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true, MessageSurface: true},
+	{Action: "SendMessageBatch", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true, MessageSurface: true},
 	{Action: "SetQueueAttributes", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
 	{Action: "StartMessageMoveTask", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
 	{Action: "TagQueue", Scope: ScopeQueue, Version: "2012-11-05", UsesQueueContext: true},
