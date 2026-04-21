@@ -4,7 +4,14 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 )
+
+func defaultSQSQueueURL(queueName string) string {
+	aws := awscontext.Default()
+	return strings.TrimRight(aws.Endpoint, "/") + "/" + aws.AccountID + "/" + queueName
+}
 
 func TestMessageContractsPreserveAWSFieldNames(t *testing.T) {
 	t.Helper()
@@ -26,7 +33,7 @@ func TestMessageContractsPreserveAWSFieldNames(t *testing.T) {
 				StringValue: "Root=1-12345678-1234567890abcdef12345678",
 			},
 		},
-		QueueUrl: "https://sqs.us-east-1.amazonaws.com/123456789012/orders",
+		QueueUrl: defaultSQSQueueURL("orders"),
 	}
 
 	data, err := json.Marshal(request)
@@ -40,7 +47,7 @@ func TestMessageContractsPreserveAWSFieldNames(t *testing.T) {
 		`"MessageDeduplicationId":"dedupe-1"`,
 		`"MessageGroupId":"group-1"`,
 		`"MessageSystemAttributes"`,
-		`"QueueUrl":"https://sqs.us-east-1.amazonaws.com/123456789012/orders"`,
+		`"QueueUrl":"` + defaultSQSQueueURL("orders") + `"`,
 	})
 
 	batch := SendMessageBatchRequest{
@@ -60,7 +67,7 @@ func TestMessageContractsPreserveAWSFieldNames(t *testing.T) {
 		`"Entries"`,
 		`"Id":"entry-1"`,
 		`"MessageBody":"payload"`,
-		`"QueueUrl":"https://sqs.us-east-1.amazonaws.com/123456789012/orders"`,
+		`"QueueUrl":"` + defaultSQSQueueURL("orders") + `"`,
 	})
 
 	sendResult := SendMessageResult{

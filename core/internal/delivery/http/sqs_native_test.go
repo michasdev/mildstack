@@ -19,10 +19,22 @@ import (
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	"github.com/michasdev/mildstack/core/internal/composition"
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	sqsapplication "github.com/michasdev/mildstack/core/internal/resources/sqs/application"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/contracts"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/domain"
 )
+
+var defaultSQSAccountID = awscontext.Default().AccountID
+
+func defaultSQSQueueURL(queueName string) string {
+	aws := awscontext.Default()
+	return strings.TrimRight(aws.Endpoint, "/") + "/" + aws.AccountID + "/" + queueName
+}
+
+func defaultSQSQueueARN(queueName string) string {
+	return awscontext.Default().ServiceARN("sqs", queueName)
+}
 
 func TestSQSNativeMiddlewareInterceptsQueryRequestsAndLeavesRuntimeRoutesUntouched(t *testing.T) {
 	t.Helper()
@@ -59,7 +71,7 @@ func TestSQSNativeMiddlewareInterceptsQueryRequestsAndLeavesRuntimeRoutesUntouch
 		t.Fatalf("create queue: %v", err)
 	}
 	queueRecorder := httptest.NewRecorder()
-	queueRequest := httptest.NewRequest(http.MethodPost, "/123456789012/orders/", strings.NewReader("Action=SendMessage&Version=2012-11-05&MessageBody=hello"))
+	queueRequest := httptest.NewRequest(http.MethodPost, "/"+defaultSQSAccountID+"/orders/", strings.NewReader("Action=SendMessage&Version=2012-11-05&MessageBody=hello"))
 	queueRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	router.Engine().ServeHTTP(queueRecorder, queueRequest)
 	if got, want := queueRecorder.Code, http.StatusOK; got != want {
@@ -70,7 +82,7 @@ func TestSQSNativeMiddlewareInterceptsQueryRequestsAndLeavesRuntimeRoutesUntouch
 	}
 
 	mismatchRecorder := httptest.NewRecorder()
-	mismatchRequest := httptest.NewRequest(http.MethodGet, "/123456789012/orders/?Action=ListQueues&Version=2012-11-05", nil)
+	mismatchRequest := httptest.NewRequest(http.MethodGet, "/"+defaultSQSAccountID+"/orders/?Action=ListQueues&Version=2012-11-05", nil)
 	router.Engine().ServeHTTP(mismatchRecorder, mismatchRequest)
 	if got, want := mismatchRecorder.Code, http.StatusBadRequest; got != want {
 		t.Fatalf("unexpected mismatch status: got %d want %d", got, want)
@@ -251,13 +263,13 @@ func TestSQSSDKSmokeCoversGovernanceAndRedriveActions(t *testing.T) {
 			"env": "dev",
 		},
 		listDeadLetterSourceQueuesResult: []string{"orders-source"},
-		startMessageMoveTaskResult:       "arn:aws:sqs:us-east-1:123456789012:orders-dlq|task-1",
+		startMessageMoveTaskResult:       defaultSQSQueueARN("orders-dlq") + "|task-1",
 		cancelMessageMoveTaskResult:      7,
 		listMessageMoveTasksResult: []domain.MessageMoveTask{
 			{
-				TaskHandle:                       "arn:aws:sqs:us-east-1:123456789012:orders-dlq|task-1",
-				SourceArn:                        "arn:aws:sqs:us-east-1:123456789012:orders-dlq",
-				DestinationArn:                   "arn:aws:sqs:us-east-1:123456789012:orders",
+				TaskHandle:                       defaultSQSQueueARN("orders-dlq") + "|task-1",
+				SourceArn:                        defaultSQSQueueARN("orders-dlq"),
+				DestinationArn:                   defaultSQSQueueARN("orders"),
 				MaxNumberOfMessagesPerSecond:     12,
 				ApproximateNumberOfMessagesMoved: 7,
 				Status:                           "RUNNING",
@@ -315,7 +327,7 @@ func TestSQSSDKSmokeCoversGovernanceAndRedriveActions(t *testing.T) {
 	if _, err := client.AddPermission(ctx, &sqs.AddPermissionInput{
 		QueueUrl:      aws.String(queueURL),
 		Label:         aws.String("label-a"),
-		AWSAccountIds: []string{"123456789012"},
+		AWSAccountIds: []string{defaultSQSAccountID},
 		Actions:       []string{"SendMessage"},
 	}); err != nil {
 		t.Fatalf("add permission: %v", err)
@@ -323,7 +335,7 @@ func TestSQSSDKSmokeCoversGovernanceAndRedriveActions(t *testing.T) {
 	if got, want := service.addPermissionLabel, "label-a"; got != want {
 		t.Fatalf("unexpected add permission label: got %q want %q", got, want)
 	}
-	if got, want := service.addPermissionAWSAccountIDs[0], "123456789012"; got != want {
+	if got, want := service.addPermissionAWSAccountIDs[0], defaultSQSAccountID; got != want {
 		t.Fatalf("unexpected add permission account: got %q want %q", got, want)
 	}
 
@@ -385,7 +397,7 @@ func TestSQSSDKSmokeCoversGovernanceAndRedriveActions(t *testing.T) {
 	if got, want := service.startMessageMoveTaskMaxPerSecond, 12; got != want {
 		t.Fatalf("unexpected start rate: got %d want %d", got, want)
 	}
-	if got, want := aws.ToString(startOutput.TaskHandle), "arn:aws:sqs:us-east-1:123456789012:orders-dlq|task-1"; got != want {
+	if got, want := aws.ToString(startOutput.TaskHandle), defaultSQSQueueARN("orders-dlq")+"|task-1"; got != want {
 		t.Fatalf("unexpected task handle: got %q want %q", got, want)
 	}
 
@@ -395,7 +407,7 @@ func TestSQSSDKSmokeCoversGovernanceAndRedriveActions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cancel message move task: %v", err)
 	}
-	if got, want := service.cancelMessageMoveTaskTaskHandle, "arn:aws:sqs:us-east-1:123456789012:orders-dlq|task-1"; got != want {
+	if got, want := service.cancelMessageMoveTaskTaskHandle, defaultSQSQueueARN("orders-dlq")+"|task-1"; got != want {
 		t.Fatalf("unexpected cancel task handle: got %q want %q", got, want)
 	}
 	if got, want := cancelOutput.ApproximateNumberOfMessagesMoved, int64(7); got != want {
@@ -415,7 +427,7 @@ func TestSQSSDKSmokeCoversGovernanceAndRedriveActions(t *testing.T) {
 	if got, want := len(tasksOutput.Results), 1; got != want {
 		t.Fatalf("unexpected task result count: got %d want %d", got, want)
 	}
-	if got, want := aws.ToString(tasksOutput.Results[0].TaskHandle), "arn:aws:sqs:us-east-1:123456789012:orders-dlq|task-1"; got != want {
+	if got, want := aws.ToString(tasksOutput.Results[0].TaskHandle), defaultSQSQueueARN("orders-dlq")+"|task-1"; got != want {
 		t.Fatalf("unexpected task result handle: got %q want %q", got, want)
 	}
 	if got, want := aws.ToString(tasksOutput.Results[0].DestinationArn), service.QueueARN("orders"); got != want {
@@ -481,7 +493,7 @@ func TestSQSNativeMiddlewareRoutesLifecycleActionThroughService(t *testing.T) {
 	RegisterSQSNativeRoutes(router, service)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/?Action=ListQueues&Version=2012-11-05&QueueNamePrefix=ord&MaxResults=2&NextToken=token-1&QueueOwnerAWSAccountId=123456789012", nil)
+	request := httptest.NewRequest(http.MethodGet, "/?Action=ListQueues&Version=2012-11-05&QueueNamePrefix=ord&MaxResults=2&NextToken=token-1&QueueOwnerAWSAccountId="+defaultSQSAccountID, nil)
 	router.ServeHTTP(recorder, request)
 
 	if !service.listQueuesCalled {
@@ -546,11 +558,11 @@ func (s *stubSQSNativeService) Metadata() orchestrator.Metadata {
 }
 
 func (s *stubSQSNativeService) QueueURL(queueName string) string {
-	return "https://sqs.us-east-1.amazonaws.com/123456789012/" + queueName
+	return defaultSQSQueueURL(queueName)
 }
 
 func (s *stubSQSNativeService) QueueARN(queueName string) string {
-	return "arn:aws:sqs:us-east-1:123456789012:" + queueName
+	return defaultSQSQueueARN(queueName)
 }
 
 func (s *stubSQSNativeService) CreateQueue(queueName string, attributes map[string]string) (domain.Queue, error) {
