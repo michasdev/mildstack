@@ -21,7 +21,7 @@ import (
 const (
 	sqliteFileName   = "state.db"
 	schemaVersionKey = "schema_version"
-	schemaVersion    = "3"
+	schemaVersion    = "4"
 )
 
 type SQLiteRepository struct {
@@ -168,6 +168,13 @@ func (r *SQLiteRepository) bootstrap() error {
 			queue_name TEXT NOT NULL,
 			message_id TEXT NOT NULL,
 			detail_json TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS sqs_queue_governance (
+			queue_name TEXT PRIMARY KEY,
+			tags_json TEXT NOT NULL,
+			permissions_json TEXT NOT NULL,
+			move_tasks_json TEXT NOT NULL,
+			FOREIGN KEY (queue_name) REFERENCES sqs_queues(name) ON DELETE CASCADE
 		)`,
 	}
 
@@ -416,6 +423,67 @@ func (r *SQLiteRepository) loadLocked() (domain.State, error) {
 		return domain.State{}, fmt.Errorf("sqs: iterate recovery metadata: %w", err)
 	}
 
+	governanceRows, err := r.db.QueryContext(ctx, `
+		SELECT queue_name, tags_json, permissions_json, move_tasks_json
+		FROM sqs_queue_governance
+		ORDER BY queue_name
+	`)
+	if err != nil {
+		return domain.State{}, fmt.Errorf("sqs: query governance: %w", err)
+	}
+	defer governanceRows.Close()
+
+	for governanceRows.Next() {
+		var (
+			queueName   string
+			tagsJSON    string
+			permissions string
+			moveTasks   string
+		)
+		if err := governanceRows.Scan(&queueName, &tagsJSON, &permissions, &moveTasks); err != nil {
+			return domain.State{}, fmt.Errorf("sqs: scan governance: %w", err)
+		}
+		if state.QueueTags == nil {
+			state.QueueTags = map[string]map[string]string{}
+		}
+		if state.QueuePermissions == nil {
+			state.QueuePermissions = map[string]map[string]domain.QueuePermission{}
+		}
+		if state.MoveTasks == nil {
+			state.MoveTasks = map[string]map[string]domain.MessageMoveTask{}
+		}
+		tags, err := decodeStringMap(tagsJSON)
+		if err != nil {
+			return domain.State{}, fmt.Errorf("sqs: decode governance tags: %w", err)
+		}
+		state.QueueTags[queueName] = tags
+
+		var permissionsList []domain.QueuePermission
+		if err := json.Unmarshal([]byte(permissions), &permissionsList); err != nil {
+			return domain.State{}, fmt.Errorf("sqs: decode governance permissions: %w", err)
+		}
+		if len(permissionsList) > 0 {
+			state.QueuePermissions[queueName] = make(map[string]domain.QueuePermission, len(permissionsList))
+			for _, permission := range permissionsList {
+				state.QueuePermissions[queueName][permission.Label] = permission
+			}
+		}
+
+		var moveTaskList []domain.MessageMoveTask
+		if err := json.Unmarshal([]byte(moveTasks), &moveTaskList); err != nil {
+			return domain.State{}, fmt.Errorf("sqs: decode governance move tasks: %w", err)
+		}
+		if len(moveTaskList) > 0 {
+			state.MoveTasks[queueName] = make(map[string]domain.MessageMoveTask, len(moveTaskList))
+			for _, task := range moveTaskList {
+				state.MoveTasks[queueName][task.TaskHandle] = task
+			}
+		}
+	}
+	if err := governanceRows.Err(); err != nil {
+		return domain.State{}, fmt.Errorf("sqs: iterate governance: %w", err)
+	}
+
 	return state, nil
 }
 
@@ -432,6 +500,10 @@ func (r *SQLiteRepository) saveLocked(state domain.State) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sqs_recovery_metadata`); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("sqs: clear recovery metadata: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sqs_queue_governance`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: clear governance: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sqs_messages`); err != nil {
 		_ = tx.Rollback()
@@ -478,6 +550,40 @@ func (r *SQLiteRepository) saveLocked(state domain.State) error {
 		); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("sqs: insert queue %q: %w", queue.Name, err)
+		}
+	}
+
+	governanceQueueNames := collectGovernanceQueueNames(normalized)
+	governanceStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO sqs_queue_governance (
+			queue_name, tags_json, permissions_json, move_tasks_json
+		) VALUES (?, ?, ?, ?)
+	`)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqs: prepare governance insert: %w", err)
+	}
+	defer governanceStmt.Close()
+
+	for _, queueName := range governanceQueueNames {
+		tags, err := encodeStringMap(normalized.QueueTags[queueName])
+		if err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("sqs: encode governance tags: %w", err)
+		}
+		permissionsJSON, err := json.Marshal(govPermissionSlice(normalized.QueuePermissions[queueName]))
+		if err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("sqs: encode governance permissions: %w", err)
+		}
+		moveTasksJSON, err := json.Marshal(govMoveTaskSlice(normalized.MoveTasks[queueName]))
+		if err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("sqs: encode governance move tasks: %w", err)
+		}
+		if _, err := governanceStmt.ExecContext(ctx, queueName, tags, string(permissionsJSON), string(moveTasksJSON)); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("sqs: insert governance %q: %w", queueName, err)
 		}
 	}
 
@@ -591,6 +697,57 @@ func (r *SQLiteRepository) saveLocked(state domain.State) error {
 	}
 
 	return nil
+}
+
+func collectGovernanceQueueNames(state domain.State) []string {
+	names := make(map[string]struct{})
+	for name := range state.QueueTags {
+		names[name] = struct{}{}
+	}
+	for name := range state.QueuePermissions {
+		names[name] = struct{}{}
+	}
+	for name := range state.MoveTasks {
+		names[name] = struct{}{}
+	}
+	ordered := make([]string, 0, len(names))
+	for name := range names {
+		ordered = append(ordered, name)
+	}
+	sort.Strings(ordered)
+	return ordered
+}
+
+func govPermissionSlice(values map[string]domain.QueuePermission) []domain.QueuePermission {
+	if len(values) == 0 {
+		return []domain.QueuePermission{}
+	}
+	labels := make([]string, 0, len(values))
+	for label := range values {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	result := make([]domain.QueuePermission, 0, len(labels))
+	for _, label := range labels {
+		result = append(result, values[label])
+	}
+	return result
+}
+
+func govMoveTaskSlice(values map[string]domain.MessageMoveTask) []domain.MessageMoveTask {
+	if len(values) == 0 {
+		return []domain.MessageMoveTask{}
+	}
+	handles := make([]string, 0, len(values))
+	for handle := range values {
+		handles = append(handles, handle)
+	}
+	sort.Strings(handles)
+	result := make([]domain.MessageMoveTask, 0, len(handles))
+	for _, handle := range handles {
+		result = append(result, values[handle])
+	}
+	return result
 }
 
 func encodeStringMap(values map[string]string) (string, error) {
