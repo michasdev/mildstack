@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -171,6 +172,7 @@ func (s *Service) CreateQueue(queueName string, attributes map[string]string) (d
 	if normalizedAttributes == nil {
 		normalizedAttributes = map[string]string{}
 	}
+	recovery := queueRecoveryFromAttributes(normalizedAttributes)
 
 	if index, queue, ok := s.queueRecordByNameLocked(queueName); ok {
 		if queue.DeletedAt.IsZero() {
@@ -185,6 +187,7 @@ func (s *Service) CreateQueue(queueName string, attributes map[string]string) (d
 
 		queue.URL = s.QueueURL(queueName)
 		queue.Attributes = normalizedAttributes
+		queue.Recovery = recovery
 		queue.OrderingHint = orderingHintFromAttributes(normalizedAttributes, queue.OrderingHint)
 		queue.CreatedAt = now
 		queue.UpdatedAt = now
@@ -201,6 +204,7 @@ func (s *Service) CreateQueue(queueName string, attributes map[string]string) (d
 		Name:         queueName,
 		URL:          s.QueueURL(queueName),
 		Attributes:   normalizedAttributes,
+		Recovery:     recovery,
 		OrderingHint: orderingHintFromAttributes(normalizedAttributes, ""),
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -396,6 +400,7 @@ func (s *Service) SetQueueAttributes(queueName string, attributes map[string]str
 	}
 
 	queue.Attributes = normalizedAttributes
+	queue.Recovery = queueRecoveryFromAttributes(normalizedAttributes)
 	queue.OrderingHint = orderingHintFromAttributes(normalizedAttributes, queue.OrderingHint)
 	queue.UpdatedAt = s.clock.Now()
 	s.state.Queues[index] = queue
@@ -410,6 +415,306 @@ func (s *Service) SetQueueAttributes(queueName string, attributes map[string]str
 		QueueARN:   queueARNForAccount(queueName, ""),
 		Attributes: cloneMap(normalizedAttributes),
 	}, nil
+}
+
+func (s *Service) TagQueue(queueName string, tags map[string]string) error {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return fmt.Errorf("sqs: queue name is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	queue, ok := s.activeQueueByNameLocked(queueName)
+	if !ok {
+		return errQueueNotFound
+	}
+
+	if s.state.QueueTags == nil {
+		s.state.QueueTags = map[string]map[string]string{}
+	}
+	current := cloneMap(s.state.QueueTags[queueName])
+	if current == nil {
+		current = map[string]string{}
+	}
+	for key, value := range tags {
+		key = trimName(key)
+		if key == "" {
+			continue
+		}
+		current[key] = value
+	}
+	s.state.QueueTags[queue.Name] = current
+	queue.UpdatedAt = s.clock.Now()
+	if index, _, ok := s.queueRecordByNameLocked(queueName); ok {
+		s.state.Queues[index] = queue
+	}
+	return s.commitStateLocked()
+}
+
+func (s *Service) UntagQueue(queueName string, tagKeys []string) error {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return fmt.Errorf("sqs: queue name is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	queue, ok := s.activeQueueByNameLocked(queueName)
+	if !ok {
+		return errQueueNotFound
+	}
+
+	current := cloneMap(s.state.QueueTags[queueName])
+	if current == nil {
+		current = map[string]string{}
+	}
+	for _, tagKey := range tagKeys {
+		tagKey = trimName(tagKey)
+		if tagKey == "" {
+			continue
+		}
+		delete(current, tagKey)
+	}
+	s.state.QueueTags[queue.Name] = current
+	queue.UpdatedAt = s.clock.Now()
+	if index, _, ok := s.queueRecordByNameLocked(queueName); ok {
+		s.state.Queues[index] = queue
+	}
+	return s.commitStateLocked()
+}
+
+func (s *Service) AddPermission(queueName, label string, awsAccountIDs, actions []string) error {
+	queueName = trimName(queueName)
+	label = trimName(label)
+	if queueName == "" {
+		return fmt.Errorf("sqs: queue name is required")
+	}
+	if label == "" {
+		return fmt.Errorf("sqs: permission label is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	queue, ok := s.activeQueueByNameLocked(queueName)
+	if !ok {
+		return errQueueNotFound
+	}
+
+	if s.state.QueuePermissions == nil {
+		s.state.QueuePermissions = map[string]map[string]domain.QueuePermission{}
+	}
+	permissions := s.state.QueuePermissions[queueName]
+	if permissions == nil {
+		permissions = map[string]domain.QueuePermission{}
+	}
+
+	now := s.clock.Now()
+	permissions[label] = domain.QueuePermission{
+		Label:         label,
+		AWSAccountIDs: uniqueSortedTrimmedStrings(awsAccountIDs),
+		Actions:       uniqueSortedTrimmedStrings(actions),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	s.state.QueuePermissions[queue.Name] = permissions
+	queue.UpdatedAt = now
+	if index, _, ok := s.queueRecordByNameLocked(queueName); ok {
+		s.state.Queues[index] = queue
+	}
+	return s.commitStateLocked()
+}
+
+func (s *Service) RemovePermission(queueName, label string) error {
+	queueName = trimName(queueName)
+	label = trimName(label)
+	if queueName == "" {
+		return fmt.Errorf("sqs: queue name is required")
+	}
+	if label == "" {
+		return fmt.Errorf("sqs: permission label is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	queue, ok := s.activeQueueByNameLocked(queueName)
+	if !ok {
+		return errQueueNotFound
+	}
+
+	permissions := cloneQueuePermissionMap(s.state.QueuePermissions[queueName])
+	delete(permissions, label)
+	if s.state.QueuePermissions == nil {
+		s.state.QueuePermissions = map[string]map[string]domain.QueuePermission{}
+	}
+	s.state.QueuePermissions[queue.Name] = permissions
+	queue.UpdatedAt = s.clock.Now()
+	if index, _, ok := s.queueRecordByNameLocked(queueName); ok {
+		s.state.Queues[index] = queue
+	}
+	return s.commitStateLocked()
+}
+
+func (s *Service) ListQueueTags(queueName string) (map[string]string, error) {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return map[string]string{}, fmt.Errorf("sqs: queue name is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.activeQueueByNameLocked(queueName); !ok {
+		return map[string]string{}, errQueueNotFound
+	}
+	return cloneMap(s.state.QueueTags[queueName]), nil
+}
+
+func (s *Service) ListDeadLetterSourceQueues(queueName string) ([]string, error) {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return nil, fmt.Errorf("sqs: queue name is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.activeQueueByNameLocked(queueName); !ok {
+		return nil, errQueueNotFound
+	}
+
+	sources := make([]string, 0)
+	for _, queue := range s.state.ListQueues() {
+		if queue.DeletedAt.IsZero() && queue.Recovery.DeadLetterQueue == queueName {
+			sources = append(sources, queue.Name)
+		}
+	}
+	sort.Strings(sources)
+	return sources, nil
+}
+
+func (s *Service) StartMessageMoveTask(sourceArn, destinationArn string, maxNumberOfMessagesPerSecond int) (string, error) {
+	sourceArn = trimName(sourceArn)
+	destinationArn = trimName(destinationArn)
+	if sourceArn == "" {
+		return "", fmt.Errorf("sqs: source ARN is required")
+	}
+	if maxNumberOfMessagesPerSecond < 0 {
+		return "", fmt.Errorf("sqs: max number of messages per second must be non-negative")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sourceQueue, ok := s.queueByARNLocked(sourceArn)
+	if !ok {
+		return "", errQueueNotFound
+	}
+	for _, task := range s.state.MoveTasks[sourceQueue.Name] {
+		if strings.EqualFold(task.Status, "RUNNING") {
+			return "", fmt.Errorf("sqs: a message move task is already running for %s", sourceQueue.Name)
+		}
+	}
+
+	hasSourceQueue := false
+	for _, queue := range s.state.ListQueues() {
+		if queue.DeletedAt.IsZero() && queue.Recovery.DeadLetterQueue == sourceQueue.Name {
+			hasSourceQueue = true
+			break
+		}
+	}
+	if !hasSourceQueue {
+		return "", fmt.Errorf("sqs: source queue is not configured as a dead-letter queue")
+	}
+
+	if s.state.MoveTasks == nil {
+		s.state.MoveTasks = map[string]map[string]domain.MessageMoveTask{}
+	}
+	tasks := s.state.MoveTasks[sourceQueue.Name]
+	if tasks == nil {
+		tasks = map[string]domain.MessageMoveTask{}
+	}
+
+	now := s.clock.Now()
+	task := domain.MessageMoveTask{
+		TaskHandle:                   sourceArn + "|" + uuid.NewString(),
+		SourceQueue:                  sourceQueue.Name,
+		SourceArn:                    sourceArn,
+		DestinationArn:               destinationArn,
+		MaxNumberOfMessagesPerSecond: maxNumberOfMessagesPerSecond,
+		Status:                       "RUNNING",
+		StartedAt:                    now,
+		UpdatedAt:                    now,
+	}
+	tasks[task.TaskHandle] = task
+	s.state.MoveTasks[sourceQueue.Name] = tasks
+	if index, _, ok := s.queueRecordByNameLocked(sourceQueue.Name); ok {
+		sourceQueue.UpdatedAt = now
+		s.state.Queues[index] = sourceQueue
+	}
+	if err := s.commitStateLocked(); err != nil {
+		return "", err
+	}
+	return task.TaskHandle, nil
+}
+
+func (s *Service) CancelMessageMoveTask(taskHandle string) (int64, error) {
+	taskHandle = trimName(taskHandle)
+	if taskHandle == "" {
+		return 0, fmt.Errorf("sqs: task handle is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	queueName, task, ok := s.findMessageMoveTaskLocked(taskHandle)
+	if !ok {
+		return 0, errQueueNotFound
+	}
+	now := s.clock.Now()
+	task.Status = "CANCELLED"
+	task.CancelledAt = now
+	task.UpdatedAt = now
+	if s.state.MoveTasks == nil {
+		s.state.MoveTasks = map[string]map[string]domain.MessageMoveTask{}
+	}
+	tasks := cloneMessageMoveTaskMap(s.state.MoveTasks[queueName])
+	tasks[taskHandle] = task
+	s.state.MoveTasks[queueName] = tasks
+	if err := s.commitStateLocked(); err != nil {
+		return 0, err
+	}
+	return task.ApproximateNumberOfMessagesMoved, nil
+}
+
+func (s *Service) ListMessageMoveTasks(queueName string) ([]domain.MessageMoveTask, error) {
+	queueName = trimName(queueName)
+	if queueName == "" {
+		return nil, fmt.Errorf("sqs: queue name is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.activeQueueByNameLocked(queueName); !ok {
+		return nil, errQueueNotFound
+	}
+
+	tasks := make([]domain.MessageMoveTask, 0, len(s.state.MoveTasks[queueName]))
+	for _, task := range s.state.MoveTasks[queueName] {
+		tasks = append(tasks, task)
+	}
+	sort.SliceStable(tasks, func(i, j int) bool {
+		if tasks[i].StartedAt.Equal(tasks[j].StartedAt) {
+			return tasks[i].TaskHandle < tasks[j].TaskHandle
+		}
+		return tasks[i].StartedAt.After(tasks[j].StartedAt)
+	})
+	return tasks, nil
 }
 
 func (s *Service) RegisterRoutes(registrar orchestrator.RouteRegistrar) error {
@@ -775,6 +1080,25 @@ func (s *Service) queueRecordByNameLocked(name string) (int, domain.Queue, bool)
 	return -1, domain.Queue{}, false
 }
 
+func (s *Service) queueByARNLocked(queueARN string) (domain.Queue, bool) {
+	queueARN = trimName(queueARN)
+	for _, queue := range s.state.Queues {
+		if queue.DeletedAt.IsZero() && queueARNForAccount(queue.Name, "") == queueARN {
+			return queue, true
+		}
+	}
+	return domain.Queue{}, false
+}
+
+func (s *Service) findMessageMoveTaskLocked(taskHandle string) (string, domain.MessageMoveTask, bool) {
+	for queueName, tasks := range s.state.MoveTasks {
+		if task, ok := tasks[taskHandle]; ok {
+			return queueName, task, true
+		}
+	}
+	return "", domain.MessageMoveTask{}, false
+}
+
 func (s *Service) queueByNameLocked(name string) (domain.Queue, bool) {
 	queue, ok := s.activeQueueByNameLocked(name)
 	return queue, ok
@@ -874,9 +1198,74 @@ func equalStringMaps(left, right map[string]string) bool {
 	return true
 }
 
+func uniqueSortedTrimmedStrings(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = trimName(value)
+		if value == "" {
+			continue
+		}
+		seen[value] = struct{}{}
+	}
+
+	ordered := make([]string, 0, len(seen))
+	for value := range seen {
+		ordered = append(ordered, value)
+	}
+	sort.Strings(ordered)
+	return ordered
+}
+
+func cloneQueuePermissionMap(values map[string]domain.QueuePermission) map[string]domain.QueuePermission {
+	if values == nil {
+		return map[string]domain.QueuePermission{}
+	}
+
+	cloned := make(map[string]domain.QueuePermission, len(values))
+	for label, permission := range values {
+		cloned[label] = domain.QueuePermission{
+			Label:         permission.Label,
+			AWSAccountIDs: append([]string(nil), permission.AWSAccountIDs...),
+			Actions:       append([]string(nil), permission.Actions...),
+			CreatedAt:     permission.CreatedAt,
+			UpdatedAt:     permission.UpdatedAt,
+		}
+	}
+	return cloned
+}
+
+func cloneMessageMoveTaskMap(values map[string]domain.MessageMoveTask) map[string]domain.MessageMoveTask {
+	if values == nil {
+		return map[string]domain.MessageMoveTask{}
+	}
+
+	cloned := make(map[string]domain.MessageMoveTask, len(values))
+	for handle, task := range values {
+		cloned[handle] = domain.MessageMoveTask{
+			TaskHandle:                       task.TaskHandle,
+			SourceQueue:                      task.SourceQueue,
+			SourceArn:                        task.SourceArn,
+			DestinationArn:                   task.DestinationArn,
+			MaxNumberOfMessagesPerSecond:     task.MaxNumberOfMessagesPerSecond,
+			ApproximateNumberOfMessagesMoved: task.ApproximateNumberOfMessagesMoved,
+			Status:                           task.Status,
+			StartedAt:                        task.StartedAt,
+			UpdatedAt:                        task.UpdatedAt,
+			CancelledAt:                      task.CancelledAt,
+		}
+	}
+	return cloned
+}
+
 func (s *Service) receiveReadyMessagesLocked(queueName string, maxMessages int, now time.Time) ([]domain.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.sweepDeadLettersLocked(now)
 
 	queue, ok := s.queueByNameLocked(queueName)
 	if !ok {
@@ -949,8 +1338,12 @@ func (s *Service) enqueueMessageLocked(queueName string, queue domain.Queue, req
 		SentAt:          now,
 	}
 
-	if request.DelaySeconds > 0 {
-		message.AvailableAt = now.Add(time.Duration(request.DelaySeconds) * time.Second)
+	effectiveDelaySeconds := request.DelaySeconds
+	if effectiveDelaySeconds <= 0 {
+		effectiveDelaySeconds = parseDelaySeconds(queue.Attributes["DelaySeconds"])
+	}
+	if effectiveDelaySeconds > 0 {
+		message.AvailableAt = now.Add(time.Duration(effectiveDelaySeconds) * time.Second)
 	}
 	if message.Metadata == nil {
 		message.Metadata = map[string]string{}
@@ -1228,6 +1621,18 @@ func parseMessageVisibilityTimeout(raw string) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+func parseDelaySeconds(raw string) int {
+	raw = trimName(raw)
+	if raw == "" {
+		return 0
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds < 0 {
+		return 0
+	}
+	return seconds
+}
+
 func nextReceiptHandle(queueName string, message domain.Message) string {
 	return fmt.Sprintf("%s/%s/%d", queueName, message.MessageID, len(message.ReceiptKeys)+1)
 }
@@ -1246,6 +1651,71 @@ func cloneMap(values map[string]string) map[string]string {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func queueRecoveryFromAttributes(attributes map[string]string) domain.QueueRecovery {
+	recovery := domain.QueueRecovery{
+		Policy: map[string]string{},
+	}
+	if len(attributes) == 0 {
+		return recovery
+	}
+
+	rawPolicy := trimName(attributes["RedrivePolicy"])
+	if rawPolicy == "" {
+		return recovery
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(rawPolicy), &parsed); err != nil {
+		recovery.Policy["raw"] = rawPolicy
+		return recovery
+	}
+
+	for key, value := range parsed {
+		normalizedKey := camelToSnake(key)
+		recovery.Policy[normalizedKey] = fmt.Sprint(value)
+	}
+	if targetArn := trimName(recovery.Policy["dead_letter_target_arn"]); targetArn != "" {
+		if queueName, _, err := queueNameAndAccountFromARN(targetArn); err == nil {
+			recovery.DeadLetterQueue = queueName
+		}
+	}
+	return recovery
+}
+
+func camelToSnake(value string) string {
+	if value == "" {
+		return ""
+	}
+
+	var out strings.Builder
+	for i, r := range value {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			out.WriteByte('_')
+		}
+		out.WriteRune(r)
+	}
+	return strings.ToLower(out.String())
+}
+
+func queueNameAndAccountFromARN(raw string) (string, string, error) {
+	trimmed := trimName(raw)
+	if trimmed == "" {
+		return "", "", fmt.Errorf("sqs: arn is required")
+	}
+
+	parts := strings.Split(trimmed, ":")
+	if len(parts) < 6 || parts[0] != "arn" {
+		return "", "", fmt.Errorf("sqs: invalid arn: %s", raw)
+	}
+
+	accountID := trimName(parts[len(parts)-2])
+	queueName := trimName(parts[len(parts)-1])
+	if accountID == "" || queueName == "" {
+		return "", "", fmt.Errorf("sqs: invalid arn: %s", raw)
+	}
+	return queueName, accountID, nil
 }
 
 func queueURLForAccount(queueName, ownerAccountID string) string {

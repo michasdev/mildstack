@@ -242,6 +242,187 @@ func TestSQSSDKSmokeReceivesAWSCompatibleSuccess(t *testing.T) {
 	}
 }
 
+func TestSQSSDKSmokeCoversGovernanceAndRedriveActions(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	service := &stubSQSNativeService{
+		listQueueTagsResult: map[string]string{
+			"env": "dev",
+		},
+		listDeadLetterSourceQueuesResult: []string{"orders-source"},
+		startMessageMoveTaskResult:       "arn:aws:sqs:us-east-1:123456789012:orders-dlq|task-1",
+		cancelMessageMoveTaskResult:      7,
+		listMessageMoveTasksResult: []domain.MessageMoveTask{
+			{
+				TaskHandle:                       "arn:aws:sqs:us-east-1:123456789012:orders-dlq|task-1",
+				SourceArn:                        "arn:aws:sqs:us-east-1:123456789012:orders-dlq",
+				DestinationArn:                   "arn:aws:sqs:us-east-1:123456789012:orders",
+				MaxNumberOfMessagesPerSecond:     12,
+				ApproximateNumberOfMessagesMoved: 7,
+				Status:                           "RUNNING",
+			},
+		},
+	}
+	router := gin.New()
+	RegisterSQSNativeRoutes(router, service)
+
+	server := httptest.NewServer(router)
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+
+	cfg, err := awsconfig.LoadDefaultConfig(ctx,
+		awsconfig.WithRegion("us-east-1"),
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "test")),
+	)
+	if err != nil {
+		t.Fatalf("load aws config: %v", err)
+	}
+
+	client := sqs.NewFromConfig(cfg, func(o *sqs.Options) {
+		o.BaseEndpoint = aws.String(server.URL)
+	})
+
+	queueURL := service.QueueURL("orders")
+	if _, err := client.TagQueue(ctx, &sqs.TagQueueInput{
+		QueueUrl: aws.String(queueURL),
+		Tags: map[string]string{
+			"env":  "dev",
+			"team": "platform",
+		},
+	}); err != nil {
+		t.Fatalf("tag queue: %v", err)
+	}
+	if got, want := service.tagQueueQueueName, "orders"; got != want {
+		t.Fatalf("unexpected tag queue name: got %q want %q", got, want)
+	}
+	if got, want := service.tagQueueTags["team"], "platform"; got != want {
+		t.Fatalf("unexpected tag queue payload: got %q want %q", got, want)
+	}
+
+	tagOutput, err := client.ListQueueTags(ctx, &sqs.ListQueueTagsInput{
+		QueueUrl: aws.String(queueURL),
+	})
+	if err != nil {
+		t.Fatalf("list queue tags: %v", err)
+	}
+	if got, want := tagOutput.Tags["env"], "dev"; got != want {
+		t.Fatalf("unexpected tag list value: got %q want %q", got, want)
+	}
+
+	if _, err := client.AddPermission(ctx, &sqs.AddPermissionInput{
+		QueueUrl:      aws.String(queueURL),
+		Label:         aws.String("label-a"),
+		AWSAccountIds: []string{"123456789012"},
+		Actions:       []string{"SendMessage"},
+	}); err != nil {
+		t.Fatalf("add permission: %v", err)
+	}
+	if got, want := service.addPermissionLabel, "label-a"; got != want {
+		t.Fatalf("unexpected add permission label: got %q want %q", got, want)
+	}
+	if got, want := service.addPermissionAWSAccountIDs[0], "123456789012"; got != want {
+		t.Fatalf("unexpected add permission account: got %q want %q", got, want)
+	}
+
+	if _, err := client.RemovePermission(ctx, &sqs.RemovePermissionInput{
+		QueueUrl: aws.String(queueURL),
+		Label:    aws.String("label-a"),
+	}); err != nil {
+		t.Fatalf("remove permission: %v", err)
+	}
+	if got, want := service.removePermissionLabel, "label-a"; got != want {
+		t.Fatalf("unexpected remove permission label: got %q want %q", got, want)
+	}
+
+	if _, err := client.UntagQueue(ctx, &sqs.UntagQueueInput{
+		QueueUrl: aws.String(queueURL),
+		TagKeys:  []string{"env", "team"},
+	}); err != nil {
+		t.Fatalf("untag queue: %v", err)
+	}
+	if got, want := service.untagQueueQueueName, "orders"; got != want {
+		t.Fatalf("unexpected untag queue name: got %q want %q", got, want)
+	}
+	if got, want := len(service.untagQueueTagKeys), 2; got != want {
+		t.Fatalf("unexpected untag key count: got %d want %d", got, want)
+	}
+
+	dlqURL := service.QueueURL("orders-dlq")
+	dlqOutput, err := client.ListDeadLetterSourceQueues(ctx, &sqs.ListDeadLetterSourceQueuesInput{
+		QueueUrl:   aws.String(dlqURL),
+		MaxResults: aws.Int32(2),
+	})
+	if err != nil {
+		t.Fatalf("list dead letter source queues: %v", err)
+	}
+	if got, want := service.listDeadLetterSourceQueuesQueueName, "orders-dlq"; got != want {
+		t.Fatalf("unexpected dead letter source queue name: got %q want %q", got, want)
+	}
+	if got, want := len(dlqOutput.QueueUrls), 1; got != want {
+		t.Fatalf("unexpected dead letter source count: got %d want %d", got, want)
+	}
+	if got, want := dlqOutput.QueueUrls[0], service.QueueURL("orders-source"); got != want {
+		t.Fatalf("unexpected dead letter source URL: got %q want %q", got, want)
+	}
+
+	startOutput, err := client.StartMessageMoveTask(ctx, &sqs.StartMessageMoveTaskInput{
+		SourceArn:                    aws.String(service.QueueARN("orders-dlq")),
+		DestinationArn:               aws.String(service.QueueARN("orders")),
+		MaxNumberOfMessagesPerSecond: aws.Int32(12),
+	})
+	if err != nil {
+		t.Fatalf("start message move task: %v", err)
+	}
+	if got, want := service.startMessageMoveTaskSourceArn, service.QueueARN("orders-dlq"); got != want {
+		t.Fatalf("unexpected start source arn: got %q want %q", got, want)
+	}
+	if got, want := service.startMessageMoveTaskDestinationArn, service.QueueARN("orders"); got != want {
+		t.Fatalf("unexpected start destination arn: got %q want %q", got, want)
+	}
+	if got, want := service.startMessageMoveTaskMaxPerSecond, 12; got != want {
+		t.Fatalf("unexpected start rate: got %d want %d", got, want)
+	}
+	if got, want := aws.ToString(startOutput.TaskHandle), "arn:aws:sqs:us-east-1:123456789012:orders-dlq|task-1"; got != want {
+		t.Fatalf("unexpected task handle: got %q want %q", got, want)
+	}
+
+	cancelOutput, err := client.CancelMessageMoveTask(ctx, &sqs.CancelMessageMoveTaskInput{
+		TaskHandle: startOutput.TaskHandle,
+	})
+	if err != nil {
+		t.Fatalf("cancel message move task: %v", err)
+	}
+	if got, want := service.cancelMessageMoveTaskTaskHandle, "arn:aws:sqs:us-east-1:123456789012:orders-dlq|task-1"; got != want {
+		t.Fatalf("unexpected cancel task handle: got %q want %q", got, want)
+	}
+	if got, want := cancelOutput.ApproximateNumberOfMessagesMoved, int64(7); got != want {
+		t.Fatalf("unexpected moved count: got %d want %d", got, want)
+	}
+
+	tasksOutput, err := client.ListMessageMoveTasks(ctx, &sqs.ListMessageMoveTasksInput{
+		SourceArn:  aws.String(service.QueueARN("orders-dlq")),
+		MaxResults: aws.Int32(1),
+	})
+	if err != nil {
+		t.Fatalf("list message move tasks: %v", err)
+	}
+	if got, want := service.listMessageMoveTasksQueueName, "orders-dlq"; got != want {
+		t.Fatalf("unexpected move tasks queue name: got %q want %q", got, want)
+	}
+	if got, want := len(tasksOutput.Results), 1; got != want {
+		t.Fatalf("unexpected task result count: got %d want %d", got, want)
+	}
+	if got, want := aws.ToString(tasksOutput.Results[0].TaskHandle), "arn:aws:sqs:us-east-1:123456789012:orders-dlq|task-1"; got != want {
+		t.Fatalf("unexpected task result handle: got %q want %q", got, want)
+	}
+	if got, want := aws.ToString(tasksOutput.Results[0].DestinationArn), service.QueueARN("orders"); got != want {
+		t.Fatalf("unexpected task destination arn: got %q want %q", got, want)
+	}
+}
+
 func TestSQSSDKSmokePreservesBatchEntrySemantics(t *testing.T) {
 	t.Helper()
 
@@ -331,6 +512,29 @@ type stubSQSNativeService struct {
 	sendMessageQueueName string
 	sendMessageRequest   contracts.SendMessageRequest
 	sendMessageResult    contracts.SendMessageResult
+
+	tagQueueQueueName                   string
+	tagQueueTags                        map[string]string
+	untagQueueQueueName                 string
+	untagQueueTagKeys                   []string
+	addPermissionQueueName              string
+	addPermissionLabel                  string
+	addPermissionAWSAccountIDs          []string
+	addPermissionActions                []string
+	removePermissionQueueName           string
+	removePermissionLabel               string
+	listQueueTagsQueueName              string
+	listQueueTagsResult                 map[string]string
+	listDeadLetterSourceQueuesQueueName string
+	listDeadLetterSourceQueuesResult    []string
+	startMessageMoveTaskSourceArn       string
+	startMessageMoveTaskDestinationArn  string
+	startMessageMoveTaskMaxPerSecond    int
+	startMessageMoveTaskResult          string
+	cancelMessageMoveTaskTaskHandle     string
+	cancelMessageMoveTaskResult         int64
+	listMessageMoveTasksQueueName       string
+	listMessageMoveTasksResult          []domain.MessageMoveTask
 }
 
 func (s *stubSQSNativeService) Policy() orchestrator.EmulationPolicy {
@@ -388,6 +592,71 @@ func (s *stubSQSNativeService) SetQueueAttributes(queueName string, attributes m
 		QueueARN:   s.QueueARN(queueName),
 		Attributes: attributes,
 	}, contracts.ErrSQSOperationDeferred
+}
+
+func (s *stubSQSNativeService) TagQueue(queueName string, tags map[string]string) error {
+	s.tagQueueQueueName = queueName
+	s.tagQueueTags = tags
+	return nil
+}
+
+func (s *stubSQSNativeService) UntagQueue(queueName string, tagKeys []string) error {
+	s.untagQueueQueueName = queueName
+	s.untagQueueTagKeys = tagKeys
+	return nil
+}
+
+func (s *stubSQSNativeService) AddPermission(queueName, label string, awsAccountIDs, actions []string) error {
+	s.addPermissionQueueName = queueName
+	s.addPermissionLabel = label
+	s.addPermissionAWSAccountIDs = awsAccountIDs
+	s.addPermissionActions = actions
+	return nil
+}
+
+func (s *stubSQSNativeService) RemovePermission(queueName, label string) error {
+	s.removePermissionQueueName = queueName
+	s.removePermissionLabel = label
+	return nil
+}
+
+func (s *stubSQSNativeService) ListQueueTags(queueName string) (map[string]string, error) {
+	s.listQueueTagsQueueName = queueName
+	if s.listQueueTagsResult == nil {
+		return map[string]string{}, nil
+	}
+	return s.listQueueTagsResult, nil
+}
+
+func (s *stubSQSNativeService) ListDeadLetterSourceQueues(queueName string) ([]string, error) {
+	s.listDeadLetterSourceQueuesQueueName = queueName
+	if s.listDeadLetterSourceQueuesResult == nil {
+		return []string{}, nil
+	}
+	return s.listDeadLetterSourceQueuesResult, nil
+}
+
+func (s *stubSQSNativeService) StartMessageMoveTask(sourceArn, destinationArn string, maxNumberOfMessagesPerSecond int) (string, error) {
+	s.startMessageMoveTaskSourceArn = sourceArn
+	s.startMessageMoveTaskDestinationArn = destinationArn
+	s.startMessageMoveTaskMaxPerSecond = maxNumberOfMessagesPerSecond
+	if s.startMessageMoveTaskResult == "" {
+		s.startMessageMoveTaskResult = "task-1"
+	}
+	return s.startMessageMoveTaskResult, nil
+}
+
+func (s *stubSQSNativeService) CancelMessageMoveTask(taskHandle string) (int64, error) {
+	s.cancelMessageMoveTaskTaskHandle = taskHandle
+	return s.cancelMessageMoveTaskResult, nil
+}
+
+func (s *stubSQSNativeService) ListMessageMoveTasks(queueName string) ([]domain.MessageMoveTask, error) {
+	s.listMessageMoveTasksQueueName = queueName
+	if s.listMessageMoveTasksResult == nil {
+		return []domain.MessageMoveTask{}, nil
+	}
+	return s.listMessageMoveTasksResult, nil
 }
 
 func (s *stubSQSNativeService) ReceiveMessage(queueName string, maxMessages int, waitTime time.Duration) ([]domain.Message, error) {

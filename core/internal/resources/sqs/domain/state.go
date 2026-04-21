@@ -13,6 +13,9 @@ type State struct {
 	Queues           []Queue
 	Messages         []Message
 	RecoveryMetadata map[string]RecoveryMetadata
+	QueueTags        map[string]map[string]string
+	QueuePermissions map[string]map[string]QueuePermission
+	MoveTasks        map[string]map[string]MessageMoveTask
 }
 
 type Queue struct {
@@ -30,6 +33,27 @@ type Queue struct {
 type QueueRecovery struct {
 	DeadLetterQueue string
 	Policy          map[string]string
+}
+
+type QueuePermission struct {
+	Label         string
+	AWSAccountIDs []string
+	Actions       []string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type MessageMoveTask struct {
+	TaskHandle                       string
+	SourceQueue                      string
+	SourceArn                        string
+	DestinationArn                   string
+	MaxNumberOfMessagesPerSecond     int
+	ApproximateNumberOfMessagesMoved int64
+	Status                           string
+	StartedAt                        time.Time
+	UpdatedAt                        time.Time
+	CancelledAt                      time.Time
 }
 
 type Message struct {
@@ -72,6 +96,9 @@ func NewState() State {
 		Queues:           []Queue{},
 		Messages:         []Message{},
 		RecoveryMetadata: map[string]RecoveryMetadata{},
+		QueueTags:        map[string]map[string]string{},
+		QueuePermissions: map[string]map[string]QueuePermission{},
+		MoveTasks:        map[string]map[string]MessageMoveTask{},
 	}
 }
 
@@ -138,11 +165,81 @@ func (s State) Snapshot() map[string]any {
 		}
 	}
 
+	queueTags := make(map[string]any, len(s.QueueTags))
+	tagQueueNames := make([]string, 0, len(s.QueueTags))
+	for queueName := range s.QueueTags {
+		tagQueueNames = append(tagQueueNames, queueName)
+	}
+	sort.Strings(tagQueueNames)
+	for _, queueName := range tagQueueNames {
+		queueTags[queueName] = cloneStringMapAny(s.QueueTags[queueName])
+	}
+
+	queuePermissions := make(map[string]any, len(s.QueuePermissions))
+	permissionQueueNames := make([]string, 0, len(s.QueuePermissions))
+	for queueName := range s.QueuePermissions {
+		permissionQueueNames = append(permissionQueueNames, queueName)
+	}
+	sort.Strings(permissionQueueNames)
+	for _, queueName := range permissionQueueNames {
+		labels := make([]string, 0, len(s.QueuePermissions[queueName]))
+		for label := range s.QueuePermissions[queueName] {
+			labels = append(labels, label)
+		}
+		sort.Strings(labels)
+		entries := make([]any, 0, len(labels))
+		for _, label := range labels {
+			permission := s.QueuePermissions[queueName][label]
+			entries = append(entries, map[string]any{
+				"label":           permission.Label,
+				"aws_account_ids": append([]string(nil), permission.AWSAccountIDs...),
+				"actions":         append([]string(nil), permission.Actions...),
+				"created_at":      snapshotTime(permission.CreatedAt),
+				"updated_at":      snapshotTime(permission.UpdatedAt),
+			})
+		}
+		queuePermissions[queueName] = entries
+	}
+
+	moveTasks := make(map[string]any, len(s.MoveTasks))
+	moveQueueNames := make([]string, 0, len(s.MoveTasks))
+	for queueName := range s.MoveTasks {
+		moveQueueNames = append(moveQueueNames, queueName)
+	}
+	sort.Strings(moveQueueNames)
+	for _, queueName := range moveQueueNames {
+		handles := make([]string, 0, len(s.MoveTasks[queueName]))
+		for handle := range s.MoveTasks[queueName] {
+			handles = append(handles, handle)
+		}
+		sort.Strings(handles)
+		entries := make([]any, 0, len(handles))
+		for _, handle := range handles {
+			task := s.MoveTasks[queueName][handle]
+			entries = append(entries, map[string]any{
+				"task_handle":                          task.TaskHandle,
+				"source_queue":                         task.SourceQueue,
+				"source_arn":                           task.SourceArn,
+				"destination_arn":                      task.DestinationArn,
+				"max_number_of_messages_per_second":    task.MaxNumberOfMessagesPerSecond,
+				"approximate_number_of_messages_moved": task.ApproximateNumberOfMessagesMoved,
+				"status":                               task.Status,
+				"started_at":                           snapshotTime(task.StartedAt),
+				"updated_at":                           snapshotTime(task.UpdatedAt),
+				"cancelled_at":                         snapshotTime(task.CancelledAt),
+			})
+		}
+		moveTasks[queueName] = entries
+	}
+
 	return map[string]any{
 		"service":           s.Service,
 		"queues":            queues,
 		"messages":          messages,
 		"recovery_metadata": recovery,
+		"queue_tags":        queueTags,
+		"queue_permissions": queuePermissions,
+		"move_tasks":        moveTasks,
 	}
 }
 
@@ -152,6 +249,9 @@ func (s State) Clone() State {
 		Queues:           make([]Queue, len(s.Queues)),
 		Messages:         make([]Message, len(s.Messages)),
 		RecoveryMetadata: make(map[string]RecoveryMetadata, len(s.RecoveryMetadata)),
+		QueueTags:        make(map[string]map[string]string, len(s.QueueTags)),
+		QueuePermissions: make(map[string]map[string]QueuePermission, len(s.QueuePermissions)),
+		MoveTasks:        make(map[string]map[string]MessageMoveTask, len(s.MoveTasks)),
 	}
 	copy(cloned.Queues, s.Queues)
 	for i := range cloned.Queues {
@@ -171,6 +271,38 @@ func (s State) Clone() State {
 			Queue:   value.Queue,
 			Message: value.Message,
 			Detail:  cloneStringMap(value.Detail),
+		}
+	}
+	for queueName, tags := range s.QueueTags {
+		cloned.QueueTags[queueName] = cloneStringMap(tags)
+	}
+	for queueName, permissions := range s.QueuePermissions {
+		cloned.QueuePermissions[queueName] = make(map[string]QueuePermission, len(permissions))
+		for label, permission := range permissions {
+			cloned.QueuePermissions[queueName][label] = QueuePermission{
+				Label:         permission.Label,
+				AWSAccountIDs: append([]string(nil), permission.AWSAccountIDs...),
+				Actions:       append([]string(nil), permission.Actions...),
+				CreatedAt:     permission.CreatedAt,
+				UpdatedAt:     permission.UpdatedAt,
+			}
+		}
+	}
+	for queueName, tasks := range s.MoveTasks {
+		cloned.MoveTasks[queueName] = make(map[string]MessageMoveTask, len(tasks))
+		for handle, task := range tasks {
+			cloned.MoveTasks[queueName][handle] = MessageMoveTask{
+				TaskHandle:                       task.TaskHandle,
+				SourceQueue:                      task.SourceQueue,
+				SourceArn:                        task.SourceArn,
+				DestinationArn:                   task.DestinationArn,
+				MaxNumberOfMessagesPerSecond:     task.MaxNumberOfMessagesPerSecond,
+				ApproximateNumberOfMessagesMoved: task.ApproximateNumberOfMessagesMoved,
+				Status:                           task.Status,
+				StartedAt:                        task.StartedAt,
+				UpdatedAt:                        task.UpdatedAt,
+				CancelledAt:                      task.CancelledAt,
+			}
 		}
 	}
 	return cloned

@@ -23,6 +23,8 @@ func TestSQSNativeRegistryDerivesSpecsFromCatalog(t *testing.T) {
 	}
 
 	supportedActions := map[string]struct{}{
+		"AddPermission":                {},
+		"CancelMessageMoveTask":        {},
 		"ChangeMessageVisibility":      {},
 		"ChangeMessageVisibilityBatch": {},
 		"CreateQueue":                  {},
@@ -31,24 +33,21 @@ func TestSQSNativeRegistryDerivesSpecsFromCatalog(t *testing.T) {
 		"DeleteQueue":                  {},
 		"GetQueueAttributes":           {},
 		"GetQueueUrl":                  {},
+		"ListDeadLetterSourceQueues":   {},
+		"ListMessageMoveTasks":         {},
+		"ListQueueTags":                {},
 		"ListQueues":                   {},
 		"PurgeQueue":                   {},
 		"ReceiveMessage":               {},
+		"RemovePermission":             {},
 		"SendMessage":                  {},
 		"SendMessageBatch":             {},
 		"SetQueueAttributes":           {},
+		"StartMessageMoveTask":         {},
+		"TagQueue":                     {},
+		"UntagQueue":                   {},
 	}
-	deferredActions := map[string]struct{}{
-		"AddPermission":              {},
-		"CancelMessageMoveTask":      {},
-		"ListDeadLetterSourceQueues": {},
-		"ListMessageMoveTasks":       {},
-		"ListQueueTags":              {},
-		"RemovePermission":           {},
-		"StartMessageMoveTask":       {},
-		"TagQueue":                   {},
-		"UntagQueue":                 {},
-	}
+	deferredActions := map[string]struct{}{}
 
 	for i, spec := range entries {
 		if spec.Action != catalog[i].Action {
@@ -76,10 +75,10 @@ func TestSQSNativeRegistryDerivesSpecsFromCatalog(t *testing.T) {
 				t.Fatalf("expected action %s to be deferred", spec.Action)
 			}
 		}
-		if isQueueLifecycleAction(spec.Action) && spec.MessageSurface {
+		if (isQueueLifecycleAction(spec.Action) || isQueueGovernanceAction(spec.Action) || isQueueRedriveAction(spec.Action)) && spec.MessageSurface {
 			t.Fatalf("did not expect lifecycle action %s to be marked as message surface", spec.Action)
 		}
-		if !isQueueLifecycleAction(spec.Action) && !spec.MessageSurface && !spec.DomainDeferred {
+		if !spec.Supported && !spec.DomainDeferred {
 			t.Fatalf("expected action %s to remain deferred", spec.Action)
 		}
 		if spec.Scope != catalog[i].Scope {
@@ -94,6 +93,8 @@ func TestSQSNativeRegistrySeparatesSupportedAndDeferredActions(t *testing.T) {
 	registry := NewSQSRegistry()
 
 	if got, want := registry.SupportedActions(), []string{
+		"AddPermission",
+		"CancelMessageMoveTask",
 		"ChangeMessageVisibility",
 		"ChangeMessageVisibilityBatch",
 		"CreateQueue",
@@ -102,27 +103,24 @@ func TestSQSNativeRegistrySeparatesSupportedAndDeferredActions(t *testing.T) {
 		"DeleteQueue",
 		"GetQueueAttributes",
 		"GetQueueUrl",
+		"ListDeadLetterSourceQueues",
+		"ListMessageMoveTasks",
 		"ListQueues",
+		"ListQueueTags",
 		"PurgeQueue",
 		"ReceiveMessage",
+		"RemovePermission",
 		"SendMessage",
 		"SendMessageBatch",
 		"SetQueueAttributes",
-	}; !equalStringSlicesSQS(got, want) {
-		t.Fatalf("unexpected supported actions: got %v want %v", got, want)
-	}
-
-	if got, want := registry.UnsupportedActions(), []string{
-		"AddPermission",
-		"CancelMessageMoveTask",
-		"ListDeadLetterSourceQueues",
-		"ListMessageMoveTasks",
-		"ListQueueTags",
-		"RemovePermission",
 		"StartMessageMoveTask",
 		"TagQueue",
 		"UntagQueue",
 	}; !equalStringSlicesSQS(got, want) {
+		t.Fatalf("unexpected supported actions: got %v want %v", got, want)
+	}
+
+	if got, want := registry.UnsupportedActions(), []string{}; !equalStringSlicesSQS(got, want) {
 		t.Fatalf("unexpected unsupported actions: got %v want %v", got, want)
 	}
 }

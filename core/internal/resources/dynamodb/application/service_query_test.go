@@ -204,6 +204,154 @@ func TestServiceReadPlannerRejectsUnsupportedExpressions(t *testing.T) {
 	}
 }
 
+func TestServiceQuerySupportsIndexedPaginationAndProjection(t *testing.T) {
+	t.Helper()
+
+	service := New()
+	_, err := service.CreateTable("mildstack-indexed", "pk", "sk", "PAY_PER_REQUEST", domain.CreateTableSpec{
+		AttributeDefinitions: []domain.AttributeDefinition{
+			{Name: "pk", Type: "S"},
+			{Name: "sk", Type: "S"},
+			{Name: "gsi_pk", Type: "S"},
+			{Name: "gsi_sk", Type: "S"},
+			{Name: "lsi_sk", Type: "S"},
+			{Name: "title", Type: "S"},
+		},
+		GlobalSecondaryIndexes: []domain.SecondaryIndex{
+			{
+				Name: "gsi-title",
+				KeySchema: []domain.KeySchemaElement{
+					{AttributeName: "gsi_pk", KeyType: "HASH"},
+					{AttributeName: "gsi_sk", KeyType: "RANGE"},
+				},
+				Projection: domain.Projection{
+					Type:             "INCLUDE",
+					NonKeyAttributes: []string{"title"},
+				},
+			},
+		},
+		LocalSecondaryIndexes: []domain.SecondaryIndex{
+			{
+				Name: "lsi-title",
+				KeySchema: []domain.KeySchemaElement{
+					{AttributeName: "pk", KeyType: "HASH"},
+					{AttributeName: "lsi_sk", KeyType: "RANGE"},
+				},
+				Projection: domain.Projection{
+					Type: "KEYS_ONLY",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create indexed table: %v", err)
+	}
+
+	for i, item := range []domain.Item{
+		{
+			Table: "mildstack-indexed",
+			Key:   "row#1",
+			Attributes: map[string]domain.AttributeValue{
+				"pk":     domain.StringValue("series#1"),
+				"sk":     domain.StringValue("001"),
+				"gsi_pk": domain.StringValue("group#1"),
+				"gsi_sk": domain.StringValue("001"),
+				"lsi_sk": domain.StringValue("001"),
+				"title":  domain.StringValue("indexed-one"),
+			},
+		},
+		{
+			Table: "mildstack-indexed",
+			Key:   "row#2",
+			Attributes: map[string]domain.AttributeValue{
+				"pk":     domain.StringValue("series#1"),
+				"sk":     domain.StringValue("002"),
+				"gsi_pk": domain.StringValue("group#1"),
+				"gsi_sk": domain.StringValue("002"),
+				"lsi_sk": domain.StringValue("002"),
+				"title":  domain.StringValue("indexed-two"),
+			},
+		},
+	} {
+		if _, err := service.PutItem(item.Table, item.Key, item.Attributes); err != nil {
+			t.Fatalf("put indexed item %d: %v", i, err)
+		}
+	}
+
+	gsiPage1, err := service.Query("mildstack-indexed", "gsi_pk = :pk AND gsi_sk BETWEEN :start AND :end", "", nil, map[string]domain.AttributeValue{
+		":pk":    domain.StringValue("group#1"),
+		":start": domain.StringValue("001"),
+		":end":   domain.StringValue("002"),
+	}, intPtr(1), nil, boolPtr(true), domain.QueryOptions{
+		IndexName:            "gsi-title",
+		ProjectionExpression: "gsi_pk, title",
+	})
+	if err != nil {
+		t.Fatalf("query gsi page 1: %v", err)
+	}
+	if got, want := gsiPage1.Count, 1; got != want {
+		t.Fatalf("unexpected gsi page 1 count: got %d want %d", got, want)
+	}
+	if got, want := attrString(gsiPage1.Items[0].Attributes["title"]), "indexed-one"; got != want {
+		t.Fatalf("unexpected gsi page 1 title: got %q want %q", got, want)
+	}
+	if _, ok := gsiPage1.Items[0].Attributes["gsi_sk"]; ok {
+		t.Fatal("expected projected gsi sort key to be omitted")
+	}
+
+	gsiPage2, err := service.Query("mildstack-indexed", "gsi_pk = :pk AND gsi_sk BETWEEN :start AND :end", "", nil, map[string]domain.AttributeValue{
+		":pk":    domain.StringValue("group#1"),
+		":start": domain.StringValue("001"),
+		":end":   domain.StringValue("002"),
+	}, intPtr(1), gsiPage1.LastEvaluatedKey, boolPtr(true), domain.QueryOptions{
+		IndexName:            "gsi-title",
+		ProjectionExpression: "gsi_pk, title",
+	})
+	if err != nil {
+		t.Fatalf("query gsi page 2: %v", err)
+	}
+	if got, want := gsiPage2.Count, 1; got != want {
+		t.Fatalf("unexpected gsi page 2 count: got %d want %d", got, want)
+	}
+	if got, want := attrString(gsiPage2.Items[0].Attributes["title"]), "indexed-two"; got != want {
+		t.Fatalf("unexpected gsi page 2 title: got %q want %q", got, want)
+	}
+
+	lsiPage1, err := service.Query("mildstack-indexed", "pk = :pk AND lsi_sk BETWEEN :start AND :end", "", nil, map[string]domain.AttributeValue{
+		":pk":    domain.StringValue("series#1"),
+		":start": domain.StringValue("001"),
+		":end":   domain.StringValue("002"),
+	}, intPtr(1), nil, boolPtr(true), domain.QueryOptions{
+		IndexName: "lsi-title",
+	})
+	if err != nil {
+		t.Fatalf("query lsi page 1: %v", err)
+	}
+	if got, want := lsiPage1.Count, 1; got != want {
+		t.Fatalf("unexpected lsi page 1 count: got %d want %d", got, want)
+	}
+	if got, want := attrString(lsiPage1.Items[0].Attributes["lsi_sk"]), "001"; got != want {
+		t.Fatalf("unexpected lsi page 1 sort key: got %q want %q", got, want)
+	}
+
+	lsiPage2, err := service.Query("mildstack-indexed", "pk = :pk AND lsi_sk BETWEEN :start AND :end", "", nil, map[string]domain.AttributeValue{
+		":pk":    domain.StringValue("series#1"),
+		":start": domain.StringValue("001"),
+		":end":   domain.StringValue("002"),
+	}, intPtr(1), lsiPage1.LastEvaluatedKey, boolPtr(true), domain.QueryOptions{
+		IndexName: "lsi-title",
+	})
+	if err != nil {
+		t.Fatalf("query lsi page 2: %v", err)
+	}
+	if got, want := lsiPage2.Count, 1; got != want {
+		t.Fatalf("unexpected lsi page 2 count: got %d want %d", got, want)
+	}
+	if got, want := attrString(lsiPage2.Items[0].Attributes["lsi_sk"]), "002"; got != want {
+		t.Fatalf("unexpected lsi page 2 sort key: got %q want %q", got, want)
+	}
+}
+
 func seedQueryItems(t *testing.T, service *Service) {
 	t.Helper()
 

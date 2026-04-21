@@ -30,6 +30,15 @@ type SQSNativeService interface {
 	PurgeQueue(queueName string) error
 	GetQueueAttributes(queueName string, attributeNames []string, ownerAccountID string) (contracts.QueueAttributesView, error)
 	SetQueueAttributes(queueName string, attributes map[string]string) (contracts.QueueAttributesView, error)
+	TagQueue(queueName string, tags map[string]string) error
+	UntagQueue(queueName string, tagKeys []string) error
+	AddPermission(queueName, label string, awsAccountIDs, actions []string) error
+	RemovePermission(queueName, label string) error
+	ListQueueTags(queueName string) (map[string]string, error)
+	ListDeadLetterSourceQueues(queueName string) ([]string, error)
+	StartMessageMoveTask(sourceArn, destinationArn string, maxNumberOfMessagesPerSecond int) (string, error)
+	CancelMessageMoveTask(taskHandle string) (int64, error)
+	ListMessageMoveTasks(queueName string) ([]domain.MessageMoveTask, error)
 	ReceiveMessage(queueName string, maxMessages int, waitTime time.Duration) ([]domain.Message, error)
 	DeleteMessage(queueName string, receiptHandle string) error
 	ChangeMessageVisibility(queueName string, receiptHandle string, visibility time.Duration) error
@@ -116,6 +125,24 @@ func (h sqsNativeHandler) dispatch(c *gin.Context) bool {
 		h.handleGetQueueAttributes(c, ctx)
 	case "SetQueueAttributes":
 		h.handleSetQueueAttributes(c, ctx)
+	case "TagQueue":
+		h.handleTagQueue(c, ctx)
+	case "UntagQueue":
+		h.handleUntagQueue(c, ctx)
+	case "AddPermission":
+		h.handleAddPermission(c, ctx)
+	case "RemovePermission":
+		h.handleRemovePermission(c, ctx)
+	case "ListQueueTags":
+		h.handleListQueueTags(c, ctx)
+	case "ListDeadLetterSourceQueues":
+		h.handleListDeadLetterSourceQueues(c, ctx)
+	case "StartMessageMoveTask":
+		h.handleStartMessageMoveTask(c, ctx)
+	case "CancelMessageMoveTask":
+		h.handleCancelMessageMoveTask(c, ctx)
+	case "ListMessageMoveTasks":
+		h.handleListMessageMoveTasks(c, ctx)
 	case "ReceiveMessage":
 		h.handleReceiveMessage(c, ctx)
 	case "SendMessage":
@@ -144,12 +171,20 @@ func (h sqsNativeHandler) handleCreateQueue(c *gin.Context, ctx SQSRequestContex
 		h.finishQueueAction(c, err)
 		return
 	}
+	if ctx.TargetStyle {
+		writeSQSCreateQueueJSONResponse(c, queue)
+		return
+	}
 	writeSQSCreateQueueResponse(c, queue)
 }
 
 func (h sqsNativeHandler) handleDeleteQueue(c *gin.Context, ctx SQSRequestContext) {
 	if err := h.service.DeleteQueue(ctx.QueueName); err != nil {
 		h.finishQueueAction(c, err)
+		return
+	}
+	if ctx.TargetStyle {
+		writeSQSNoBodyActionResponse(c, "DeleteQueueResponse")
 		return
 	}
 	writeSQSDeleteQueueResponse(c)
@@ -161,6 +196,10 @@ func (h sqsNativeHandler) handleGetQueueUrl(c *gin.Context, ctx SQSRequestContex
 	queueURL, err := h.service.GetQueueUrl(queueName, ownerAccountID)
 	if err != nil {
 		h.finishQueueAction(c, err)
+		return
+	}
+	if ctx.TargetStyle {
+		writeSQSGetQueueURLJSONResponse(c, queueURL)
 		return
 	}
 	writeSQSGetQueueUrlResponse(c, queueURL)
@@ -188,6 +227,10 @@ func (h sqsNativeHandler) handlePurgeQueue(c *gin.Context, ctx SQSRequestContext
 		h.finishQueueAction(c, err)
 		return
 	}
+	if ctx.TargetStyle {
+		writeSQSNoBodyActionResponse(c, "PurgeQueueResponse")
+		return
+	}
 	writeSQSPurgeQueueResponse(c)
 }
 
@@ -197,6 +240,10 @@ func (h sqsNativeHandler) handleGetQueueAttributes(c *gin.Context, ctx SQSReques
 	attributes, err := h.service.GetQueueAttributes(ctx.QueueName, attributeNames, ownerAccountID)
 	if err != nil {
 		h.finishQueueAction(c, err)
+		return
+	}
+	if ctx.TargetStyle {
+		writeSQSGetQueueAttributesJSONResponse(c, attributes)
 		return
 	}
 	writeSQSGetQueueAttributesResponse(c, attributes)
@@ -209,7 +256,126 @@ func (h sqsNativeHandler) handleSetQueueAttributes(c *gin.Context, ctx SQSReques
 		h.finishQueueAction(c, err)
 		return
 	}
+	if ctx.TargetStyle {
+		writeSQSNoBodyActionResponse(c, "SetQueueAttributesResponse")
+		return
+	}
 	writeSQSSetQueueAttributesResponse(c, view)
+}
+
+func (h sqsNativeHandler) handleTagQueue(c *gin.Context, ctx SQSRequestContext) {
+	if err := h.service.TagQueue(ctx.QueueName, tagQueueTagsFromValues(ctx.Values)); err != nil {
+		h.finishQueueAction(c, err)
+		return
+	}
+	writeSQSNoBodyActionResponse(c, "TagQueueResponse")
+}
+
+func (h sqsNativeHandler) handleUntagQueue(c *gin.Context, ctx SQSRequestContext) {
+	if err := h.service.UntagQueue(ctx.QueueName, queueTagKeysFromValues(ctx.Values)); err != nil {
+		h.finishQueueAction(c, err)
+		return
+	}
+	writeSQSNoBodyActionResponse(c, "UntagQueueResponse")
+}
+
+func (h sqsNativeHandler) handleAddPermission(c *gin.Context, ctx SQSRequestContext) {
+	label := strings.TrimSpace(ctx.Values.Get("Label"))
+	if err := h.service.AddPermission(ctx.QueueName, label, permissionAccountsFromValues(ctx.Values), permissionActionsFromValues(ctx.Values)); err != nil {
+		h.finishQueueAction(c, err)
+		return
+	}
+	writeSQSNoBodyActionResponse(c, "AddPermissionResponse")
+}
+
+func (h sqsNativeHandler) handleRemovePermission(c *gin.Context, ctx SQSRequestContext) {
+	label := strings.TrimSpace(ctx.Values.Get("Label"))
+	if err := h.service.RemovePermission(ctx.QueueName, label); err != nil {
+		h.finishQueueAction(c, err)
+		return
+	}
+	writeSQSNoBodyActionResponse(c, "RemovePermissionResponse")
+}
+
+func (h sqsNativeHandler) handleListQueueTags(c *gin.Context, ctx SQSRequestContext) {
+	tags, err := h.service.ListQueueTags(ctx.QueueName)
+	if err != nil {
+		h.finishQueueAction(c, err)
+		return
+	}
+	if ctx.TargetStyle {
+		c.JSON(http.StatusOK, sqsListQueueTagsJSONResponse{Tags: tags})
+		return
+	}
+	writeSQSListQueueTagsResponse(c, tags)
+}
+
+func (h sqsNativeHandler) handleListDeadLetterSourceQueues(c *gin.Context, ctx SQSRequestContext) {
+	queueNames, err := h.service.ListDeadLetterSourceQueues(ctx.QueueName)
+	if err != nil {
+		h.finishQueueAction(c, err)
+		return
+	}
+	queueURLs := make([]string, 0, len(queueNames))
+	for _, queueName := range queueNames {
+		queueURLs = append(queueURLs, h.service.QueueURL(queueName))
+	}
+	if ctx.TargetStyle {
+		c.JSON(http.StatusOK, sqsListDeadLetterSourceQueuesJSONResponse{QueueUrls: queueURLs})
+		return
+	}
+	writeSQSListDeadLetterSourceQueuesResponse(c, queueURLs)
+}
+
+func (h sqsNativeHandler) handleStartMessageMoveTask(c *gin.Context, ctx SQSRequestContext) {
+	sourceArn, destinationArn, maxPerSecond := startMessageMoveTaskRequestFromValues(ctx.Values)
+	if sourceArn == "" {
+		sourceArn = h.service.QueueARN(ctx.QueueName)
+	}
+	taskHandle, err := h.service.StartMessageMoveTask(sourceArn, destinationArn, maxPerSecond)
+	if err != nil {
+		h.finishQueueAction(c, err)
+		return
+	}
+	if ctx.TargetStyle {
+		c.JSON(http.StatusOK, sqsStartMessageMoveTaskJSONResponse{TaskHandle: taskHandle})
+		return
+	}
+	writeSQSStartMessageMoveTaskResponse(c, taskHandle)
+}
+
+func (h sqsNativeHandler) handleCancelMessageMoveTask(c *gin.Context, ctx SQSRequestContext) {
+	taskHandle := cancelMessageMoveTaskRequestFromValues(ctx.Values)
+	moved, err := h.service.CancelMessageMoveTask(taskHandle)
+	if err != nil {
+		h.finishQueueAction(c, err)
+		return
+	}
+	if ctx.TargetStyle {
+		c.JSON(http.StatusOK, sqsCancelMessageMoveTaskJSONResponse{ApproximateNumberOfMessagesMoved: moved})
+		return
+	}
+	writeSQSCancelMessageMoveTaskResponse(c, moved)
+}
+
+func (h sqsNativeHandler) handleListMessageMoveTasks(c *gin.Context, ctx SQSRequestContext) {
+	_, maxResults := listMessageMoveTasksRequestFromValues(ctx.Values)
+	tasks, err := h.service.ListMessageMoveTasks(ctx.QueueName)
+	if err != nil {
+		h.finishQueueAction(c, err)
+		return
+	}
+	if maxResults <= 0 {
+		maxResults = 1
+	}
+	if maxResults > 0 && len(tasks) > maxResults {
+		tasks = append([]domain.MessageMoveTask(nil), tasks[:maxResults]...)
+	}
+	if ctx.TargetStyle {
+		c.JSON(http.StatusOK, sqsListMessageMoveTasksJSONResponse{Results: messageMoveTaskJSONResults(tasks)})
+		return
+	}
+	writeSQSListMessageMoveTasksResponse(c, tasks)
 }
 
 func (h sqsNativeHandler) handleReceiveMessage(c *gin.Context, ctx SQSRequestContext) {
@@ -265,6 +431,10 @@ func (h sqsNativeHandler) handleDeleteMessage(c *gin.Context, ctx SQSRequestCont
 		h.finishMessageAction(c, err)
 		return
 	}
+	if ctx.TargetStyle {
+		writeSQSNoBodyActionResponse(c, "DeleteMessageResponse")
+		return
+	}
 	writeSQSDeleteMessageResponse(c)
 }
 
@@ -287,6 +457,10 @@ func (h sqsNativeHandler) handleChangeMessageVisibility(c *gin.Context, ctx SQSR
 	visibility := time.Duration(request.VisibilityTimeout) * time.Second
 	if err := h.service.ChangeMessageVisibility(ctx.QueueName, request.ReceiptHandle, visibility); err != nil {
 		h.finishMessageAction(c, err)
+		return
+	}
+	if ctx.TargetStyle {
+		writeSQSNoBodyActionResponse(c, "ChangeMessageVisibilityResponse")
 		return
 	}
 	writeSQSChangeMessageVisibilityResponse(c)
@@ -368,6 +542,14 @@ type sqsListQueuesJSONResponse struct {
 	NextToken string   `json:"NextToken,omitempty"`
 }
 
+type sqsQueueURLJSONResponse struct {
+	QueueUrl string `json:"QueueUrl"`
+}
+
+type sqsGetQueueAttributesJSONResponse struct {
+	Attributes map[string]string `json:"Attributes"`
+}
+
 type sqsGetQueueAttributesResponse struct {
 	XMLName                  xml.Name                    `xml:"GetQueueAttributesResponse"`
 	GetQueueAttributesResult sqsGetQueueAttributesResult `xml:"GetQueueAttributesResult"`
@@ -386,6 +568,110 @@ type sqsQueueAttributeXML struct {
 type sqsSetQueueAttributesResponse struct {
 	XMLName          xml.Name            `xml:"SetQueueAttributesResponse"`
 	ResponseMetadata sqsResponseMetadata `xml:"ResponseMetadata"`
+}
+
+type sqsEmptyActionXMLResponse struct {
+	XMLName          xml.Name
+	ResponseMetadata sqsResponseMetadata `xml:"ResponseMetadata"`
+}
+
+type sqsListQueueTagsXMLResponse struct {
+	XMLName             xml.Name               `xml:"ListQueueTagsResponse"`
+	ListQueueTagsResult sqsListQueueTagsResult `xml:"ListQueueTagsResult"`
+	ResponseMetadata    sqsResponseMetadata    `xml:"ResponseMetadata"`
+}
+
+type sqsListQueueTagsResult struct {
+	Tags []sqsTagXML `xml:"Tag"`
+}
+
+type sqsTagXML struct {
+	Key   string `xml:"Key"`
+	Value string `xml:"Value"`
+}
+
+type sqsListQueueTagsJSONResponse struct {
+	Tags map[string]string `json:"Tags"`
+}
+
+type sqsListDeadLetterSourceQueuesXMLResponse struct {
+	XMLName                          xml.Name                            `xml:"ListDeadLetterSourceQueuesResponse"`
+	ListDeadLetterSourceQueuesResult sqsListDeadLetterSourceQueuesResult `xml:"ListDeadLetterSourceQueuesResult"`
+	ResponseMetadata                 sqsResponseMetadata                 `xml:"ResponseMetadata"`
+}
+
+type sqsListDeadLetterSourceQueuesResult struct {
+	QueueUrls []string `xml:"QueueUrl"`
+	NextToken string   `xml:"NextToken,omitempty"`
+}
+
+type sqsListDeadLetterSourceQueuesJSONResponse struct {
+	QueueUrls []string `json:"queueUrls"`
+	NextToken string   `json:"NextToken,omitempty"`
+}
+
+type sqsStartMessageMoveTaskXMLResponse struct {
+	XMLName                    xml.Name                      `xml:"StartMessageMoveTaskResponse"`
+	StartMessageMoveTaskResult sqsStartMessageMoveTaskResult `xml:"StartMessageMoveTaskResult"`
+	ResponseMetadata           sqsResponseMetadata           `xml:"ResponseMetadata"`
+}
+
+type sqsStartMessageMoveTaskResult struct {
+	TaskHandle string `xml:"TaskHandle"`
+}
+
+type sqsStartMessageMoveTaskJSONResponse struct {
+	TaskHandle string `json:"TaskHandle"`
+}
+
+type sqsCancelMessageMoveTaskXMLResponse struct {
+	XMLName                     xml.Name                       `xml:"CancelMessageMoveTaskResponse"`
+	CancelMessageMoveTaskResult sqsCancelMessageMoveTaskResult `xml:"CancelMessageMoveTaskResult"`
+	ResponseMetadata            sqsResponseMetadata            `xml:"ResponseMetadata"`
+}
+
+type sqsCancelMessageMoveTaskResult struct {
+	ApproximateNumberOfMessagesMoved int64 `xml:"ApproximateNumberOfMessagesMoved"`
+}
+
+type sqsCancelMessageMoveTaskJSONResponse struct {
+	ApproximateNumberOfMessagesMoved int64 `json:"ApproximateNumberOfMessagesMoved"`
+}
+
+type sqsListMessageMoveTasksXMLResponse struct {
+	XMLName                    xml.Name                      `xml:"ListMessageMoveTasksResponse"`
+	ListMessageMoveTasksResult sqsListMessageMoveTasksResult `xml:"ListMessageMoveTasksResult"`
+	ResponseMetadata           sqsResponseMetadata           `xml:"ResponseMetadata"`
+}
+
+type sqsListMessageMoveTasksResult struct {
+	Results []sqsMessageMoveTaskXML `xml:"Result"`
+}
+
+type sqsListMessageMoveTasksJSONResponse struct {
+	Results []sqsMessageMoveTaskJSON `json:"Results"`
+}
+
+type sqsMessageMoveTaskXML struct {
+	ApproximateNumberOfMessagesMoved  int64  `xml:"ApproximateNumberOfMessagesMoved,omitempty"`
+	ApproximateNumberOfMessagesToMove int64  `xml:"ApproximateNumberOfMessagesToMove,omitempty"`
+	DestinationArn                    string `xml:"DestinationArn,omitempty"`
+	MaxNumberOfMessagesPerSecond      int    `xml:"MaxNumberOfMessagesPerSecond,omitempty"`
+	SourceArn                         string `xml:"SourceArn,omitempty"`
+	StartedTimestamp                  int64  `xml:"StartedTimestamp,omitempty"`
+	Status                            string `xml:"Status,omitempty"`
+	TaskHandle                        string `xml:"TaskHandle,omitempty"`
+}
+
+type sqsMessageMoveTaskJSON struct {
+	ApproximateNumberOfMessagesMoved  int64  `json:"ApproximateNumberOfMessagesMoved,omitempty"`
+	ApproximateNumberOfMessagesToMove int64  `json:"ApproximateNumberOfMessagesToMove,omitempty"`
+	DestinationArn                    string `json:"DestinationArn,omitempty"`
+	MaxNumberOfMessagesPerSecond      int    `json:"MaxNumberOfMessagesPerSecond,omitempty"`
+	SourceArn                         string `json:"SourceArn,omitempty"`
+	StartedTimestamp                  int64  `json:"StartedTimestamp,omitempty"`
+	Status                            string `json:"Status,omitempty"`
+	TaskHandle                        string `json:"TaskHandle,omitempty"`
 }
 
 type sqsSendMessageResponse struct {
@@ -474,15 +760,38 @@ type sqsResponseMetadata struct {
 }
 
 func writeSQSCreateQueueResponse(c *gin.Context, queue domain.Queue) {
+	queueURL := queueURLOrDefault(queue)
+	c.XML(http.StatusOK, sqsCreateQueueResponse{
+		CreateQueueResult: sqsQueueUrlResult{QueueURL: queueURL},
+		ResponseMetadata:  sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
+}
+
+func writeSQSCreateQueueJSONResponse(c *gin.Context, queue domain.Queue) {
+	c.JSON(http.StatusOK, sqsQueueURLJSONResponse{
+		QueueUrl: queueURLOrDefault(queue),
+	})
+}
+
+func writeSQSGetQueueURLJSONResponse(c *gin.Context, queueURL string) {
+	c.JSON(http.StatusOK, sqsQueueURLJSONResponse{
+		QueueUrl: queueURL,
+	})
+}
+
+func writeSQSGetQueueAttributesJSONResponse(c *gin.Context, view contracts.QueueAttributesView) {
+	c.JSON(http.StatusOK, sqsGetQueueAttributesJSONResponse{
+		Attributes: copyQueueAttributes(view.Attributes),
+	})
+}
+
+func queueURLOrDefault(queue domain.Queue) string {
 	queueURL := queue.URL
 	if queueURL == "" {
 		aws := awscontext.Default()
 		queueURL = "https://sqs." + aws.Region + ".amazonaws.com/" + aws.AccountID + "/" + queue.Name
 	}
-	c.XML(http.StatusOK, sqsCreateQueueResponse{
-		CreateQueueResult: sqsQueueUrlResult{QueueURL: queueURL},
-		ResponseMetadata:  sqsResponseMetadata{RequestID: requestIDFromContext(c)},
-	})
+	return queueURL
 }
 
 func writeSQSGetQueueUrlResponse(c *gin.Context, queueURL string) {
@@ -541,6 +850,130 @@ func writeSQSSetQueueAttributesResponse(c *gin.Context, _ contracts.QueueAttribu
 	c.XML(http.StatusOK, sqsSetQueueAttributesResponse{
 		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
 	})
+}
+
+func writeSQSNoBodyActionResponse(c *gin.Context, root string) {
+	if c == nil {
+		return
+	}
+	if c.Request != nil && c.Request.Header.Get("X-Amz-Target") != "" {
+		c.JSON(http.StatusOK, gin.H{})
+		return
+	}
+	c.XML(http.StatusOK, sqsEmptyActionXMLResponse{
+		XMLName:          xml.Name{Local: root},
+		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
+}
+
+func writeSQSListQueueTagsResponse(c *gin.Context, tags map[string]string) {
+	c.XML(http.StatusOK, sqsListQueueTagsXMLResponse{
+		XMLName: xml.Name{Local: "ListQueueTagsResponse"},
+		ListQueueTagsResult: sqsListQueueTagsResult{
+			Tags: tagsToXML(tags),
+		},
+		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
+}
+
+func writeSQSListDeadLetterSourceQueuesResponse(c *gin.Context, queueURLs []string) {
+	c.XML(http.StatusOK, sqsListDeadLetterSourceQueuesXMLResponse{
+		XMLName: xml.Name{Local: "ListDeadLetterSourceQueuesResponse"},
+		ListDeadLetterSourceQueuesResult: sqsListDeadLetterSourceQueuesResult{
+			QueueUrls: queueURLs,
+		},
+		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
+}
+
+func writeSQSStartMessageMoveTaskResponse(c *gin.Context, taskHandle string) {
+	c.XML(http.StatusOK, sqsStartMessageMoveTaskXMLResponse{
+		XMLName: xml.Name{Local: "StartMessageMoveTaskResponse"},
+		StartMessageMoveTaskResult: sqsStartMessageMoveTaskResult{
+			TaskHandle: taskHandle,
+		},
+		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
+}
+
+func writeSQSCancelMessageMoveTaskResponse(c *gin.Context, moved int64) {
+	c.XML(http.StatusOK, sqsCancelMessageMoveTaskXMLResponse{
+		XMLName: xml.Name{Local: "CancelMessageMoveTaskResponse"},
+		CancelMessageMoveTaskResult: sqsCancelMessageMoveTaskResult{
+			ApproximateNumberOfMessagesMoved: moved,
+		},
+		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
+}
+
+func writeSQSListMessageMoveTasksResponse(c *gin.Context, tasks []domain.MessageMoveTask) {
+	c.XML(http.StatusOK, sqsListMessageMoveTasksXMLResponse{
+		XMLName: xml.Name{Local: "ListMessageMoveTasksResponse"},
+		ListMessageMoveTasksResult: sqsListMessageMoveTasksResult{
+			Results: messageMoveTaskXMLResults(tasks),
+		},
+		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
+}
+
+func tagsToXML(tags map[string]string) []sqsTagXML {
+	if len(tags) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(tags))
+	for key := range tags {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	result := make([]sqsTagXML, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, sqsTagXML{Key: key, Value: tags[key]})
+	}
+	return result
+}
+
+func messageMoveTaskXMLResults(tasks []domain.MessageMoveTask) []sqsMessageMoveTaskXML {
+	if len(tasks) == 0 {
+		return nil
+	}
+	results := make([]sqsMessageMoveTaskXML, 0, len(tasks))
+	for _, task := range tasks {
+		xmlTask := sqsMessageMoveTaskXML{
+			ApproximateNumberOfMessagesMoved: task.ApproximateNumberOfMessagesMoved,
+			DestinationArn:                   task.DestinationArn,
+			MaxNumberOfMessagesPerSecond:     task.MaxNumberOfMessagesPerSecond,
+			SourceArn:                        task.SourceArn,
+			StartedTimestamp:                 task.StartedAt.UnixMilli(),
+			Status:                           task.Status,
+		}
+		if strings.EqualFold(task.Status, "RUNNING") {
+			xmlTask.TaskHandle = task.TaskHandle
+		}
+		results = append(results, xmlTask)
+	}
+	return results
+}
+
+func messageMoveTaskJSONResults(tasks []domain.MessageMoveTask) []sqsMessageMoveTaskJSON {
+	if len(tasks) == 0 {
+		return nil
+	}
+	results := make([]sqsMessageMoveTaskJSON, 0, len(tasks))
+	for _, task := range tasks {
+		item := sqsMessageMoveTaskJSON{
+			ApproximateNumberOfMessagesMoved: task.ApproximateNumberOfMessagesMoved,
+			DestinationArn:                   task.DestinationArn,
+			MaxNumberOfMessagesPerSecond:     task.MaxNumberOfMessagesPerSecond,
+			SourceArn:                        task.SourceArn,
+			StartedTimestamp:                 task.StartedAt.UnixMilli(),
+			Status:                           task.Status,
+		}
+		if strings.EqualFold(task.Status, "RUNNING") {
+			item.TaskHandle = task.TaskHandle
+		}
+		results = append(results, item)
+	}
+	return results
 }
 
 func writeSQSSendMessageResponse(c *gin.Context, result contracts.SendMessageResult) {
@@ -753,4 +1186,16 @@ func sortedQueueAttributeXML(attributes map[string]string) []sqsQueueAttributeXM
 		items = append(items, sqsQueueAttributeXML{Name: key, Value: attributes[key]})
 	}
 	return items
+}
+
+func copyQueueAttributes(attributes map[string]string) map[string]string {
+	if len(attributes) == 0 {
+		return map[string]string{}
+	}
+
+	cloned := make(map[string]string, len(attributes))
+	for key, value := range attributes {
+		cloned[key] = value
+	}
+	return cloned
 }

@@ -129,6 +129,10 @@ func (s *Service) HeadObject(bucket, key string) (domain.Object, error) {
 }
 
 func (s *Service) PutObject(bucket, key string, body io.Reader, contentType string) (domain.Object, error) {
+	return s.PutObjectWithMetadata(bucket, key, body, contentType, nil, nil)
+}
+
+func (s *Service) PutObjectWithMetadata(bucket, key string, body io.Reader, contentType string, metadata, preservedHeaders map[string]string) (domain.Object, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -158,12 +162,14 @@ func (s *Service) PutObject(bucket, key string, body io.Reader, contentType stri
 		return domain.Object{}, err
 	}
 	object, err := s.storeObject(domain.Object{
-		Bucket:      bucket,
-		Key:         key,
-		Size:        size,
-		ContentType: contentType,
-		ETag:        etag,
-		PayloadRef:  payloadRef,
+		Bucket:           bucket,
+		Key:              key,
+		Size:             size,
+		ContentType:      contentType,
+		ETag:             etag,
+		Metadata:         cloneObjectStringMap(metadata),
+		PreservedHeaders: cloneObjectStringMap(preservedHeaders),
+		PayloadRef:       payloadRef,
 	})
 	if err != nil {
 		return domain.Object{}, err

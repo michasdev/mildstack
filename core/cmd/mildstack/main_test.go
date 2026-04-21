@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -712,14 +710,11 @@ func TestRegisterNativeSQSRoutesExposesAwsCompatibleSmokeSurface(t *testing.T) {
 	rootRecorder := httptest.NewRecorder()
 	rootRequest := httptest.NewRequest(http.MethodGet, "/?Action=ListQueues&Version=2012-11-05", nil)
 	router.Engine().ServeHTTP(rootRecorder, rootRequest)
-	if got, want := rootRecorder.Code, http.StatusBadRequest; got != want {
+	if got, want := rootRecorder.Code, http.StatusOK; got != want {
 		t.Fatalf("unexpected sqs root status: got %d want %d", got, want)
 	}
-	if !strings.Contains(rootRecorder.Body.String(), "<ErrorResponse>") {
-		t.Fatalf("expected sqs error response xml, got %q", rootRecorder.Body.String())
-	}
-	if !strings.Contains(rootRecorder.Body.String(), "UnsupportedOperation") {
-		t.Fatalf("expected unsupported operation xml, got %q", rootRecorder.Body.String())
+	if !strings.Contains(rootRecorder.Body.String(), "ListQueuesResponse") {
+		t.Fatalf("expected sqs list queues xml response, got %q", rootRecorder.Body.String())
 	}
 
 	server := httptest.NewServer(router.Engine())
@@ -728,11 +723,9 @@ func TestRegisterNativeSQSRoutesExposesAwsCompatibleSmokeSurface(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
 
-	transport := &captureTransport{base: http.DefaultTransport}
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion("us-east-1"),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "test")),
-		config.WithHTTPClient(&http.Client{Transport: transport}),
 	)
 	if err != nil {
 		t.Fatalf("load aws config: %v", err)
@@ -742,41 +735,15 @@ func TestRegisterNativeSQSRoutesExposesAwsCompatibleSmokeSurface(t *testing.T) {
 		o.BaseEndpoint = aws.String(server.URL)
 	})
 
-	_, err = client.ListQueues(ctx, &sqssdk.ListQueuesInput{})
-	if err == nil {
-		t.Fatal("expected list queues to return an error")
-	}
-	if !strings.Contains(string(transport.body), "<ErrorResponse>") {
-		t.Fatalf("expected captured sqs xml body, got %q", string(transport.body))
-	}
-	if !strings.Contains(string(transport.body), "UnsupportedOperation") && !strings.Contains(string(transport.body), "InvalidQueryParameter") {
-		t.Fatalf("expected captured sqs xml body to contain an SQS error code, got %q", string(transport.body))
-	}
-}
-
-type captureTransport struct {
-	base http.RoundTripper
-	body []byte
-}
-
-func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	resp, err := t.base.RoundTrip(req)
+	result, err := client.ListQueues(ctx, &sqssdk.ListQueuesInput{})
 	if err != nil {
-		return nil, err
+		t.Fatalf("expected list queues to succeed, got: %v", err)
 	}
-	if resp.Body == nil {
-		return resp, nil
+	if result == nil {
+		t.Fatal("expected non-nil list queues result")
 	}
-
-	data, readErr := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if readErr != nil {
-		return nil, readErr
-	}
-	t.body = append([]byte(nil), data...)
-	resp.Body = io.NopCloser(bytes.NewReader(data))
-	return resp, nil
 }
+
 
 func newDynamoDBSmokeClient(t *testing.T, endpoint string) *dynamodb.Client {
 	t.Helper()
