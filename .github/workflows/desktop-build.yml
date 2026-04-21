@@ -9,7 +9,7 @@ name: Build/Release Desktop
 #     paths:
 #       - 'apps/desktop/**'
 #       - '.github/workflows/desktop-build.yml'
-#       - '.github/workflows/electron-builder.yml'
+#       - 'apps/desktop/electron-builder.yml'
 #   workflow_dispatch:
 on:
   workflow_dispatch:
@@ -44,5 +44,5 @@ jobs:
           release: ${{ startsWith(github.ref, 'refs/tags/v') }}
           package_root: apps/desktop
           skip_install: true
-          # Point to the config file in its new location
-          args: --config ../../.github/workflows/electron-builder.yml
+          # Using default config location in apps/desktop/electron-builder.yml
+
