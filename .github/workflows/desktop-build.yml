@@ -1,17 +1,15 @@
 name: Build/Release Desktop
 
-# on:
-#   push:
-#     branches:
-#       - main
-#     tags:
-#       - 'v*'
-#     paths:
-#       - 'apps/desktop/**'
-#       - '.github/workflows/desktop-build.yml'
-#       - 'apps/desktop/electron-builder.yml'
-#   workflow_dispatch:
 on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+    paths:
+      - 'apps/desktop/**'
+      - '.github/workflows/desktop-build.yml'
+      - 'apps/desktop/electron-builder.yml'
   workflow_dispatch:
 
 jobs:
@@ -26,6 +24,12 @@ jobs:
       - name: Check out Git repository
         uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
@@ -36,6 +40,10 @@ jobs:
       - name: Install dependencies
         working-directory: apps/desktop
         run: npm ci
+
+      - name: Build Go CLI binaries
+        working-directory: apps/desktop
+        run: npm run build:cli
 
       - name: Build/release Electron app
         uses: samuelmeuli/action-electron-builder@v1

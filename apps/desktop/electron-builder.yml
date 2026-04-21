@@ -43,3 +43,8 @@ publish:
   owner: michasdev
   repo: mildstack
   releaseType: release
+extraResources:
+  - from: "resources/bin/${os}-${arch}"
+    to: "bin"
+    filter:
+      - "**/*"

@@ -3,10 +3,18 @@ import { getActiveInstancePort, setActiveInstancePort } from "./instance-state"
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
 
+import { app } from 'electron'
+import { join } from 'path'
+
 const userShell = process.env.SHELL || '/bin/zsh'
 const execAsync = (cmd: string) => promisify(exec)(cmd, { shell: userShell })
 
-const mildStackExecutable = import.meta.env.MAIN_VITE_MILDSTACK_EXECUTABLE || 'mildstack'
+let mildStackExecutable = import.meta.env.MAIN_VITE_MILDSTACK_EXECUTABLE || 'mildstack'
+
+if (app.isPackaged) {
+    const binName = process.platform === 'win32' ? 'mildstack.exe' : 'mildstack'
+    mildStackExecutable = `"${join(process.resourcesPath, 'bin', binName)}"`
+}
 
 export type MildStackInstanceStatus = 'running' | 'not_started' | 'errored'
 

@@ -7,6 +7,7 @@ import { registerS3IpcHandlers } from './s3-ipc'
 import { registerDynamoDBIpcHandlers } from './dynamodb-ipc'
 import { registerSQSIpcHandlers } from './sqs-ipc'
 import { registerMildStackIpcHandlers } from './mildstack-ipc'
+import { setupCliInstaller } from './setup-cli'
 
 // Set app name for macOS Dock and Menu Bar as early as possible
 if (process.platform === 'darwin') {
@@ -88,6 +89,7 @@ app.whenReady().then(() => {
 
   createWindow()
   checkForUpdates()
+  setupCliInstaller()
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
