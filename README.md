@@ -82,5 +82,5 @@ MildStack is released under the **MIT License**. Build freely.
 ---
 
 <p align="center">
-  Built with ❤️ for developers by <a href="https://github.com/michasdev">Michel</a> and the community.
+  Built with ❤️ for developers.
 </p>
