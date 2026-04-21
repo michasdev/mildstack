@@ -19,3 +19,5 @@ mildstack
 
 *.env*
 !.env.example
+
+**/resources/bin
