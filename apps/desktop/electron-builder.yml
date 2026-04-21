@@ -43,5 +43,3 @@ publish:
   owner: michasdev
   repo: mildstack
   releaseType: release
-electronDownload:
-  mirror: https://npmmirror.com/mirrors/electron/
