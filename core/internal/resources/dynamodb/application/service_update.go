@@ -149,7 +149,15 @@ func parseUpdateClause(kind, body string, expressionAttributeNames map[string]st
 			if err != nil {
 				return nil, err
 			}
-			value, err := resolveUpdateValue(strings.TrimSpace(part[equalIndex+1:]), expressionAttributeValues)
+			rawValue := strings.TrimSpace(part[equalIndex+1:])
+			if addValue, ok, err := resolveSelfAddUpdateValue(path, rawValue, expressionAttributeNames, expressionAttributeValues); err != nil {
+				return nil, err
+			} else if ok {
+				operations = append(operations, updateOperation{kind: "ADD", path: path, value: addValue})
+				continue
+			}
+
+			value, err := resolveUpdateValue(rawValue, expressionAttributeValues)
 			if err != nil {
 				return nil, err
 			}
@@ -274,6 +282,31 @@ func resolveUpdateValue(raw string, expressionAttributeValues map[string]domain.
 		return domain.AttributeValue{}, fmt.Errorf("dynamodb: unresolved expression attribute value %q", token)
 	}
 	return value.Clone(), nil
+}
+
+func resolveSelfAddUpdateValue(targetPath, raw string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]domain.AttributeValue) (domain.AttributeValue, bool, error) {
+	parts := strings.Split(raw, "+")
+	if len(parts) != 2 {
+		return domain.AttributeValue{}, false, nil
+	}
+
+	leftPath, err := resolveUpdatePath(parts[0], expressionAttributeNames)
+	if err != nil {
+		return domain.AttributeValue{}, false, err
+	}
+	if leftPath != targetPath {
+		return domain.AttributeValue{}, false, fmt.Errorf("dynamodb: unsupported update expression %q", raw)
+	}
+
+	value, err := resolveUpdateValue(parts[1], expressionAttributeValues)
+	if err != nil {
+		return domain.AttributeValue{}, false, err
+	}
+	if value.N == nil {
+		return domain.AttributeValue{}, false, fmt.Errorf("dynamodb: ADD requires a numeric value")
+	}
+
+	return value, true, nil
 }
 
 func addAttribute(existing domain.AttributeValue, delta domain.AttributeValue) (domain.AttributeValue, error) {

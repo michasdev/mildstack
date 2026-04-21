@@ -29,7 +29,7 @@ func NewSQSRegistry() SQSRegistry {
 	byName := make(map[string]SQSRegistrySpec, len(specs))
 
 	for _, spec := range specs {
-		supported := isQueueLifecycleAction(spec.Action) || spec.MessageSurface
+		supported := isQueueLifecycleAction(spec.Action) || isQueueGovernanceAction(spec.Action) || isQueueRedriveAction(spec.Action) || spec.MessageSurface
 		entry := SQSRegistrySpec{
 			Action:           spec.Action,
 			Scope:            spec.Scope,
@@ -97,6 +97,24 @@ func (r SQSRegistry) String() string {
 func isQueueLifecycleAction(action string) bool {
 	switch action {
 	case "CreateQueue", "DeleteQueue", "GetQueueAttributes", "GetQueueUrl", "ListQueues", "PurgeQueue", "SetQueueAttributes":
+		return true
+	default:
+		return false
+	}
+}
+
+func isQueueGovernanceAction(action string) bool {
+	switch action {
+	case "AddPermission", "RemovePermission", "TagQueue", "UntagQueue", "ListQueueTags":
+		return true
+	default:
+		return false
+	}
+}
+
+func isQueueRedriveAction(action string) bool {
+	switch action {
+	case "ListDeadLetterSourceQueues", "StartMessageMoveTask", "CancelMessageMoveTask", "ListMessageMoveTasks":
 		return true
 	default:
 		return false

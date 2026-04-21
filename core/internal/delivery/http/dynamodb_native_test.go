@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	"github.com/michasdev/mildstack/core/internal/resources/dynamodb/application"
+	sqsapplication "github.com/michasdev/mildstack/core/internal/resources/sqs/application"
 )
 
 func TestDynamoDBTargetRegistryDistinguishesSupportedAndUnsupportedOperations(t *testing.T) {
@@ -486,7 +487,7 @@ func TestDynamoDBNativeRoutesReturnAWSShapedErrors(t *testing.T) {
 	RegisterDynamoDBNativeRoutes(engine, application.New())
 
 	malformed := doDynamoDBRequest(t, engine, dynamoRequest{
-		target: "ListTables",
+		target: "DynamoDB_20120810.",
 		body:   `{}`,
 	})
 	assertDynamoError(t, malformed, http.StatusBadRequest, "ValidationException")
@@ -502,7 +503,7 @@ func TestDynamoDBNativeRoutesReturnAWSShapedErrors(t *testing.T) {
 			}
 		}`,
 	})
-	assertDynamoError(t, unsupportedQuery, http.StatusBadRequest, "ValidationException")
+	assertDynamoError(t, unsupportedQuery, http.StatusBadRequest, "ResourceNotFoundException")
 
 	unsupportedScan := doDynamoDBRequest(t, engine, dynamoRequest{
 		target: "DynamoDB_20120810.Scan",
@@ -561,7 +562,7 @@ func TestDynamoDBNativeRoutesReturnAWSShapedErrors(t *testing.T) {
 		target: "DynamoDB_20120810.DeleteItem",
 		body: `{
 			"TableName":"mildstack-records",
-			"Key":{"id":{"S":"missing"}}
+			"Key":{"id":{"S":"missing"},"version":{"N":"1"}}
 		}`,
 	})
 	assertDynamoError(t, missingItem, http.StatusBadRequest, "ResourceNotFoundException")
@@ -570,7 +571,7 @@ func TestDynamoDBNativeRoutesReturnAWSShapedErrors(t *testing.T) {
 		target: "DynamoDB_20120810.UpdateItem",
 		body: `{
 			"TableName":"mildstack-records",
-			"Key":{"id":{"S":"missing"}},
+			"Key":{"id":{"S":"missing"},"version":{"N":"1"}},
 			"UpdateExpression":"SET title = :title",
 			"ConditionExpression":"attribute_exists(id)",
 			"ExpressionAttributeValues":{
@@ -604,6 +605,56 @@ func TestDynamoDBNativeRoutesReturnAWSShapedErrors(t *testing.T) {
 		}`,
 	})
 	assertDynamoError(t, missingDelete, http.StatusBadRequest, "ResourceNotFoundException")
+}
+
+func TestDynamoDBSQSRoutingIsolation(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+	RegisterSQSNativeRoutes(engine, sqsapplication.New())
+	engine.POST("/", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	sqsResponse := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "AmazonSQS.ListQueues",
+		body:   `{}`,
+	})
+	if got, want := sqsResponse.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected sqs status: got %d want %d\nbody: %s", got, want, sqsResponse.body)
+	}
+	if strings.Contains(sqsResponse.body, "ValidationException") {
+		t.Fatalf("expected sqs request to bypass dynamodb validation error, got %q", sqsResponse.body)
+	}
+	if !strings.Contains(sqsResponse.body, "\"QueueUrls\"") {
+		t.Fatalf("expected sqs response body, got %q", sqsResponse.body)
+	}
+
+	dynamoResponse := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.ListTables",
+		body:   `{}`,
+	})
+	if got, want := dynamoResponse.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected dynamodb status: got %d want %d\nbody: %s", got, want, dynamoResponse.body)
+	}
+	if !strings.Contains(dynamoResponse.body, "\"TableNames\"") {
+		t.Fatalf("expected dynamodb response body, got %q", dynamoResponse.body)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", dynamoDBJSONContentType)
+	engine.ServeHTTP(recorder, request)
+
+	if got, want := recorder.Code, http.StatusBadRequest; got != want {
+		t.Fatalf("unexpected missing-target status: got %d want %d\nbody: %s", got, want, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "ValidationException") {
+		t.Fatalf("expected missing target to bypass dynamodb validation error, got %q", recorder.Body.String())
+	}
 }
 
 func TestDynamoDBNativeRoutesHandleQueryAndScanSubset(t *testing.T) {
@@ -771,6 +822,198 @@ func TestDynamoDBNativeRoutesHandleQueryAndScanSubset(t *testing.T) {
 	}
 	if got, want := scanResponse.Items[0]["title"].S, "keep-two"; got != want {
 		t.Fatalf("unexpected scan page 2 item: got %q want %q", got, want)
+	}
+}
+
+func TestDynamoDBNativeRoutesSupportIndexedQueryAndProjection(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+
+	createTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"mildstack-indexed",
+			"KeySchema":[
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions":[
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"},
+				{"AttributeName":"gsi_pk","AttributeType":"S"},
+				{"AttributeName":"gsi_sk","AttributeType":"S"},
+				{"AttributeName":"title","AttributeType":"S"}
+			],
+			"GlobalSecondaryIndexes":[
+				{
+					"IndexName":"gsi-title",
+					"KeySchema":[
+						{"AttributeName":"gsi_pk","KeyType":"HASH"},
+						{"AttributeName":"gsi_sk","KeyType":"RANGE"}
+					],
+					"Projection":{
+						"ProjectionType":"INCLUDE",
+						"NonKeyAttributes":["title"]
+					}
+				}
+			]
+		}`,
+	})
+	if got, want := createTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create table status: got %d want %d", got, want)
+	}
+
+	for _, item := range []struct {
+		sk    string
+		gsiSK string
+		title string
+	}{
+		{sk: "001", gsiSK: "001", title: "indexed-one"},
+		{sk: "002", gsiSK: "002", title: "indexed-two"},
+	} {
+		response := doDynamoDBRequest(t, engine, dynamoRequest{
+			target: "DynamoDB_20120810.PutItem",
+			body: `{
+				"TableName":"mildstack-indexed",
+				"Item":{
+					"pk":{"S":"series#1"},
+					"sk":{"S":"` + item.sk + `"},
+					"gsi_pk":{"S":"group#1"},
+					"gsi_sk":{"S":"` + item.gsiSK + `"},
+					"title":{"S":"` + item.title + `"}
+				}
+			}`,
+		})
+		if got, want := response.code, http.StatusOK; got != want {
+			t.Fatalf("unexpected put item status: got %d want %d", got, want)
+		}
+	}
+
+	queryPage1 := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.Query",
+		body: `{
+			"TableName":"mildstack-indexed",
+			"IndexName":"gsi-title",
+			"KeyConditionExpression":"gsi_pk = :pk AND gsi_sk BETWEEN :start AND :end",
+			"ProjectionExpression":"gsi_pk, title",
+			"ExpressionAttributeValues":{
+				":pk":{"S":"group#1"},
+				":start":{"S":"001"},
+				":end":{"S":"002"}
+			},
+			"Limit":1
+		}`,
+	})
+	if got, want := queryPage1.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected indexed query status: got %d want %d", got, want)
+	}
+	var queryResponse queryResponse
+	decodeResponse(t, queryPage1.body, &queryResponse)
+	if got, want := queryResponse.Count, 1; got != want {
+		t.Fatalf("unexpected indexed query count: got %d want %d", got, want)
+	}
+	if got, want := queryResponse.Items[0]["title"].S, "indexed-one"; got != want {
+		t.Fatalf("unexpected indexed query title: got %q want %q", got, want)
+	}
+	if _, ok := queryResponse.Items[0]["gsi_sk"]; ok {
+		t.Fatal("expected projected gsi sort key to be omitted from query item")
+	}
+
+	queryPage2 := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.Query",
+		body: `{
+			"TableName":"mildstack-indexed",
+			"IndexName":"gsi-title",
+			"KeyConditionExpression":"gsi_pk = :pk AND gsi_sk BETWEEN :start AND :end",
+			"ProjectionExpression":"gsi_pk, title",
+			"ExpressionAttributeValues":{
+				":pk":{"S":"group#1"},
+				":start":{"S":"001"},
+				":end":{"S":"002"}
+			},
+			"Limit":1,
+			"ExclusiveStartKey":{
+				"gsi_pk":{"S":"group#1"},
+				"gsi_sk":{"S":"001"},
+				"pk":{"S":"series#1"},
+				"sk":{"S":"001"}
+			}
+		}`,
+	})
+	if got, want := queryPage2.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected indexed query page 2 status: got %d want %d", got, want)
+	}
+	decodeResponse(t, queryPage2.body, &queryResponse)
+	if got, want := queryResponse.Count, 1; got != want {
+		t.Fatalf("unexpected indexed query page 2 count: got %d want %d", got, want)
+	}
+	if got, want := queryResponse.Items[0]["title"].S, "indexed-two"; got != want {
+		t.Fatalf("unexpected indexed query page 2 title: got %q want %q", got, want)
+	}
+}
+
+func TestDynamoDBNativeRoutesHonorCustomTableKeyNames(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+
+	createTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"mildstack-custom-keys",
+			"KeySchema":[
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions":[
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"}
+			],
+			"BillingMode":"PAY_PER_REQUEST"
+		}`,
+	})
+	if got, want := createTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create table status: got %d want %d", got, want)
+	}
+
+	putItem := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.PutItem",
+		body: `{
+			"TableName":"mildstack-custom-keys",
+			"Item":{
+				"pk":{"S":"account#1"},
+				"sk":{"S":"meta"},
+				"title":{"S":"custom schema"}
+			}
+		}`,
+	})
+	if got, want := putItem.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected put item status: got %d want %d\nbody: %s", got, want, putItem.body)
+	}
+
+	getItem := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.GetItem",
+		body: `{
+			"TableName":"mildstack-custom-keys",
+			"Key":{
+				"pk":{"S":"account#1"},
+				"sk":{"S":"meta"}
+			}
+		}`,
+	})
+	if got, want := getItem.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected get item status: got %d want %d\nbody: %s", got, want, getItem.body)
+	}
+
+	var response getItemResponse
+	decodeResponse(t, getItem.body, &response)
+	if got, want := response.Item["title"].S, "custom schema"; got != want {
+		t.Fatalf("unexpected fetched title: got %q want %q", got, want)
 	}
 }
 

@@ -132,7 +132,7 @@ func ParseSQSRequest(req *http.Request) (SQSRequestContext, error) {
 	}
 
 	if pathContext.Kind == SQSRequestKindRoot && isQueueScopedAction(action) {
-		queueName, accountID, err := queueNameFromQueueURL(values.Get("QueueUrl"))
+		queueName, accountID, err := queueContextFromValuesForAction(action, values)
 		if err != nil {
 			return SQSRequestContext{}, err
 		}
@@ -280,6 +280,9 @@ func mergeJSONValues(dst url.Values, payload map[string]any) {
 				}
 				continue
 			}
+			for i, item := range typed {
+				dst.Set(fmt.Sprintf("%s.%d", key, i+1), fmt.Sprint(item))
+			}
 		default:
 			dst.Set(key, fmt.Sprint(value))
 		}
@@ -390,11 +393,68 @@ func queueNameFromQueueURL(raw string) (string, string, error) {
 
 func isQueueScopedAction(action string) bool {
 	switch action {
-	case "ChangeMessageVisibility", "ChangeMessageVisibilityBatch", "DeleteMessage", "DeleteMessageBatch", "ReceiveMessage", "SendMessage", "SendMessageBatch":
+	case "AddPermission", "CancelMessageMoveTask", "ChangeMessageVisibility", "ChangeMessageVisibilityBatch", "DeleteMessage", "DeleteMessageBatch", "DeleteQueue", "GetQueueAttributes", "ListDeadLetterSourceQueues", "ListMessageMoveTasks", "ListQueueTags", "PurgeQueue", "ReceiveMessage", "RemovePermission", "SendMessage", "SendMessageBatch", "SetQueueAttributes", "StartMessageMoveTask", "TagQueue", "UntagQueue":
 		return true
 	default:
 		return false
 	}
+}
+
+func queueContextFromValuesForAction(action string, values url.Values) (string, string, error) {
+	if queueName, accountID, err := queueNameFromQueueURL(values.Get("QueueUrl")); err == nil {
+		return queueName, accountID, nil
+	}
+
+	switch action {
+	case "StartMessageMoveTask", "ListMessageMoveTasks", "ListDeadLetterSourceQueues":
+		queueName, accountID, err := queueNameFromQueueARN(values.Get("SourceArn"))
+		if err != nil {
+			return "", "", err
+		}
+		return queueName, accountID, nil
+	case "CancelMessageMoveTask":
+		queueName, accountID, err := queueNameFromTaskHandle(values.Get("TaskHandle"))
+		if err != nil {
+			return "", "", err
+		}
+		return queueName, accountID, nil
+	default:
+		queueName, accountID, err := queueNameFromQueueURL(values.Get("QueueUrl"))
+		if err != nil {
+			return "", "", err
+		}
+		return queueName, accountID, nil
+	}
+}
+
+func queueNameFromQueueARN(raw string) (string, string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", "", fmt.Errorf("sqs: SourceArn is required")
+	}
+
+	parts := strings.Split(trimmed, ":")
+	if len(parts) < 6 || !strings.HasPrefix(trimmed, "arn:") {
+		return "", "", fmt.Errorf("sqs: invalid SourceArn: %s", raw)
+	}
+	queueName := parts[len(parts)-1]
+	accountID := parts[len(parts)-2]
+	if queueName == "" || accountID == "" {
+		return "", "", fmt.Errorf("sqs: invalid SourceArn: %s", raw)
+	}
+	return queueName, accountID, nil
+}
+
+func queueNameFromTaskHandle(raw string) (string, string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", "", fmt.Errorf("sqs: TaskHandle is required")
+	}
+	parts := strings.SplitN(trimmed, "|", 2)
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		return "", "", fmt.Errorf("sqs: invalid TaskHandle: %s", raw)
+	}
+	return queueNameFromQueueARN(parts[0])
 }
 
 func sendMessageRequestFromValues(values url.Values) contracts.SendMessageRequest {
@@ -457,8 +517,132 @@ func receiveMessageRequestFromValues(values url.Values) contracts.ReceiveMessage
 	}
 }
 
+func tagQueueTagsFromValues(values url.Values) map[string]string {
+	type queueTag struct {
+		key   string
+		value string
+	}
+
+	direct := map[string]string{}
+	byIndex := map[int]*queueTag{}
+	for key, list := range values {
+		if len(list) == 0 {
+			continue
+		}
+
+		parts := strings.Split(key, ".")
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Tags") {
+			direct[strings.TrimSpace(parts[1])] = list[0]
+			continue
+		}
+		if len(parts) < 4 || !strings.EqualFold(parts[0], "Tags") || !strings.EqualFold(parts[1], "entry") {
+			continue
+		}
+		index, err := strconv.Atoi(parts[2])
+		if err != nil || index <= 0 {
+			continue
+		}
+		entry := byIndex[index]
+		if entry == nil {
+			entry = &queueTag{}
+			byIndex[index] = entry
+		}
+		switch strings.ToLower(parts[3]) {
+		case "key":
+			entry.key = strings.TrimSpace(list[0])
+		case "value":
+			entry.value = list[0]
+		}
+	}
+
+	if len(byIndex) == 0 {
+		if len(direct) == 0 {
+			return nil
+		}
+		return direct
+	}
+
+	indices := make([]int, 0, len(byIndex))
+	for index := range byIndex {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+
+	tags := make(map[string]string, len(indices))
+	for _, index := range indices {
+		entry := byIndex[index]
+		if entry == nil || entry.key == "" {
+			continue
+		}
+		tags[entry.key] = entry.value
+	}
+	if len(tags) == 0 {
+		return nil
+	}
+	for key, value := range direct {
+		tags[key] = value
+	}
+	return tags
+}
+
+func queueTagKeysFromValues(values url.Values) []string {
+	keys := make([]string, 0)
+	for _, raw := range append(values["TagKey"], values["TagKeys"]...) {
+		if trimmed := strings.TrimSpace(raw); trimmed != "" {
+			keys = append(keys, trimmed)
+		}
+	}
+	keys = append(keys, listValuesFromPrefix(values, "TagKey")...)
+	keys = append(keys, listValuesFromPrefix(values, "TagKeys")...)
+	sort.Strings(keys)
+	keys = uniqueStringSlice(keys)
+	return keys
+}
+
+func permissionAccountsFromValues(values url.Values) []string {
+	return uniqueStringSlice(append(listValuesFromPrefix(values, "AWSAccountIds"), values["AWSAccountIds"]...))
+}
+
+func permissionActionsFromValues(values url.Values) []string {
+	return uniqueStringSlice(append(listValuesFromPrefix(values, "Actions"), values["Actions"]...))
+}
+
+func uniqueStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			seen[trimmed] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	ordered := make([]string, 0, len(seen))
+	for value := range seen {
+		ordered = append(ordered, value)
+	}
+	sort.Strings(ordered)
+	return ordered
+}
+
+func startMessageMoveTaskRequestFromValues(values url.Values) (string, string, int) {
+	return strings.TrimSpace(values.Get("SourceArn")), strings.TrimSpace(values.Get("DestinationArn")), parseIntValue(values.Get("MaxNumberOfMessagesPerSecond"))
+}
+
+func cancelMessageMoveTaskRequestFromValues(values url.Values) string {
+	return strings.TrimSpace(values.Get("TaskHandle"))
+}
+
+func listMessageMoveTasksRequestFromValues(values url.Values) (string, int) {
+	return strings.TrimSpace(values.Get("SourceArn")), parseIntValue(values.Get("MaxResults"))
+}
+
 func sendMessageBatchEntriesFromValues(values url.Values) []contracts.SendMessageBatchRequestEntry {
 	return batchEntriesFromValues(values, []string{"Entries", "SendMessageBatchRequestEntry"}, func(entry url.Values, item contracts.SendMessageBatchRequestEntry) contracts.SendMessageBatchRequestEntry {
+		item.Id = entry.Get("Id")
 		item.DelaySeconds = parseIntValue(entry.Get("DelaySeconds"))
 		item.MessageAttributes = messageAttributesFromValues(entry, "MessageAttribute")
 		item.MessageBody = entry.Get("MessageBody")
@@ -471,6 +655,7 @@ func sendMessageBatchEntriesFromValues(values url.Values) []contracts.SendMessag
 
 func deleteMessageBatchEntriesFromValues(values url.Values) []contracts.DeleteMessageBatchRequestEntry {
 	return batchEntriesFromValues(values, []string{"Entries", "DeleteMessageBatchRequestEntry"}, func(entry url.Values, item contracts.DeleteMessageBatchRequestEntry) contracts.DeleteMessageBatchRequestEntry {
+		item.Id = entry.Get("Id")
 		item.ReceiptHandle = entry.Get("ReceiptHandle")
 		return item
 	})
@@ -478,6 +663,7 @@ func deleteMessageBatchEntriesFromValues(values url.Values) []contracts.DeleteMe
 
 func changeMessageVisibilityBatchEntriesFromValues(values url.Values) []contracts.ChangeMessageVisibilityBatchRequestEntry {
 	return batchEntriesFromValues(values, []string{"Entries", "ChangeMessageVisibilityBatchRequestEntry"}, func(entry url.Values, item contracts.ChangeMessageVisibilityBatchRequestEntry) contracts.ChangeMessageVisibilityBatchRequestEntry {
+		item.Id = entry.Get("Id")
 		item.ReceiptHandle = entry.Get("ReceiptHandle")
 		item.VisibilityTimeout = parseIntValue(entry.Get("VisibilityTimeout"))
 		return item
@@ -539,7 +725,7 @@ func messageAttributesFromValues(values url.Values, prefix string) map[string]co
 			continue
 		}
 		parts := strings.Split(key, ".")
-		if len(parts) < 4 || !strings.EqualFold(parts[0], prefix) {
+		if len(parts) < 3 || !strings.EqualFold(parts[0], prefix) {
 			continue
 		}
 		index, err := strconv.Atoi(parts[1])
