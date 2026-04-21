@@ -1,4 +1,4 @@
-import { getActiveInstancePort } from './instance-state'
+import { resolveLocalEndpoint } from './local-endpoint'
 import { registerValidatedHandler } from './ipc-middleware'
 import {
   DynamoDBClient,
@@ -269,8 +269,7 @@ function getClient(region = 'us-east-1'): DynamoDBClient {
 }
 
 function resolveDynamoDBEndpoint(): string {
-  const port = getActiveInstancePort()
-  return process.env.MILDSTACK_DYNAMODB_ENDPOINT || process.env.AWS_DYNAMODB_ENDPOINT || `http://127.0.0.1:${port}`
+  return resolveLocalEndpoint('dynamodb')
 }
 
 function normalizeRegion(region?: string): string {

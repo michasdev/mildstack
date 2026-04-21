@@ -27,6 +27,9 @@ function ResourcesPage(): React.JSX.Element {
     if (title === "DynamoDB") {
       navigate('/resources/dynamodb')
     }
+    if (title === "SQS") {
+      navigate('/resources/sqs')
+    }
   }
 
   return (

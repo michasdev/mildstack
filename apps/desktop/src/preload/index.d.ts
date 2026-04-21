@@ -61,6 +61,31 @@ interface DynamoDBBrowserApi {
   getItem(tableName: string, key: any, region?: string): Promise<any>
 }
 
+interface SQSBrowserApi {
+  listQueues(region?: string): Promise<any[]>
+  createQueue(queueName: string, isFifo?: boolean, region?: string): Promise<string>
+  deleteQueue(queueUrl: string, region?: string): Promise<void>
+  getQueueAttributes(queueUrl: string, region?: string): Promise<Record<string, string>>
+  setQueueAttributes(queueUrl: string, attributes: Record<string, string>, region?: string): Promise<void>
+  purgeQueue(queueUrl: string, region?: string): Promise<void>
+  sendMessage(
+    queueUrl: string,
+    body: string,
+    delaySeconds?: number,
+    messageGroupId?: string,
+    messageDeduplicationId?: string,
+    messageAttributes?: Record<string, any>,
+    region?: string
+  ): Promise<string>
+  receiveMessages(
+    queueUrl: string,
+    maxMessages?: number,
+    waitTimeSeconds?: number,
+    region?: string
+  ): Promise<any[]>
+  deleteMessage(queueUrl: string, receiptHandle: string, region?: string): Promise<void>
+}
+
 interface InstanceApi {
   setSelected(port: number): Promise<void>
 }
@@ -98,6 +123,7 @@ declare global {
     api: {
       s3: S3BrowserApi
       dynamodb: DynamoDBBrowserApi
+      sqs: SQSBrowserApi
       instance: InstanceApi
       mildstack: MildStackApi
     }
