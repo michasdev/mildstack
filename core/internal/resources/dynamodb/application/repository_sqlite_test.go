@@ -70,8 +70,26 @@ func TestSQLiteRepositoryBootstrapAndPersistAcrossRestart(t *testing.T) {
 		PartitionKey: "pk",
 		SortKey:      "sk",
 		BillingMode:  "PAY_PER_REQUEST",
-		Status:       domain.TableStatusCreating,
-		CreatedAt:    state.Tables[0].CreatedAt,
+		AttributeDefinitions: []domain.AttributeDefinition{
+			{Name: "pk", Type: "S"},
+			{Name: "sk", Type: "S"},
+			{Name: "gsi_pk", Type: "S"},
+			{Name: "gsi_sk", Type: "S"},
+		},
+		GlobalSecondaryIndexes: []domain.SecondaryIndex{
+			{
+				Name: "gsi-archive",
+				KeySchema: []domain.KeySchemaElement{
+					{AttributeName: "gsi_pk", KeyType: "HASH"},
+					{AttributeName: "gsi_sk", KeyType: "RANGE"},
+				},
+				Projection: domain.Projection{
+					Type: "KEYS_ONLY",
+				},
+			},
+		},
+		Status:    domain.TableStatusCreating,
+		CreatedAt: state.Tables[0].CreatedAt,
 	})
 	state.UpsertItem(domain.Item{
 		Table: "mildstack-archive",
@@ -115,6 +133,15 @@ func TestSQLiteRepositoryBootstrapAndPersistAcrossRestart(t *testing.T) {
 	}
 	if got, want := fetched.Attributes["title"].Any(), "archive item"; got != want {
 		t.Fatalf("unexpected item title after restart: got %q want %q", got, want)
+	}
+	if got, want := len(archive.GlobalSecondaryIndexes), 1; got != want {
+		t.Fatalf("unexpected gsi count after restart: got %d want %d", got, want)
+	}
+	if got, want := archive.GlobalSecondaryIndexes[0].Name, "gsi-archive"; got != want {
+		t.Fatalf("unexpected gsi name after restart: got %q want %q", got, want)
+	}
+	if got, want := archive.GlobalSecondaryIndexes[0].Projection.Type, "KEYS_ONLY"; got != want {
+		t.Fatalf("unexpected gsi projection after restart: got %q want %q", got, want)
 	}
 
 	statePath := filepath.Join(repo.storageDir, sqliteFileName)

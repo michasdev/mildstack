@@ -93,6 +93,44 @@ func TestCatalogHasTransportScopeMetadata(t *testing.T) {
 	}
 }
 
+func TestCatalogMarksPhase39MessageSurfaceActions(t *testing.T) {
+	t.Helper()
+
+	byAction := make(map[string]ActionSpec)
+	for _, spec := range Catalog() {
+		byAction[spec.Action] = spec
+	}
+
+	messageActions := []string{
+		"ChangeMessageVisibility",
+		"ChangeMessageVisibilityBatch",
+		"DeleteMessage",
+		"DeleteMessageBatch",
+		"ReceiveMessage",
+		"SendMessage",
+		"SendMessageBatch",
+	}
+	for _, action := range messageActions {
+		spec, ok := byAction[action]
+		if !ok {
+			t.Fatalf("expected action %q in catalog", action)
+		}
+		if !spec.MessageSurface {
+			t.Fatalf("expected action %s to be marked as message surface", action)
+		}
+	}
+
+	for _, action := range []string{"AddPermission", "CreateQueue", "ListQueues", "TagQueue"} {
+		spec, ok := byAction[action]
+		if !ok {
+			t.Fatalf("expected action %q in catalog", action)
+		}
+		if spec.MessageSurface {
+			t.Fatalf("did not expect action %s to be marked as message surface", action)
+		}
+	}
+}
+
 func TestCatalogReturnsCopies(t *testing.T) {
 	t.Helper()
 

@@ -52,9 +52,15 @@ type BatchGetItemResult struct {
 }
 
 type TransactWriteItem struct {
-	Table     string
-	PutItem   map[string]domain.AttributeValue
-	DeleteKey map[string]domain.AttributeValue
+	Table                     string
+	PutItem                   map[string]domain.AttributeValue
+	DeleteKey                 map[string]domain.AttributeValue
+	UpdateKey                 map[string]domain.AttributeValue
+	UpdateExpression          string
+	ConditionExpression       string
+	ExpressionAttributeNames  map[string]string
+	ExpressionAttributeValues map[string]domain.AttributeValue
+	ConditionCheckKey         map[string]domain.AttributeValue
 }
 
 type TransactWriteItemsRequest struct {

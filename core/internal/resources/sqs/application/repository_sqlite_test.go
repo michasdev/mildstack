@@ -81,6 +81,8 @@ func TestSQLiteRepositoryPersistsQueueAndMessageStateAcrossRestart(t *testing.T)
 		},
 		CreatedAt: createdAt,
 		UpdatedAt: createdAt.Add(time.Minute),
+		DeletedAt: createdAt.Add(2 * time.Minute),
+		PurgedAt:  createdAt.Add(3 * time.Minute),
 	})
 	state.Messages = append(state.Messages, domain.Message{
 		Queue:                 "queue-a",
@@ -111,6 +113,27 @@ func TestSQLiteRepositoryPersistsQueueAndMessageStateAcrossRestart(t *testing.T)
 		Queue:   "queue-a",
 		Message: "message-1",
 		Detail:  map[string]string{"reason": "retry"},
+	}
+	state.QueueTags["queue-a"] = map[string]string{
+		"env": "dev",
+	}
+	state.QueuePermissions["queue-a"] = map[string]domain.QueuePermission{
+		"label-a": {
+			Label:         "label-a",
+			AWSAccountIDs: []string{"123456789012"},
+			Actions:       []string{"SendMessage"},
+		},
+	}
+	state.MoveTasks["queue-a"] = map[string]domain.MessageMoveTask{
+		"task-1": {
+			TaskHandle:                       "task-1",
+			SourceQueue:                      "queue-a",
+			SourceArn:                        "arn:aws:sqs:us-east-1:123456789012:queue-a",
+			DestinationArn:                   "arn:aws:sqs:us-east-1:123456789012:queue-dlq",
+			MaxNumberOfMessagesPerSecond:     10,
+			ApproximateNumberOfMessagesMoved: 2,
+			Status:                           "RUNNING",
+		},
 	}
 
 	if err := repo.Save(state); err != nil {
@@ -150,6 +173,12 @@ func TestSQLiteRepositoryPersistsQueueAndMessageStateAcrossRestart(t *testing.T)
 	}
 	if got, want := queue.Recovery.DeadLetterQueue, "queue-dlq"; got != want {
 		t.Fatalf("unexpected dead-letter queue after restart: got %q want %q", got, want)
+	}
+	if got, want := queue.DeletedAt, createdAt.Add(2*time.Minute); !got.Equal(want) {
+		t.Fatalf("unexpected deleted_at after restart: got %v want %v", got, want)
+	}
+	if got, want := queue.PurgedAt, createdAt.Add(3*time.Minute); !got.Equal(want) {
+		t.Fatalf("unexpected purged_at after restart: got %v want %v", got, want)
 	}
 
 	message := loaded.Messages[0]
@@ -194,6 +223,15 @@ func TestSQLiteRepositoryPersistsQueueAndMessageStateAcrossRestart(t *testing.T)
 	}
 	if got, want := loaded.RecoveryMetadata["queue-a/message-1"].Detail["reason"], "retry"; got != want {
 		t.Fatalf("unexpected recovery metadata after restart: got %q want %q", got, want)
+	}
+	if got, want := loaded.QueueTags["queue-a"]["env"], "dev"; got != want {
+		t.Fatalf("unexpected queue tags after restart: got %q want %q", got, want)
+	}
+	if got, want := loaded.QueuePermissions["queue-a"]["label-a"].Actions[0], "SendMessage"; got != want {
+		t.Fatalf("unexpected queue permission after restart: got %q want %q", got, want)
+	}
+	if got, want := loaded.MoveTasks["queue-a"]["task-1"].Status, "RUNNING"; got != want {
+		t.Fatalf("unexpected move task status after restart: got %q want %q", got, want)
 	}
 
 	statePath := filepath.Join(baseDir, "instances", "instance-a", "sqs", sqliteFileName)

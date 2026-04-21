@@ -2,6 +2,7 @@ package application
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	ddbcontracts "github.com/michasdev/mildstack/core/internal/resources/dynamodb/contracts"
@@ -50,7 +51,8 @@ func (s *Service) BatchWriteItem(request BatchWriteItemRequest) (BatchWriteItemR
 		if tableName == "" {
 			return BatchWriteItemResult{}, fmt.Errorf("dynamodb: table name is required")
 		}
-		if !next.HasTable(tableName) {
+		tableInfo, ok := next.Table(tableName)
+		if !ok {
 			return BatchWriteItemResult{}, fmt.Errorf("dynamodb: table %q not found", tableName)
 		}
 
@@ -70,7 +72,7 @@ func (s *Service) BatchWriteItem(request BatchWriteItemRequest) (BatchWriteItemR
 				break
 			}
 
-			key, err := batchDocumentKey(itemRequest.PutItem, itemRequest.DeleteKey)
+			key, err := batchDocumentKey(tableInfo, itemRequest.PutItem, itemRequest.DeleteKey)
 			if err != nil {
 				return BatchWriteItemResult{}, err
 			}
@@ -125,7 +127,8 @@ func (s *Service) BatchGetItem(request BatchGetItemRequest) (BatchGetItemResult,
 		if tableName == "" {
 			return BatchGetItemResult{}, fmt.Errorf("dynamodb: table name is required")
 		}
-		if !s.state.HasTable(tableName) {
+		tableInfo, ok := s.state.Table(tableName)
+		if !ok {
 			return BatchGetItemResult{}, fmt.Errorf("dynamodb: table %q not found", tableName)
 		}
 
@@ -142,7 +145,7 @@ func (s *Service) BatchGetItem(request BatchGetItemRequest) (BatchGetItemResult,
 				break
 			}
 
-			key, err := itemDocumentKey(keyDocument)
+			key, err := itemDocumentKey(tableInfo, keyDocument)
 			if err != nil {
 				return BatchGetItemResult{}, err
 			}
@@ -194,16 +197,17 @@ func (s *Service) TransactWriteItems(request TransactWriteItemsRequest) error {
 		if tableName == "" {
 			return fmt.Errorf("dynamodb: table name is required")
 		}
-		if !next.HasTable(tableName) {
+		tableInfo, ok := next.Table(tableName)
+		if !ok {
 			return fmt.Errorf("dynamodb: table %q not found", tableName)
 		}
 
-		key, err := transactDocumentKey(item.PutItem, item.DeleteKey)
+		key, err := transactDocumentKey(tableInfo, item)
 		if err != nil {
 			return err
 		}
 
-		if previous, ok := seen[tableName+"|"+key]; ok {
+		if previous, ok := seen[tableName+"|"+key]; ok && len(item.ConditionCheckKey) == 0 && len(request.Items[previous].ConditionCheckKey) == 0 {
 			reason := TransactionCanceledReason{
 				Code:    transactionConflictCode,
 				Message: "same item targeted more than once",
@@ -220,6 +224,59 @@ func (s *Service) TransactWriteItems(request TransactWriteItemsRequest) error {
 				Key:        key,
 				Attributes: cloneAttributeDocument(item.PutItem),
 			})
+			continue
+		}
+
+		if len(item.UpdateKey) > 0 {
+			current, _ := next.Item(tableName, key)
+			attrs := cloneDocument(current.Attributes)
+			if attrs == nil {
+				attrs = make(map[string]domain.AttributeValue)
+			}
+
+			if err := evaluateUpdateCondition(attrs, item.ConditionExpression, item.ExpressionAttributeNames, item.ExpressionAttributeValues); err != nil {
+				return &TransactionCanceledError{Reasons: cancellationReasonsForTransaction(index, len(request.Items), "ConditionalCheckFailed", "The conditional request failed")}
+			}
+
+			operations, err := parseUpdateExpression(item.UpdateExpression, item.ExpressionAttributeNames, item.ExpressionAttributeValues)
+			if err != nil {
+				return err
+			}
+			for _, operation := range operations {
+				path := operation.path
+				if path == tableInfo.PartitionKey || (tableInfo.SortKey != "" && path == tableInfo.SortKey) {
+					return fmt.Errorf("dynamodb: unsupported update to key attribute %q", path)
+				}
+
+				switch operation.kind {
+				case "SET":
+					attrs[path] = operation.value.Clone()
+				case "REMOVE":
+					delete(attrs, path)
+				case "ADD":
+					updated, err := addAttribute(attrs[path], operation.value)
+					if err != nil {
+						return err
+					}
+					attrs[path] = updated
+				default:
+					return fmt.Errorf("dynamodb: unsupported update operation %q", operation.kind)
+				}
+			}
+
+			next.UpsertItem(domain.Item{
+				Table:      tableName,
+				Key:        key,
+				Attributes: attrs,
+			})
+			continue
+		}
+
+		if len(item.ConditionCheckKey) > 0 {
+			current, _ := next.Item(tableName, key)
+			if err := evaluateUpdateCondition(current.Attributes, item.ConditionExpression, item.ExpressionAttributeNames, item.ExpressionAttributeValues); err != nil {
+				return &TransactionCanceledError{Reasons: cancellationReasonsForTransaction(index, len(request.Items), "ConditionalCheckFailed", "The conditional request failed")}
+			}
 			continue
 		}
 
@@ -246,11 +303,12 @@ func (s *Service) TransactGetItems(request TransactGetItemsRequest) (TransactGet
 		if tableName == "" {
 			return TransactGetItemsResult{}, fmt.Errorf("dynamodb: table name is required")
 		}
-		if !s.state.HasTable(tableName) {
+		tableInfo, ok := s.state.Table(tableName)
+		if !ok {
 			return TransactGetItemsResult{}, fmt.Errorf("dynamodb: table %q not found", tableName)
 		}
 
-		key, err := itemDocumentKey(item.Key)
+		key, err := itemDocumentKey(tableInfo, item.Key)
 		if err != nil {
 			return TransactGetItemsResult{}, err
 		}
@@ -317,59 +375,127 @@ func cloneAttributeDocument(values map[string]domain.AttributeValue) map[string]
 	return copied
 }
 
-func batchDocumentKey(putItem, deleteKey map[string]domain.AttributeValue) (string, error) {
+func batchDocumentKey(table domain.Table, putItem, deleteKey map[string]domain.AttributeValue) (string, error) {
 	if len(putItem) > 0 {
-		return itemDocumentKey(putItem)
+		return itemRecordKey(table, putItem)
 	}
 	if len(deleteKey) > 0 {
-		return itemDocumentKey(deleteKey)
+		return itemDocumentKey(table, deleteKey)
 	}
 	return "", fmt.Errorf("dynamodb: batch request item is required")
 }
 
-func transactDocumentKey(putItem, deleteKey map[string]domain.AttributeValue) (string, error) {
-	if len(putItem) > 0 {
-		return itemDocumentKey(putItem)
+func transactDocumentKey(table domain.Table, item TransactWriteItem) (string, error) {
+	if len(item.PutItem) > 0 {
+		return itemRecordKey(table, item.PutItem)
 	}
-	if len(deleteKey) > 0 {
-		return itemDocumentKey(deleteKey)
+	if len(item.DeleteKey) > 0 {
+		return itemDocumentKey(table, item.DeleteKey)
+	}
+	if len(item.UpdateKey) > 0 {
+		return itemDocumentKey(table, item.UpdateKey)
+	}
+	if len(item.ConditionCheckKey) > 0 {
+		return itemDocumentKey(table, item.ConditionCheckKey)
 	}
 	return "", fmt.Errorf("dynamodb: transaction item is required")
 }
 
-func itemDocumentKey(values map[string]domain.AttributeValue) (string, error) {
+func itemDocumentKey(table domain.Table, values map[string]domain.AttributeValue) (string, error) {
 	if len(values) == 0 {
 		return "", fmt.Errorf("dynamodb: item is required")
 	}
 
-	if idValue, ok := values["id"]; ok {
-		id, err := attributeValueToKeyComponent(idValue)
-		if err != nil {
-			return "", err
-		}
-		if skValue, ok := values["sk"]; ok {
-			sk, err := attributeValueToKeyComponent(skValue)
-			if err != nil {
-				return "", err
-			}
-			if strings.TrimSpace(sk) != "" {
-				return id + "|" + sk, nil
-			}
-		}
-		return id, nil
+	if strings.TrimSpace(table.PartitionKey) == "" {
+		return "", fmt.Errorf("dynamodb: table %q has no partition key", table.Name)
 	}
 
-	if len(values) == 1 {
-		for _, value := range values {
-			return attributeValueToKeyComponent(value)
-		}
+	expectedCount := 1
+	if strings.TrimSpace(table.SortKey) != "" {
+		expectedCount++
+	}
+	if len(values) != expectedCount {
+		return "", fmt.Errorf("dynamodb: unsupported key attributes %q", strings.Join(sortedAttributeKeys(values), ", "))
 	}
 
+	partitionValue, ok := values[table.PartitionKey]
+	if !ok {
+		return "", fmt.Errorf("dynamodb: missing key attribute %q", table.PartitionKey)
+	}
+
+	partitionKey, err := attributeValueToKeyComponent(partitionValue)
+	if err != nil {
+		return "", err
+	}
+
+	if strings.TrimSpace(table.SortKey) == "" {
+		return partitionKey, nil
+	}
+
+	sortValue, ok := values[table.SortKey]
+	if !ok {
+		return "", fmt.Errorf("dynamodb: missing key attribute %q", table.SortKey)
+	}
+
+	sortKey, err := attributeValueToKeyComponent(sortValue)
+	if err != nil {
+		return "", err
+	}
+
+	return partitionKey + "|" + sortKey, nil
+}
+
+func itemRecordKey(table domain.Table, values map[string]domain.AttributeValue) (string, error) {
+	if len(values) == 0 {
+		return "", fmt.Errorf("dynamodb: item is required")
+	}
+	if strings.TrimSpace(table.PartitionKey) == "" {
+		return "", fmt.Errorf("dynamodb: table %q has no partition key", table.Name)
+	}
+
+	partitionValue, ok := values[table.PartitionKey]
+	if !ok {
+		return "", fmt.Errorf("dynamodb: missing key attribute %q", table.PartitionKey)
+	}
+
+	partitionKey, err := attributeValueToKeyComponent(partitionValue)
+	if err != nil {
+		return "", err
+	}
+
+	if strings.TrimSpace(table.SortKey) == "" {
+		return partitionKey, nil
+	}
+
+	sortValue, ok := values[table.SortKey]
+	if !ok {
+		return "", fmt.Errorf("dynamodb: missing key attribute %q", table.SortKey)
+	}
+
+	sortKey, err := attributeValueToKeyComponent(sortValue)
+	if err != nil {
+		return "", err
+	}
+
+	return partitionKey + "|" + sortKey, nil
+}
+
+func sortedAttributeKeys(values map[string]domain.AttributeValue) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)
 	}
-	return "", fmt.Errorf("dynamodb: unsupported key attributes %q", strings.Join(keys, ", "))
+	sort.Strings(keys)
+	return keys
+}
+
+func cancellationReasonsForTransaction(index, size int, code, message string) []TransactionCanceledReason {
+	reasons := make([]TransactionCanceledReason, size)
+	reasons[index] = TransactionCanceledReason{
+		Code:    code,
+		Message: message,
+	}
+	return reasons
 }
 
 func attributeValueToKeyComponent(value domain.AttributeValue) (string, error) {
