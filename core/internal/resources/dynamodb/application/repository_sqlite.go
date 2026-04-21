@@ -22,7 +22,7 @@ import (
 const (
 	sqliteFileName   = "state.db"
 	schemaVersionKey = "schema_version"
-	schemaVersion    = "2"
+	schemaVersion    = "3"
 )
 
 type SQLiteRepository struct {
@@ -138,6 +138,9 @@ func (r *SQLiteRepository) bootstrap() error {
 			partition_key TEXT NOT NULL,
 			sort_key TEXT NOT NULL,
 			billing_mode TEXT NOT NULL,
+			attribute_definitions_json TEXT NOT NULL DEFAULT '[]',
+			global_secondary_indexes_json TEXT NOT NULL DEFAULT '[]',
+			local_secondary_indexes_json TEXT NOT NULL DEFAULT '[]',
 			status TEXT NOT NULL DEFAULT 'ACTIVE',
 			created_at_ns INTEGER NOT NULL DEFAULT 0,
 			activation_at_ns INTEGER NOT NULL DEFAULT 0,
@@ -160,6 +163,18 @@ func (r *SQLiteRepository) bootstrap() error {
 	}
 
 	if err := ensureTableColumn(ctx, tx, "dynamodb_tables", "status", "TEXT NOT NULL DEFAULT 'ACTIVE'"); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := ensureTableColumn(ctx, tx, "dynamodb_tables", "attribute_definitions_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := ensureTableColumn(ctx, tx, "dynamodb_tables", "global_secondary_indexes_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := ensureTableColumn(ctx, tx, "dynamodb_tables", "local_secondary_indexes_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -197,7 +212,7 @@ func (r *SQLiteRepository) loadLocked() (domain.State, error) {
 	state := domain.State{Service: "dynamodb"}
 
 	tableRows, err := r.db.QueryContext(ctx, `
-		SELECT name, partition_key, sort_key, billing_mode, status, created_at_ns, activation_at_ns, deleted_at_ns
+		SELECT name, partition_key, sort_key, billing_mode, attribute_definitions_json, global_secondary_indexes_json, local_secondary_indexes_json, status, created_at_ns, activation_at_ns, deleted_at_ns
 		FROM dynamodb_tables
 		ORDER BY name
 	`)
@@ -208,9 +223,25 @@ func (r *SQLiteRepository) loadLocked() (domain.State, error) {
 
 	for tableRows.Next() {
 		var table domain.Table
-		var createdAtNS, activationAtNS, deletedAtNS int64
-		if err := tableRows.Scan(&table.Name, &table.PartitionKey, &table.SortKey, &table.BillingMode, &table.Status, &createdAtNS, &activationAtNS, &deletedAtNS); err != nil {
+		var (
+			attributeDefinitionsJSON   string
+			globalSecondaryIndexesJSON string
+			localSecondaryIndexesJSON  string
+			createdAtNS                int64
+			activationAtNS             int64
+			deletedAtNS                int64
+		)
+		if err := tableRows.Scan(&table.Name, &table.PartitionKey, &table.SortKey, &table.BillingMode, &attributeDefinitionsJSON, &globalSecondaryIndexesJSON, &localSecondaryIndexesJSON, &table.Status, &createdAtNS, &activationAtNS, &deletedAtNS); err != nil {
 			return domain.State{}, fmt.Errorf("dynamodb: scan table: %w", err)
+		}
+		if err := json.Unmarshal([]byte(attributeDefinitionsJSON), &table.AttributeDefinitions); err != nil {
+			return domain.State{}, fmt.Errorf("dynamodb: decode table attribute definitions %q: %w", table.Name, err)
+		}
+		if err := json.Unmarshal([]byte(globalSecondaryIndexesJSON), &table.GlobalSecondaryIndexes); err != nil {
+			return domain.State{}, fmt.Errorf("dynamodb: decode table global secondary indexes %q: %w", table.Name, err)
+		}
+		if err := json.Unmarshal([]byte(localSecondaryIndexesJSON), &table.LocalSecondaryIndexes); err != nil {
+			return domain.State{}, fmt.Errorf("dynamodb: decode table local secondary indexes %q: %w", table.Name, err)
 		}
 		table.CreatedAt = unixNanoToTime(createdAtNS)
 		table.ActivationAt = unixNanoToTime(activationAtNS)
@@ -278,8 +309,8 @@ func (r *SQLiteRepository) saveLocked(state domain.State) error {
 	}
 
 	tableStmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO dynamodb_tables(name, partition_key, sort_key, billing_mode, status, created_at_ns, activation_at_ns, deleted_at_ns)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO dynamodb_tables(name, partition_key, sort_key, billing_mode, attribute_definitions_json, global_secondary_indexes_json, local_secondary_indexes_json, status, created_at_ns, activation_at_ns, deleted_at_ns)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		_ = tx.Rollback()
@@ -293,6 +324,9 @@ func (r *SQLiteRepository) saveLocked(state domain.State) error {
 			table.PartitionKey,
 			table.SortKey,
 			table.BillingMode,
+			string(marshalJSONOrPanic(table.AttributeDefinitions)),
+			string(marshalJSONOrPanic(table.GlobalSecondaryIndexes)),
+			string(marshalJSONOrPanic(table.LocalSecondaryIndexes)),
 			table.Status,
 			timeToUnixNano(table.CreatedAt),
 			timeToUnixNano(table.ActivationAt),
@@ -360,6 +394,9 @@ func validatePersistedState(state domain.State) error {
 		if table.BillingMode == "" {
 			return fmt.Errorf("dynamodb: invalid table %q: empty billing mode", table.Name)
 		}
+		if err := validatePersistedIndexDefinitions(table); err != nil {
+			return err
+		}
 		if _, ok := tables[table.Name]; ok {
 			return fmt.Errorf("dynamodb: duplicate table %q", table.Name)
 		}
@@ -388,6 +425,9 @@ func normalizePersistedTable(table domain.Table) domain.Table {
 	table.PartitionKey = strings.TrimSpace(table.PartitionKey)
 	table.SortKey = strings.TrimSpace(table.SortKey)
 	table.BillingMode = strings.TrimSpace(table.BillingMode)
+	table.AttributeDefinitions = normalizePersistedAttributeDefinitions(table.AttributeDefinitions)
+	table.GlobalSecondaryIndexes = normalizePersistedSecondaryIndexes(table.GlobalSecondaryIndexes)
+	table.LocalSecondaryIndexes = normalizePersistedSecondaryIndexes(table.LocalSecondaryIndexes)
 	table.Status = strings.ToUpper(strings.TrimSpace(table.Status))
 
 	switch table.Status {
@@ -399,6 +439,173 @@ func normalizePersistedTable(table domain.Table) domain.Table {
 	}
 
 	return table
+}
+
+func validatePersistedIndexDefinitions(table domain.Table) error {
+	indexNames := map[string]struct{}{}
+	for _, index := range table.GlobalSecondaryIndexes {
+		if err := validatePersistedSecondaryIndex(table, index, false); err != nil {
+			return fmt.Errorf("dynamodb: invalid table %q global secondary index: %w", table.Name, err)
+		}
+		if _, ok := indexNames[index.Name]; ok {
+			return fmt.Errorf("dynamodb: invalid table %q: duplicate index %q", table.Name, index.Name)
+		}
+		indexNames[index.Name] = struct{}{}
+	}
+	for _, index := range table.LocalSecondaryIndexes {
+		if err := validatePersistedSecondaryIndex(table, index, true); err != nil {
+			return fmt.Errorf("dynamodb: invalid table %q local secondary index: %w", table.Name, err)
+		}
+		if _, ok := indexNames[index.Name]; ok {
+			return fmt.Errorf("dynamodb: invalid table %q: duplicate index %q", table.Name, index.Name)
+		}
+		indexNames[index.Name] = struct{}{}
+	}
+	return nil
+}
+
+func validatePersistedSecondaryIndex(table domain.Table, index domain.SecondaryIndex, local bool) error {
+	if strings.TrimSpace(index.Name) == "" {
+		return fmt.Errorf("empty name")
+	}
+	if len(index.KeySchema) == 0 {
+		return fmt.Errorf("index %q has no key schema", index.Name)
+	}
+	var hashCount, rangeCount int
+	var partitionKey, sortKey string
+	for _, element := range index.KeySchema {
+		switch strings.ToUpper(strings.TrimSpace(element.KeyType)) {
+		case "HASH":
+			hashCount++
+			partitionKey = strings.TrimSpace(element.AttributeName)
+		case "RANGE":
+			rangeCount++
+			sortKey = strings.TrimSpace(element.AttributeName)
+		}
+	}
+	if hashCount != 1 {
+		return fmt.Errorf("index %q must have exactly one HASH key", index.Name)
+	}
+	if local {
+		if partitionKey != table.PartitionKey {
+			return fmt.Errorf("index %q must reuse table partition key %q", index.Name, table.PartitionKey)
+		}
+	} else if partitionKey == table.PartitionKey {
+		return fmt.Errorf("index %q must not reuse table partition key %q", index.Name, table.PartitionKey)
+	}
+	if rangeCount > 1 {
+		return fmt.Errorf("index %q has duplicate RANGE keys", index.Name)
+	}
+	if strings.EqualFold(index.Projection.Type, "INCLUDE") && len(index.Projection.NonKeyAttributes) == 0 {
+		return fmt.Errorf("index %q INCLUDE projection requires non-key attributes", index.Name)
+	}
+	_ = sortKey
+	return nil
+}
+
+func normalizePersistedAttributeDefinitions(source []domain.AttributeDefinition) []domain.AttributeDefinition {
+	if len(source) == 0 {
+		return nil
+	}
+	normalized := make([]domain.AttributeDefinition, 0, len(source))
+	seen := make(map[string]struct{}, len(source))
+	for _, definition := range source {
+		definition.Name = strings.TrimSpace(definition.Name)
+		definition.Type = strings.ToUpper(strings.TrimSpace(definition.Type))
+		if definition.Name == "" {
+			continue
+		}
+		if _, ok := seen[definition.Name]; ok {
+			continue
+		}
+		seen[definition.Name] = struct{}{}
+		normalized = append(normalized, definition)
+	}
+	return normalized
+}
+
+func normalizePersistedSecondaryIndexes(source []domain.SecondaryIndex) []domain.SecondaryIndex {
+	if len(source) == 0 {
+		return nil
+	}
+	normalized := make([]domain.SecondaryIndex, 0, len(source))
+	for _, index := range source {
+		index.Name = strings.TrimSpace(index.Name)
+		index.KeySchema = normalizePersistedKeySchema(index.KeySchema)
+		index.Projection = normalizePersistedProjection(index.Projection)
+		if index.Name == "" {
+			continue
+		}
+		normalized = append(normalized, index)
+	}
+	return normalized
+}
+
+func normalizePersistedKeySchema(source []domain.KeySchemaElement) []domain.KeySchemaElement {
+	if len(source) == 0 {
+		return nil
+	}
+	normalized := make([]domain.KeySchemaElement, 0, len(source))
+	seen := map[string]struct{}{}
+	for _, element := range source {
+		element.AttributeName = strings.TrimSpace(element.AttributeName)
+		element.KeyType = strings.ToUpper(strings.TrimSpace(element.KeyType))
+		if element.AttributeName == "" || element.KeyType == "" {
+			continue
+		}
+		key := element.KeyType + ":" + element.AttributeName
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, element)
+	}
+	return normalized
+}
+
+func normalizePersistedProjection(projection domain.Projection) domain.Projection {
+	projection.Type = strings.ToUpper(strings.TrimSpace(projection.Type))
+	switch projection.Type {
+	case "", "ALL":
+		projection.Type = "ALL"
+		projection.NonKeyAttributes = nil
+	case "KEYS_ONLY":
+		projection.NonKeyAttributes = nil
+	case "INCLUDE":
+		projection.NonKeyAttributes = uniqueStringsLocal(projection.NonKeyAttributes)
+	default:
+		projection.Type = "ALL"
+		projection.NonKeyAttributes = nil
+	}
+	return projection
+}
+
+func marshalJSONOrPanic(value any) []byte {
+	data, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
+
+func uniqueStringsLocal(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	return unique
 }
 
 func ensureTableColumn(ctx context.Context, tx *sql.Tx, tableName, columnName, definition string) error {
@@ -619,12 +826,12 @@ func decodeAttributeValue(raw json.RawMessage) (domain.AttributeValue, error) {
 }
 
 type storedAttributeValue struct {
-	S    *string                     `json:"S,omitempty"`
-	N    *string                     `json:"N,omitempty"`
-	BOOL *bool                       `json:"BOOL,omitempty"`
-	NULL bool                        `json:"NULL,omitempty"`
-	M    map[string]json.RawMessage  `json:"M,omitempty"`
-	L    []json.RawMessage           `json:"L,omitempty"`
+	S    *string                    `json:"S,omitempty"`
+	N    *string                    `json:"N,omitempty"`
+	BOOL *bool                      `json:"BOOL,omitempty"`
+	NULL bool                       `json:"NULL,omitempty"`
+	M    map[string]json.RawMessage `json:"M,omitempty"`
+	L    []json.RawMessage          `json:"L,omitempty"`
 }
 
 func decodeStoredAttributeValue(raw json.RawMessage) (domain.AttributeValue, bool, error) {

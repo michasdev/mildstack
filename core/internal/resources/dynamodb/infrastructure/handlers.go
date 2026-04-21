@@ -4,7 +4,7 @@ import "github.com/michasdev/mildstack/core/internal/resources/dynamodb/domain"
 
 type Service interface {
 	ListTables() []domain.Table
-	CreateTable(name, partitionKey, sortKey, billingMode string) (domain.Table, error)
+	CreateTable(name, partitionKey, sortKey, billingMode string, specs ...domain.CreateTableSpec) (domain.Table, error)
 	GetItem(table, key string) (domain.Item, error)
 	PutItem(table, key string, attributes map[string]domain.AttributeValue) (domain.Item, error)
 	UpdateItem(table, key, updateExpression, conditionExpression string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]domain.AttributeValue) (domain.Item, error)
@@ -33,10 +33,13 @@ type ListTablesResponse struct {
 }
 
 type CreateTableRequest struct {
-	Name         string
-	PartitionKey string
-	SortKey      string
-	BillingMode  string
+	Name                   string
+	PartitionKey           string
+	SortKey                string
+	BillingMode            string
+	AttributeDefinitions   []domain.AttributeDefinition
+	GlobalSecondaryIndexes []domain.SecondaryIndex
+	LocalSecondaryIndexes  []domain.SecondaryIndex
 }
 
 type CreateTableResponse struct {
@@ -63,12 +66,12 @@ type PutItemResponse struct {
 }
 
 type UpdateItemRequest struct {
-	Table                      string
-	Key                        string
-	UpdateExpression           string
-	ConditionExpression        string
-	ExpressionAttributeNames   map[string]string
-	ExpressionAttributeValues  map[string]domain.AttributeValue
+	Table                     string
+	Key                       string
+	UpdateExpression          string
+	ConditionExpression       string
+	ExpressionAttributeNames  map[string]string
+	ExpressionAttributeValues map[string]domain.AttributeValue
 }
 
 type UpdateItemResponse struct {
@@ -105,7 +108,11 @@ func (h Handlers) ListTables() ListTablesResponse {
 }
 
 func (h Handlers) CreateTable(request CreateTableRequest) (CreateTableResponse, error) {
-	table, err := h.service.CreateTable(request.Name, request.PartitionKey, request.SortKey, request.BillingMode)
+	table, err := h.service.CreateTable(request.Name, request.PartitionKey, request.SortKey, request.BillingMode, domain.CreateTableSpec{
+		AttributeDefinitions:   request.AttributeDefinitions,
+		GlobalSecondaryIndexes: request.GlobalSecondaryIndexes,
+		LocalSecondaryIndexes:  request.LocalSecondaryIndexes,
+	})
 	if err != nil {
 		return CreateTableResponse{}, err
 	}

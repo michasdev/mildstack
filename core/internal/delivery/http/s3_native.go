@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,28 @@ type S3NativeService interface {
 	HeadObject(bucket, key string) (s3domain.Object, error)
 	PutObject(bucket, key string, body io.Reader, contentType string) (s3domain.Object, error)
 	DeleteObject(bucket, key string) error
+}
+
+type s3NativeMetadataWriter interface {
+	PutObjectWithMetadata(bucket, key string, body io.Reader, contentType string, metadata, preservedHeaders map[string]string) (s3domain.Object, error)
+}
+
+type s3NativeListObjectsV2Service interface {
+	ListObjectsV2(request s3domain.ListObjectsV2Request) (s3domain.ListObjectsV2Result, error)
+}
+
+type s3NativeDeleteObjectsService interface {
+	DeleteObjects(request s3domain.DeleteObjectsRequest) (s3domain.DeleteObjectsResult, error)
+}
+
+type s3NativeCopyObjectService interface {
+	CopyObject(bucket, key, sourceBucket, sourceKey string) (s3domain.Object, error)
+}
+
+type s3NativeMultipartService interface {
+	CreateMultipartUpload(bucket, key, contentType string, metadata, preservedHeaders map[string]string) (s3domain.MultipartUpload, error)
+	UploadPart(uploadID string, partNumber int, body []byte) (s3domain.MultipartPart, error)
+	CompleteMultipartUpload(uploadID string) (s3domain.Object, error)
 }
 
 const s3XMLNamespace = "http://s3.amazonaws.com/doc/2006-03-01/"
@@ -55,6 +78,7 @@ func (h s3NativeHandler) dispatch(c *gin.Context) bool {
 	if path == "" || strings.HasPrefix(path, "/api/") {
 		return false
 	}
+	query := c.Request.URL.Query()
 
 	trimmed := strings.Trim(path, "/")
 	segments := []string{}
@@ -74,6 +98,11 @@ func (h s3NativeHandler) dispatch(c *gin.Context) bool {
 		case http.MethodPut:
 			h.createBucket(c, bucket)
 			return true
+		case http.MethodPost:
+			if hasS3QueryParam(query, "delete") {
+				h.deleteObjects(c, bucket)
+				return true
+			}
 		case http.MethodHead:
 			h.headBucket(c, bucket)
 			return true
@@ -81,6 +110,10 @@ func (h s3NativeHandler) dispatch(c *gin.Context) bool {
 			h.deleteBucket(c, bucket)
 			return true
 		case http.MethodGet:
+			if strings.TrimSpace(query.Get("list-type")) == "2" {
+				h.listObjectsV2(c, bucket)
+				return true
+			}
 			h.listObjects(c, bucket)
 			return true
 		}
@@ -88,10 +121,27 @@ func (h s3NativeHandler) dispatch(c *gin.Context) bool {
 		bucket := segments[0]
 		key := strings.Join(segments[1:], "/")
 		switch c.Request.Method {
+		case http.MethodPost:
+			switch {
+			case hasS3QueryParam(query, "uploads"):
+				h.createMultipartUpload(c, bucket, key)
+				return true
+			case strings.TrimSpace(query.Get("uploadId")) != "":
+				h.completeMultipartUpload(c, bucket, key)
+				return true
+			}
 		case http.MethodGet:
 			h.getObject(c, bucket, key)
 			return true
 		case http.MethodPut:
+			switch {
+			case strings.TrimSpace(query.Get("uploadId")) != "" && strings.TrimSpace(query.Get("partNumber")) != "":
+				h.uploadPart(c, bucket, key)
+				return true
+			case strings.TrimSpace(c.GetHeader("x-amz-copy-source")) != "":
+				h.copyObject(c, bucket, key)
+				return true
+			}
 			h.putObject(c, bucket, key)
 			return true
 		case http.MethodHead:
@@ -136,6 +186,54 @@ func (h s3NativeHandler) listObjects(c *gin.Context, bucketName string) {
 		XMLNS:    s3XMLNamespace,
 		Name:     bucketName,
 		Contents: listObjectEntriesFromDomain(objects),
+	})
+}
+
+func (h s3NativeHandler) listObjectsV2(c *gin.Context, bucketName string) {
+	service, ok := h.service.(s3NativeListObjectsV2Service)
+	if !ok {
+		writeS3Error(c, io.ErrUnexpectedEOF)
+		return
+	}
+
+	maxKeys := 0
+	if raw := strings.TrimSpace(c.Query("max-keys")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			writeS3Error(c, err)
+			return
+		}
+		maxKeys = parsed
+	}
+
+	result, err := service.ListObjectsV2(s3domain.ListObjectsV2Request{
+		Bucket:            bucketName,
+		Prefix:            strings.TrimSpace(c.Query("prefix")),
+		Delimiter:         strings.TrimSpace(c.Query("delimiter")),
+		ContinuationToken: strings.TrimSpace(c.Query("continuation-token")),
+		StartAfter:        strings.TrimSpace(c.Query("start-after")),
+		MaxKeys:           maxKeys,
+	})
+	if err != nil {
+		writeS3Error(c, err)
+		return
+	}
+
+	c.Header("Content-Type", "application/xml")
+	c.XML(http.StatusOK, listObjectsV2Result{
+		XMLName:               xml.Name{Local: "ListBucketResult"},
+		XMLNS:                 s3XMLNamespace,
+		Name:                  result.Bucket,
+		Prefix:                result.Prefix,
+		Delimiter:             result.Delimiter,
+		MaxKeys:               result.MaxKeys,
+		KeyCount:              result.KeyCount,
+		IsTruncated:           result.IsTruncated,
+		ContinuationToken:     result.ContinuationToken,
+		NextContinuationToken: result.NextContinuationToken,
+		StartAfter:            result.StartAfter,
+		Contents:              listObjectEntriesFromDomain(result.Objects),
+		CommonPrefixes:        commonPrefixEntries(result.CommonPrefixes),
 	})
 }
 
@@ -199,8 +297,18 @@ func (h s3NativeHandler) putObject(c *gin.Context, bucketName, objectKey string)
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
+	metadata := metadataFromHeaders(c.Request.Header)
+	preservedHeaders := preservedObjectHeaders(c.Request.Header)
 
-	object, err := h.service.PutObject(bucketName, objectKey, c.Request.Body, contentType)
+	var (
+		object s3domain.Object
+		err    error
+	)
+	if writer, ok := h.service.(s3NativeMetadataWriter); ok {
+		object, err = writer.PutObjectWithMetadata(bucketName, objectKey, c.Request.Body, contentType, metadata, preservedHeaders)
+	} else {
+		object, err = h.service.PutObject(bucketName, objectKey, c.Request.Body, contentType)
+	}
 	if err != nil {
 		writeS3Error(c, err)
 		return
@@ -210,12 +318,169 @@ func (h s3NativeHandler) putObject(c *gin.Context, bucketName, objectKey string)
 	c.Status(http.StatusOK)
 }
 
+func (h s3NativeHandler) copyObject(c *gin.Context, bucketName, objectKey string) {
+	service, ok := h.service.(s3NativeCopyObjectService)
+	if !ok {
+		writeS3Error(c, io.ErrUnexpectedEOF)
+		return
+	}
+
+	sourceBucket, sourceKey, err := parseCopySource(c.GetHeader("x-amz-copy-source"))
+	if err != nil {
+		writeS3Error(c, err)
+		return
+	}
+
+	object, err := service.CopyObject(bucketName, objectKey, sourceBucket, sourceKey)
+	if err != nil {
+		writeS3Error(c, err)
+		return
+	}
+
+	c.Header("Content-Type", "application/xml")
+	c.XML(http.StatusOK, copyObjectResult{
+		XMLName:      xml.Name{Local: "CopyObjectResult"},
+		XMLNS:        s3XMLNamespace,
+		LastModified: object.LastModified.UTC().Format(time.RFC3339),
+		ETag:         object.ETag,
+	})
+}
+
 func (h s3NativeHandler) deleteObject(c *gin.Context, bucketName, objectKey string) {
 	if err := h.service.DeleteObject(bucketName, objectKey); err != nil {
 		writeS3Error(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h s3NativeHandler) deleteObjects(c *gin.Context, bucketName string) {
+	service, ok := h.service.(s3NativeDeleteObjectsService)
+	if !ok {
+		writeS3Error(c, io.ErrUnexpectedEOF)
+		return
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		writeS3Error(c, err)
+		return
+	}
+
+	var payload deleteObjectsRequest
+	if err := xml.Unmarshal(body, &payload); err != nil {
+		writeS3Error(c, err)
+		return
+	}
+
+	keys := make([]string, 0, len(payload.Objects))
+	for _, object := range payload.Objects {
+		key := strings.TrimSpace(object.Key)
+		if key == "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+
+	result, err := service.DeleteObjects(s3domain.DeleteObjectsRequest{
+		Bucket: bucketName,
+		Keys:   keys,
+		Quiet:  payload.Quiet,
+	})
+	if err != nil {
+		writeS3Error(c, err)
+		return
+	}
+
+	c.Header("Content-Type", "application/xml")
+	c.XML(http.StatusOK, deleteObjectsResult{
+		XMLName: xml.Name{Local: "DeleteResult"},
+		XMLNS:   s3XMLNamespace,
+		Deleted: deletedObjectEntries(result.Deleted),
+		Errors:  deleteObjectErrorEntries(result.Errors),
+	})
+}
+
+func (h s3NativeHandler) createMultipartUpload(c *gin.Context, bucketName, objectKey string) {
+	service, ok := h.service.(s3NativeMultipartService)
+	if !ok {
+		writeS3Error(c, io.ErrUnexpectedEOF)
+		return
+	}
+
+	upload, err := service.CreateMultipartUpload(
+		bucketName,
+		objectKey,
+		strings.TrimSpace(c.GetHeader("Content-Type")),
+		metadataFromHeaders(c.Request.Header),
+		preservedObjectHeaders(c.Request.Header),
+	)
+	if err != nil {
+		writeS3Error(c, err)
+		return
+	}
+
+	c.Header("Content-Type", "application/xml")
+	c.XML(http.StatusOK, createMultipartUploadResult{
+		XMLName:  xml.Name{Local: "InitiateMultipartUploadResult"},
+		XMLNS:    s3XMLNamespace,
+		Bucket:   upload.Bucket,
+		Key:      upload.Key,
+		UploadID: upload.UploadID,
+	})
+}
+
+func (h s3NativeHandler) uploadPart(c *gin.Context, _, _ string) {
+	service, ok := h.service.(s3NativeMultipartService)
+	if !ok {
+		writeS3Error(c, io.ErrUnexpectedEOF)
+		return
+	}
+
+	partNumber, err := strconv.Atoi(strings.TrimSpace(c.Query("partNumber")))
+	if err != nil {
+		writeS3Error(c, err)
+		return
+	}
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		writeS3Error(c, err)
+		return
+	}
+
+	part, err := service.UploadPart(strings.TrimSpace(c.Query("uploadId")), partNumber, body)
+	if err != nil {
+		writeS3Error(c, err)
+		return
+	}
+
+	c.Header("ETag", part.ETag)
+	c.Status(http.StatusOK)
+}
+
+func (h s3NativeHandler) completeMultipartUpload(c *gin.Context, bucketName, objectKey string) {
+	service, ok := h.service.(s3NativeMultipartService)
+	if !ok {
+		writeS3Error(c, io.ErrUnexpectedEOF)
+		return
+	}
+
+	object, err := service.CompleteMultipartUpload(strings.TrimSpace(c.Query("uploadId")))
+	if err != nil {
+		writeS3Error(c, err)
+		return
+	}
+
+	c.Header("Content-Type", "application/xml")
+	c.XML(http.StatusOK, completeMultipartUploadResult{
+		XMLName:      xml.Name{Local: "CompleteMultipartUploadResult"},
+		XMLNS:        s3XMLNamespace,
+		Location:     "/" + bucketName + "/" + objectKey,
+		Bucket:       bucketName,
+		Key:          objectKey,
+		ETag:         object.ETag,
+		LastModified: object.LastModified.UTC().Format(time.RFC3339),
+	})
 }
 
 type listBucketsResult struct {
@@ -246,12 +511,83 @@ type listObjectsResult struct {
 	Contents []listObjectEntry `xml:"Contents"`
 }
 
+type listObjectsV2Result struct {
+	XMLName               xml.Name            `xml:"ListBucketResult"`
+	XMLNS                 string              `xml:"xmlns,attr"`
+	Name                  string              `xml:"Name"`
+	Prefix                string              `xml:"Prefix,omitempty"`
+	Delimiter             string              `xml:"Delimiter,omitempty"`
+	MaxKeys               int                 `xml:"MaxKeys"`
+	KeyCount              int                 `xml:"KeyCount"`
+	IsTruncated           bool                `xml:"IsTruncated"`
+	ContinuationToken     string              `xml:"ContinuationToken,omitempty"`
+	NextContinuationToken string              `xml:"NextContinuationToken,omitempty"`
+	StartAfter            string              `xml:"StartAfter,omitempty"`
+	Contents              []listObjectEntry   `xml:"Contents"`
+	CommonPrefixes        []commonPrefixEntry `xml:"CommonPrefixes,omitempty"`
+}
+
 type listObjectEntry struct {
 	Key          string `xml:"Key"`
 	LastModified string `xml:"LastModified"`
 	ETag         string `xml:"ETag"`
 	Size         int64  `xml:"Size"`
 	StorageClass string `xml:"StorageClass"`
+}
+
+type commonPrefixEntry struct {
+	Prefix string `xml:"Prefix"`
+}
+
+type deleteObjectsRequest struct {
+	Quiet   bool                       `xml:"Quiet"`
+	Objects []deleteObjectsRequestItem `xml:"Object"`
+}
+
+type deleteObjectsRequestItem struct {
+	Key string `xml:"Key"`
+}
+
+type deleteObjectsResult struct {
+	XMLName xml.Name                 `xml:"DeleteResult"`
+	XMLNS   string                   `xml:"xmlns,attr"`
+	Deleted []deletedObjectEntry     `xml:"Deleted,omitempty"`
+	Errors  []deleteObjectErrorEntry `xml:"Error,omitempty"`
+}
+
+type deletedObjectEntry struct {
+	Key string `xml:"Key"`
+}
+
+type deleteObjectErrorEntry struct {
+	Key     string `xml:"Key"`
+	Code    string `xml:"Code"`
+	Message string `xml:"Message"`
+}
+
+type copyObjectResult struct {
+	XMLName      xml.Name `xml:"CopyObjectResult"`
+	XMLNS        string   `xml:"xmlns,attr"`
+	LastModified string   `xml:"LastModified"`
+	ETag         string   `xml:"ETag"`
+}
+
+type createMultipartUploadResult struct {
+	XMLName  xml.Name `xml:"InitiateMultipartUploadResult"`
+	XMLNS    string   `xml:"xmlns,attr"`
+	Bucket   string   `xml:"Bucket"`
+	Key      string   `xml:"Key"`
+	UploadID string   `xml:"UploadId"`
+}
+
+type completeMultipartUploadResult struct {
+	XMLName      xml.Name `xml:"CompleteMultipartUploadResult"`
+	XMLNS        string   `xml:"xmlns,attr"`
+	Location     string   `xml:"Location,omitempty"`
+	Bucket       string   `xml:"Bucket"`
+	Key          string   `xml:"Key"`
+	ETag         string   `xml:"ETag"`
+	LastModified string   `xml:"LastModified,omitempty"`
 }
 
 func bucketEntriesFromDomain(buckets []s3domain.Bucket) []bucketEntry {
@@ -274,6 +610,34 @@ func listObjectEntriesFromDomain(objects []s3domain.Object) []listObjectEntry {
 			ETag:         object.ETag,
 			Size:         object.Size,
 			StorageClass: "STANDARD",
+		}
+	}
+	return entries
+}
+
+func commonPrefixEntries(prefixes []string) []commonPrefixEntry {
+	entries := make([]commonPrefixEntry, len(prefixes))
+	for i, prefix := range prefixes {
+		entries[i] = commonPrefixEntry{Prefix: prefix}
+	}
+	return entries
+}
+
+func deletedObjectEntries(objects []s3domain.DeletedObject) []deletedObjectEntry {
+	entries := make([]deletedObjectEntry, len(objects))
+	for i, object := range objects {
+		entries[i] = deletedObjectEntry{Key: object.Key}
+	}
+	return entries
+}
+
+func deleteObjectErrorEntries(errors []s3domain.DeleteObjectsError) []deleteObjectErrorEntry {
+	entries := make([]deleteObjectErrorEntry, len(errors))
+	for i, objectErr := range errors {
+		entries[i] = deleteObjectErrorEntry{
+			Key:     objectErr.Key,
+			Code:    objectErr.Code,
+			Message: objectErr.Message,
 		}
 	}
 	return entries
@@ -306,6 +670,8 @@ func mapS3Error(err error) (int, string, string) {
 		return http.StatusNotFound, "NoSuchBucket", message
 	case strings.Contains(message, "NoSuchKey"):
 		return http.StatusNotFound, "NoSuchKey", message
+	case strings.Contains(message, "NoSuchUpload"):
+		return http.StatusNotFound, "NoSuchUpload", message
 	case strings.Contains(message, "BucketNotEmpty"):
 		return http.StatusConflict, "BucketNotEmpty", message
 	case strings.Contains(message, "InvalidBucketName"):
@@ -325,6 +691,18 @@ func writeObjectResponse(c *gin.Context, object s3domain.Object, includeBody boo
 	c.Header("Content-Type", object.ContentType)
 	c.Header("Content-Length", formatContentLength(object.Size))
 	c.Header("Accept-Ranges", "bytes")
+	for key, value := range object.PreservedHeaders {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		c.Header(key, value)
+	}
+	for key, value := range object.Metadata {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		c.Header("x-amz-meta-"+strings.ToLower(key), value)
+	}
 
 	if !includeBody {
 		c.Status(http.StatusOK)
@@ -339,4 +717,59 @@ func formatContentLength(size int64) string {
 		size = 0
 	}
 	return strconv.FormatInt(size, 10)
+}
+
+func hasS3QueryParam(values url.Values, key string) bool {
+	if values == nil {
+		return false
+	}
+	_, ok := values[key]
+	return ok
+}
+
+func metadataFromHeaders(headers http.Header) map[string]string {
+	metadata := map[string]string{}
+	for key, values := range headers {
+		lowerKey := strings.ToLower(strings.TrimSpace(key))
+		if !strings.HasPrefix(lowerKey, "x-amz-meta-") {
+			continue
+		}
+		metadata[strings.TrimPrefix(lowerKey, "x-amz-meta-")] = strings.Join(values, ",")
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
+}
+
+func preservedObjectHeaders(headers http.Header) map[string]string {
+	preserved := map[string]string{}
+	for _, key := range []string{"Cache-Control", "Content-Disposition", "Content-Encoding", "Content-Language", "Expires"} {
+		value := strings.TrimSpace(headers.Get(key))
+		if value == "" {
+			continue
+		}
+		preserved[key] = value
+	}
+	if len(preserved) == 0 {
+		return nil
+	}
+	return preserved
+}
+
+func parseCopySource(raw string) (string, string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", "", io.ErrUnexpectedEOF
+	}
+	decoded, err := url.PathUnescape(trimmed)
+	if err != nil {
+		return "", "", err
+	}
+	decoded = strings.TrimPrefix(decoded, "/")
+	parts := strings.SplitN(decoded, "/", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", io.ErrUnexpectedEOF
+	}
+	return parts[0], parts[1], nil
 }

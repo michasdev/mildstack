@@ -13,6 +13,7 @@ type SQSRegistrySpec struct {
 	Version          string
 	Supported        bool
 	DomainDeferred   bool
+	MessageSurface   bool
 	ReturnsQueueURL  bool
 	UsesQueueContext bool
 }
@@ -28,12 +29,14 @@ func NewSQSRegistry() SQSRegistry {
 	byName := make(map[string]SQSRegistrySpec, len(specs))
 
 	for _, spec := range specs {
+		supported := isQueueLifecycleAction(spec.Action) || isQueueGovernanceAction(spec.Action) || isQueueRedriveAction(spec.Action) || spec.MessageSurface
 		entry := SQSRegistrySpec{
 			Action:           spec.Action,
 			Scope:            spec.Scope,
 			Version:          spec.Version,
-			Supported:        true,
-			DomainDeferred:   true,
+			Supported:        supported,
+			DomainDeferred:   !supported,
+			MessageSurface:   spec.MessageSurface,
 			ReturnsQueueURL:  spec.ReturnsQueueURL,
 			UsesQueueContext: spec.UsesQueueContext,
 		}
@@ -89,6 +92,33 @@ func (r SQSRegistry) UnsupportedActions() []string {
 
 func (r SQSRegistry) String() string {
 	return fmt.Sprintf("sqs registry: %d actions", len(r.ordered))
+}
+
+func isQueueLifecycleAction(action string) bool {
+	switch action {
+	case "CreateQueue", "DeleteQueue", "GetQueueAttributes", "GetQueueUrl", "ListQueues", "PurgeQueue", "SetQueueAttributes":
+		return true
+	default:
+		return false
+	}
+}
+
+func isQueueGovernanceAction(action string) bool {
+	switch action {
+	case "AddPermission", "RemovePermission", "TagQueue", "UntagQueue", "ListQueueTags":
+		return true
+	default:
+		return false
+	}
+}
+
+func isQueueRedriveAction(action string) bool {
+	switch action {
+	case "ListDeadLetterSourceQueues", "StartMessageMoveTask", "CancelMessageMoveTask", "ListMessageMoveTasks":
+		return true
+	default:
+		return false
+	}
 }
 
 func isSQSErrorCode(err error, target error) bool {
