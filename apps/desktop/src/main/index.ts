@@ -5,6 +5,7 @@ import { autoUpdater } from 'electron-updater'
 import icon from '../../build/icon.png?asset'
 import { registerS3IpcHandlers } from './s3-ipc'
 import { registerDynamoDBIpcHandlers } from './dynamodb-ipc'
+import { registerSQSIpcHandlers } from './sqs-ipc'
 import { registerMildStackIpcHandlers } from './mildstack-ipc'
 
 // Set app name for macOS Dock and Menu Bar as early as possible
@@ -82,6 +83,7 @@ app.whenReady().then(() => {
   ipcMain.on('ping', () => console.log('pong'))
   registerS3IpcHandlers()
   registerDynamoDBIpcHandlers()
+  registerSQSIpcHandlers()
   registerMildStackIpcHandlers()
 
   createWindow()

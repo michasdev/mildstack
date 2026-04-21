@@ -1,4 +1,4 @@
-import { getActiveInstancePort } from './instance-state'
+import { resolveLocalEndpoint } from './local-endpoint'
 import { registerValidatedHandler } from './ipc-middleware'
 import {
   S3Client,
@@ -212,8 +212,7 @@ function getClient(region = 'us-east-1'): S3Client {
 }
 
 function resolveS3Endpoint(): string {
-  const port = getActiveInstancePort()
-  return process.env.MILDSTACK_S3_ENDPOINT || process.env.AWS_S3_ENDPOINT || `http://127.0.0.1:${port}`
+  return resolveLocalEndpoint('s3')
 }
 
 function normalizeRegion(region?: string): string {

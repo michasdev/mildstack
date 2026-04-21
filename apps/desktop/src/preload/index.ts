@@ -63,6 +63,31 @@ interface DynamoDBBrowserApi {
   getItem(tableName: string, key: any, region?: string): Promise<any>
 }
 
+interface SQSBrowserApi {
+  listQueues(region?: string): Promise<any[]>
+  createQueue(queueName: string, isFifo?: boolean, region?: string): Promise<string>
+  deleteQueue(queueUrl: string, region?: string): Promise<void>
+  getQueueAttributes(queueUrl: string, region?: string): Promise<Record<string, string>>
+  setQueueAttributes(queueUrl: string, attributes: Record<string, string>, region?: string): Promise<void>
+  purgeQueue(queueUrl: string, region?: string): Promise<void>
+  sendMessage(
+    queueUrl: string,
+    body: string,
+    delaySeconds?: number,
+    messageGroupId?: string,
+    messageDeduplicationId?: string,
+    messageAttributes?: Record<string, any>,
+    region?: string
+  ): Promise<string>
+  receiveMessages(
+    queueUrl: string,
+    maxMessages?: number,
+    waitTimeSeconds?: number,
+    region?: string
+  ): Promise<any[]>
+  deleteMessage(queueUrl: string, receiptHandle: string, region?: string): Promise<void>
+}
+
 interface InstanceApi {
   setSelected(port: number): Promise<void>
 }
@@ -95,7 +120,7 @@ interface MildStackApi {
 }
 
 // Custom APIs for renderer
-const api: { s3: S3BrowserApi; dynamodb: DynamoDBBrowserApi; instance: InstanceApi; mildstack: MildStackApi } = {
+const api: { s3: S3BrowserApi; dynamodb: DynamoDBBrowserApi; sqs: SQSBrowserApi; instance: InstanceApi; mildstack: MildStackApi } = {
   s3: {
     listBuckets: (region) => ipcRenderer.invoke('s3:listBuckets', { region }),
     createBucket: (name, region) => ipcRenderer.invoke('s3:createBucket', { name, region }),
@@ -124,6 +149,19 @@ const api: { s3: S3BrowserApi; dynamodb: DynamoDBBrowserApi; instance: InstanceA
       ipcRenderer.invoke('dynamodb:deleteItem', { tableName, key, region }),
     getItem: (tableName, key, region) =>
       ipcRenderer.invoke('dynamodb:getItem', { tableName, key, region })
+  },
+  sqs: {
+    listQueues: (region) => ipcRenderer.invoke('sqs:listQueues', { region }),
+    createQueue: (queueName, isFifo, region) => ipcRenderer.invoke('sqs:createQueue', { queueName, isFifo, region }),
+    deleteQueue: (queueUrl, region) => ipcRenderer.invoke('sqs:deleteQueue', { queueUrl, region }),
+    getQueueAttributes: (queueUrl, region) => ipcRenderer.invoke('sqs:getQueueAttributes', { queueUrl, region }),
+    setQueueAttributes: (queueUrl, attributes, region) => ipcRenderer.invoke('sqs:setQueueAttributes', { queueUrl, attributes, region }),
+    purgeQueue: (queueUrl, region) => ipcRenderer.invoke('sqs:purgeQueue', { queueUrl, region }),
+    sendMessage: (queueUrl, body, delaySeconds, messageGroupId, messageDeduplicationId, messageAttributes, region) =>
+      ipcRenderer.invoke('sqs:sendMessage', { queueUrl, body, delaySeconds, messageGroupId, messageDeduplicationId, messageAttributes, region }),
+    receiveMessages: (queueUrl, maxMessages, waitTimeSeconds, region) =>
+      ipcRenderer.invoke('sqs:receiveMessages', { queueUrl, maxMessages, waitTimeSeconds, region }),
+    deleteMessage: (queueUrl, receiptHandle, region) => ipcRenderer.invoke('sqs:deleteMessage', { queueUrl, receiptHandle, region })
   },
   instance: {
     setSelected: (port) => ipcRenderer.invoke('instance:setSelected', port)

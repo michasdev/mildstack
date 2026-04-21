@@ -42,7 +42,7 @@ main().catch((error) => {
 });
 
 async function main() {
-  const endpoint = process.env.MILDSTACK_DYNAMODB_ENDPOINT || process.env.AWS_DYNAMODB_ENDPOINT || `http://localhost:${port}`;
+  const endpoint = process.env.MILDSTACK_DYNAMODB_ENDPOINT || `http://localhost:${port}`;
 
   console.log(`Running AWS SDK smoke mode against ${endpoint}`);
   const client = new DynamoDBClient({

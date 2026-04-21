@@ -2,102 +2,85 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="apps/desktop/src/renderer/src/assets/logos/mildstack-logo-full-white.png">
     <source media="(prefers-color-scheme: light)" srcset="apps/desktop/src/renderer/src/assets/logos/mildstack-logo-full-black.png">
-    <img alt="MildStack Logo" src="apps/desktop/src/renderer/src/assets/logos/mildstack-logo-full-black.png" width="400">
+    <img alt="MildStack Logo" src="apps/desktop/src/renderer/src/assets/logos/mildstack-logo-full-black.png" width="450">
   </picture>
 </p>
 
-# MildStack
+<p align="center">
+  <strong>The Lightweight, Drop-in Replacement for LocalStack.</strong><br />
+  Fast, Open Source, and Developer-First.
+</p>
 
-> A lightweight, local-first AWS emulator built for developers. The best localstack alternative.
+<p align="center">
+  <a href="https://mildstack.dev">Website</a> •
+  <a href="#key-features">Key Features</a> •
+  <a href="#supported-services">Supported Services</a> •
+  <a href="https://discord.gg/your-invite">Community</a>
+</p>
 
-MildStack is an open-source project that helps you run and test AWS-like services locally with a focus on speed, simplicity, and low resource usage.
+---
 
-It is designed to be a practical alternative for local cloud development, without unnecessary overhead.
+## ⚡️ What is MildStack?
 
-## Why MildStack?
+MildStack is a high-performance, local-first AWS emulator designed to streamline your cloud development workflow. Unlike heavy alternatives that require Docker and significant system resources, MildStack is built in **Go** for maximum efficiency and speed.
 
-Working with AWS-based applications locally can be slow, heavy, or fragmented.
+Stop waiting for containers to spin up. Start building instantly with a local cloud that feels "mild" on your CPU but "spicy" on productivity.
 
-MildStack aims to make that experience better by being:
+## ✨ Why MildStack?
 
-- lightweight
-- fast
-- developer-friendly
-- open-source
-- easy to extend
-- suitable for local development workflows
+- **🚀 Instant-On**: No Docker required. MildStack runs as a native binary, starting in milliseconds.
+- **🖥️ Desktop App**: A beautiful, intuitive UI to browse S3 buckets, query DynamoDB tables, and monitor SQS queues without leaving your IDE.
+- **🍃 Ultra-Lightweight**: Minimal RAM and CPU footprint. Keep your machine cool while simulating complex cloud architectures.
+- **🔌 Drop-in Compatibility**: Works seamlessly with official AWS SDKs and CLI. Just change your endpoint URL.
+- **📡 Offline-First**: Build and test your cloud applications on a plane, a train, or anywhere without an internet connection.
+- **💰 100% Free**: No "Pro" tiers for basic features. Everything you need for local development, open-source and free.
 
-## What it is
+## 🛠 Supported Services
 
-MildStack is being built as a small ecosystem around a core emulator.
+MildStack is rapidly evolving. We currently provide robust support for core AWS services:
 
-The project currently includes:
+| Service | Status | Features |
+| :--- | :--- | :--- |
+| **S3** | ✅ Active | Bucket management, Multipart uploads, Metadata support |
+| **DynamoDB** | ✅ Active | Tables, GSI/LSI support, Rich querying & filtering |
+| **SQS** | ✅ Active | Message queues, DLQ redrive, FIFO support |
+| **SNS** |  📅 Planned | Topic publishing, basic subscriptions |
+| **Lambda** | 📅 Planned | Local execution of serverless functions |
+| **EventBridge** | 📅 Planned | Event-driven architecture simulation |
 
-- a Go-based core for the emulator and API
-- a CLI for local control and startup
-- a desktop app for a more visual experience and resource browsing
-- a web presence for documentation and project info
+## 📦 The Ecosystem
 
-## Project goals
+MildStack isn't just an emulator; it's a complete development environment:
 
-MildStack is intended to be:
+### 1. The Core Engine
+Written in Go, our core provides a high-concurrency, low-latency API that mimics AWS service behavior with precision.
 
-- a local AWS-like emulator
-- simple to run and use
-- performant and memory-efficient
-- modular by design
-- consistent across services
-- easy to evolve over time
+### 2. The MildStack CLI
+A modern, terminal-based control center (powered by Charm/BubbleTea) to manage your local instances, view logs, and monitor service health.
 
-## Tech stack
+### 3. The Desktop Browser
+An Electron-powered visual console that gives you a "Production-like" experience for inspecting your local resources. Browse objects, edit items, and peek at messages with ease.
 
-The project is centered around:
+---
 
-- **Go** for the core runtime, API, and CLI
-- **Gin** for the HTTP API
-- **Charm** for the terminal UI and CLI experience
-- **Electron** for the desktop app
-- **React** for the website and docs
+## 🗺 Roadmap
 
-## Design principles
+Our goal is to cover the 80% of AWS services used in 95% of applications. Check our [Roadmap](https://mildstack.dev/roadmap) to see what's coming next, including Lambda support, IAM simulation, and more.
 
-The core of the project follows:
+## 🤝 Contributing
 
-- **Domain-Driven Design**
-- **Clean Architecture**
-- **SOLID principles**
+We love contributors! Whether you're fixing a bug, adding a new service, or improving the documentation, your help is welcome.
 
-The goal is to keep the emulator core independent from frameworks and easy to maintain as new services are added.
+1. Check out our [Contribution Guidelines](CONTRIBUTING.md).
+2. Join our [Discord community](https://discord.gg/your-invite) to discuss ideas.
+3. Spread the word! 🌟
 
-## Philosophy
+## 📄 License
 
-MildStack is built around a few simple ideas:
+MildStack is released under the **MIT License**. Build freely.
 
-- local-first
-- developer-first
-- performance-oriented
-- minimal overhead
-- clear architecture
-- open-source friendly
+---
 
-## Current status
-
-MildStack is still in early development.
-
-This README is intentionally lightweight and provisional until the project has proper installation docs, usage guides, and service-specific documentation.
-
-## Contributing
-
-Contributions are welcome.
-
-If you want to help, you can:
-
-- suggest services to emulate first
-- review architecture decisions
-- improve documentation
-- test the project locally
-- help build core features
-
-## License
-
-MIT.
+<p align="center">
+  Built with ❤️ for developers by <a href="https://github.com/michasdev">Michel</a> and the community.
+</p>

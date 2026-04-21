@@ -45,7 +45,7 @@ main().catch((error) => {
 });
 
 async function main() {
-  const endpoint = process.env.MILDSTACK_SQS_ENDPOINT || process.env.AWS_SQS_ENDPOINT || `http://localhost:${port}`;
+  const endpoint = process.env.MILDSTACK_SQS_ENDPOINT || `http://localhost:${port}`;
 
   console.log(`Running AWS SDK smoke mode against ${endpoint}`);
   const client = new SQSClient({
