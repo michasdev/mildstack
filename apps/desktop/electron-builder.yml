@@ -1,5 +1,11 @@
 appId: com.michasdev.mildstack-desktop
 productName: MildStack Desktop
+metadata:
+  author: michasdev
+  description: "MildStack: Run AWS services locally"
+  homepage: "https://mildstack.dev"
+  license: "MIT"
+  name: "mildstack"
 directories:
   buildResources: build
 files:

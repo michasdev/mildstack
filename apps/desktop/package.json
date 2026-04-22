@@ -2,7 +2,9 @@
   "name": "mildstack-desktop",
   "productName": "MildStack Desktop",
   "version": "1.0.0",
-  "description": "Desktop App for MildStack: resource-browser, multi-platform, electron-based",
+  "description": "MildStack: Run AWS services locally",
+  "homepage": "https://mildstack.dev",
+  "license": "MIT",
   "main": "./out/main/index.js",
   "author": "michasdev",
   "scripts": {
