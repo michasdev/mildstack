@@ -13,13 +13,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  release:
-    strategy:
-      matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
-
-    runs-on: ${{ matrix.os }}
-
+  build-cli:
+    runs-on: ubuntu-latest
     steps:
       - name: Check out Git repository
         uses: actions/checkout@v4
@@ -49,6 +44,49 @@ jobs:
         working-directory: apps/desktop
         run: npm run build:cli
 
+      - name: Upload CLI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-binaries
+          path: apps/desktop/resources/bin/
+
+  release:
+    needs: build-cli
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12
+          cache: 'npm'
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/desktop
+        run: npm ci --prefer-offline
+        env:
+          npm_config_fetch_retries: 5
+          npm_config_fetch_retry_mintimeout: 20000
+          npm_config_fetch_retry_maxtimeout: 120000
+
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-binaries
+          path: apps/desktop/resources/bin/
+
+      - name: Make binaries executable
+        if: runner.os != 'Windows'
+        run: find apps/desktop/resources/bin -type f -exec chmod +x {} +
+
       - name: Build/release Electron app
         uses: samuelmeuli/action-electron-builder@v1
         with:
@@ -57,4 +95,5 @@ jobs:
           package_root: apps/desktop
           skip_install: true
           # Using default config location in apps/desktop/electron-builder.yml
-
+        env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
