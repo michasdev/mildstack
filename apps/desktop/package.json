@@ -1,7 +1,7 @@
 {
   "name": "mildstack-desktop",
   "productName": "MildStack Desktop",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "MildStack: Run AWS services locally",
   "homepage": "https://mildstack.dev",
   "license": "MIT",
