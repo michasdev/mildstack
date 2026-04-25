@@ -1,4 +1,4 @@
-name: 🚀 Core Go CI
+name: 🛠️ Core Go CI
 
 on:
   pull_request:
