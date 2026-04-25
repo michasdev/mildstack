@@ -7,7 +7,7 @@ on:
     paths:
       - 'apps/desktop/**'
       - '.github/workflows/desktop-build.yml'
-      - '.github/workflows/desktop-release.yml'
+      - '.github/workflows/mildstack-release.yml'
 
 permissions:
   contents: read
