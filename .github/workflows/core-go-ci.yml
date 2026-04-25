@@ -1,0 +1,40 @@
+name: Core Go CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'core/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-go-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Test and Build Core
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.2'
+          cache: true
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Build Go packages
+        run: go build ./...
