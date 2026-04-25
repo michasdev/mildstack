@@ -1,4 +1,4 @@
-name: Deploy mildstack.dev to GitHub Pages
+name: 🌐 Deploy mildstack.dev to GitHub Pages
 
 on:
   push:
