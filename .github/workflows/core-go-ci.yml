@@ -1,11 +1,9 @@
-name: 🚀 Core Go CI
+name: 🛠️ Core Go CI
 
 on:
   pull_request:
     branches:
       - main
-    paths-ignore:
-      - 'apps/**'
     paths:
       - 'core/**'
 

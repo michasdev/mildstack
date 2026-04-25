@@ -1,23 +1,19 @@
-name: 🖥️ Build/Release Desktop + CLI
+name: 🛠️ Desktop CI
 
 on:
-  push:
+  pull_request:
     branches:
       - main
-    tags:
-      - 'v*'
     paths:
-      - 'apps/core/**'
       - 'apps/desktop/**'
       - '.github/workflows/desktop-build.yml'
-      - 'apps/desktop/electron-builder.yml'
-  workflow_dispatch:
+      - '.github/workflows/desktop-release.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: desktop-build-${{ github.ref }}
+  group: desktop-ci-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -33,8 +29,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
-          cache: false
+          go-version: '1.26.2'
+          cache: true
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -58,10 +54,10 @@ jobs:
       - name: Upload CLI artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: cli-binaries
+          name: ci-cli-binaries
           path: apps/desktop/resources/bin/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 3
 
   build-desktop:
     name: Build Desktop (${{ matrix.label }})
@@ -76,29 +72,12 @@ jobs:
           - os: macos-latest
             label: macOS
             platform: mac
-            artifact_name: desktop-dist-macos
-            release_files: |
-              apps/desktop/dist/*.dmg
-              apps/desktop/dist/*.zip
-              apps/desktop/dist/*.zip.blockmap
-              apps/desktop/dist/latest-mac.yml
           - os: windows-latest
             label: Windows
             platform: win
-            artifact_name: desktop-dist-windows
-            release_files: |
-              apps/desktop/dist/*-setup.exe
-              apps/desktop/dist/*.exe.blockmap
-              apps/desktop/dist/latest.yml
           - os: ubuntu-latest
             label: Linux
             platform: linux
-            artifact_name: desktop-dist-linux
-            release_files: |
-              apps/desktop/dist/*.AppImage
-              apps/desktop/dist/*.AppImage.blockmap
-              apps/desktop/dist/*.deb
-              apps/desktop/dist/latest-linux.yml
 
     steps:
       - name: Check out Git repository
@@ -122,7 +101,7 @@ jobs:
       - name: Download CLI artifacts
         uses: actions/download-artifact@v4
         with:
-          name: cli-binaries
+          name: ci-cli-binaries
           path: apps/desktop/resources/bin/
 
       - name: Make binaries executable
@@ -142,59 +121,3 @@ jobs:
         run: npx --no-install electron-builder --${{ matrix.platform }} --publish never
         env:
           NODE_OPTIONS: '--max-old-space-size=8192'
-
-      - name: Upload packaged release artifacts
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.release_files }}
-          if-no-files-found: error
-          retention-days: 7
-
-  publish-release:
-    name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-desktop
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download macOS release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: desktop-dist-macos
-          path: release-assets/macos
-
-      - name: Download Windows release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: desktop-dist-windows
-          path: release-assets/windows
-
-      - name: Download Linux release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: desktop-dist-linux
-          path: release-assets/linux
-
-      - name: Publish curated release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            release-assets/macos/*
-            release-assets/windows/*
-            release-assets/linux/*
-          fail_on_unmatched_files: true
-          generate_release_notes: false
-          body: |
-            Download the asset that matches your platform:
-
-            - macOS Apple Silicon: `*-mac-arm64.dmg`
-            - macOS Intel: `*-mac-x64.dmg`
-            - Windows x64: `*-windows-x64-setup.exe`
-            - Windows ARM64: `*-windows-arm64-setup.exe`
-            - Linux AppImage (recommended): `*-linux-x64.AppImage` or `*-linux-arm64.AppImage`
-            - Linux Debian/Ubuntu: `*-linux-amd64.deb` or `*-linux-arm64.deb`
