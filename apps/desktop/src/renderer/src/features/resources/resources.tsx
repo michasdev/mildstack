@@ -40,7 +40,7 @@ function ResourcesPage(): React.JSX.Element {
             <FrameTitle>Resources</FrameTitle>
             <FrameDescription>Browse and manage MildStack resources</FrameDescription>
           </div>
-          
+
           <div className="relative group max-w-sm w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500 group-focus-within:text-neutral-300 transition-colors" />
             <input
@@ -48,7 +48,7 @@ function ResourcesPage(): React.JSX.Element {
               placeholder="Search resources..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full h-10 pl-10 pr-4 rounded-xl border border-neutral-800 bg-neutral-900/50 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-700 transition-all"
+              className="w-full h-10 pl-10 pr-4 rounded-xl border border-neutral-800 bg-card text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-700 transition-all"
             />
           </div>
         </div>
@@ -79,8 +79,8 @@ function ResourcesPage(): React.JSX.Element {
                 </h2>
                 <Separator className="bg-neutral-800/50 flex-1" />
               </div>
-              
-              <div className="bg-neutral-900/30 border border-neutral-800/50 rounded-2xl p-6 text-center">
+
+              <div className="bg-neutral-900/30 border border-border rounded-2xl p-6 text-center">
                 <p className="text-sm text-neutral-400 italic">
                   We're expanding the MildStack! New services are being developed to bring the full AWS experience to your local environment.
                 </p>
@@ -101,7 +101,7 @@ function ResourcesPage(): React.JSX.Element {
             </div>
           )}
         </div>
-        
+
         {filteredResources.length === 0 && filteredSoon.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-neutral-500">
             <Search size={48} className="mb-4 opacity-20" />
