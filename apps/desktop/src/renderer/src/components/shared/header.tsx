@@ -28,6 +28,8 @@ const Header = () => {
 
     segments.forEach((segment, index) => {
         if (index === 0 && segment.toLowerCase().startsWith("instances")) return;
+        if (index === 0 && segment.toLowerCase().startsWith("resources")) return;
+        
         if (selectedInstance && segment === selectedInstance.instanceId) return;
 
         const url = `/${segments.slice(0, index + 1).join('/')}`;
@@ -38,8 +40,7 @@ const Header = () => {
     });
 
     return (
-        <header className="flex flex-row items-center gap-4 px-6">
-            <Separator orientation="vertical" className="h-6" />
+        <header className="flex flex-row items-center gap-4">
             {selectedInstance && (
                 <div className="flex flex-row items-center gap-2">
                     <span className="text-sm font-semibold">Instance {selectedInstance.port}</span>

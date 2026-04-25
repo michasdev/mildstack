@@ -1252,7 +1252,7 @@ func TestServicePersistenceRoundTripAcrossRestart(t *testing.T) {
 	}
 
 	buckets := second.ListBuckets()
-	if got, want := len(buckets), 2; got != want {
+	if got, want := len(buckets), 1; got != want {
 		t.Fatalf("unexpected bucket count after restart: got %d want %d", got, want)
 	}
 	object, err := second.GetObject(bucket.Name, "archive.txt")

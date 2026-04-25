@@ -18,25 +18,88 @@ import {
     Home, 
     Database, 
     Inbox, 
-    Bell, 
-    Zap, 
-    Settings2, 
-    Network, 
-    Archive,
+    Box,
+    SquircleDashed,
     Settings
 } from "lucide-react"
 import { useInstanceStore } from "@/store/instance-store"
+import { useState } from "react"
+import { motion, AnimatePresence } from "motion/react"
+import { cn } from "@renderer/lib/utils"
+
+function NavItem({ 
+    id, 
+    icon: Icon, 
+    label, 
+    to, 
+    isActive, 
+    disabled = false,
+    hoveredItem,
+    setHoveredItem
+}: { 
+    id: string, 
+    icon: React.ElementType, 
+    label: string, 
+    to?: string, 
+    isActive?: boolean, 
+    disabled?: boolean,
+    hoveredItem: string | null,
+    setHoveredItem: (id: string | null) => void
+}) {
+    return (
+        <SidebarMenuItem 
+            onMouseEnter={() => !disabled && setHoveredItem(id)} 
+            onMouseLeave={() => setHoveredItem(null)}
+            className="relative"
+        >
+            <AnimatePresence>
+                {hoveredItem === id && !disabled && (
+                    <motion.div
+                        layoutId="sidebar-hover-bg"
+                        className="absolute inset-0 bg-sidebar-accent rounded-md z-0"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                    />
+                )}
+            </AnimatePresence>
+            <SidebarMenuButton 
+                asChild={!disabled} 
+                tooltip={label} 
+                isActive={isActive} 
+                disabled={disabled}
+                className={cn("relative z-10 transition-colors", !disabled && "hover:bg-transparent")}
+            >
+                {disabled ? (
+                    <>
+                        <Icon />
+                        <span>{label}</span>
+                    </>
+                ) : (
+                    <Link to={to!}>
+                        <Icon />
+                        <span>{label}</span>
+                    </Link>
+                )}
+            </SidebarMenuButton>
+        </SidebarMenuItem>
+    )
+}
 
 export function AppSidebar() {
     const location = useLocation()
     const { instances, selectInstance, getSelectedInstance } = useInstanceStore()
     const selectedInstance = getSelectedInstance()
+    const isInstanceRunning = selectedInstance?.status === 'running'
+    
+    const [hoveredItem, setHoveredItem] = useState<string | null>(null)
 
     return (
         <Sidebar>
             <SidebarHeader className="">
                 <Link to="/" className="mb-2 mt-2 mx-auto">
-                    <img src={mildstackLightLogo} alt="Mildstack" className="h-8 w-auto pointer-events-none slect-none  " />
+                    <img src={mildstackLightLogo} alt="Mildstack" className="h-8 w-auto pointer-events-none select-none" />
                 </Link>
                 <SidebarMenu>
                     <SidebarMenuItem>
@@ -98,77 +161,91 @@ export function AppSidebar() {
             <SidebarContent>
                 <SidebarGroup>
                     <SidebarMenu>
-                        <SidebarMenuItem>
-                            <SidebarMenuButton asChild tooltip="Instances" isActive={location.pathname === '/'}>
-                                <Link to="/">
-                                    <Home />
-                                    <span>Instances</span>
-                                </Link>
-                            </SidebarMenuButton>
-                        </SidebarMenuItem>
+                        <NavItem 
+                            id="home"
+                            icon={Home}
+                            label="Instances"
+                            to="/"
+                            isActive={location.pathname === '/'}
+                            hoveredItem={hoveredItem}
+                            setHoveredItem={setHoveredItem}
+                        />
                     </SidebarMenu>
                 </SidebarGroup>
-
                 <SidebarGroup>
-                    <SidebarGroupLabel>SERVICES</SidebarGroupLabel>
+                    <SidebarGroupLabel className="text-xs">SERVICES</SidebarGroupLabel>
                     <SidebarGroupContent>
                         <SidebarMenu>
-                            <SidebarMenuItem>
-                                <SidebarMenuButton asChild tooltip="S3" isActive={location.pathname.startsWith('/resources/s3')}>
-                                    <Link to="/resources/s3">
-                                        <Archive />
-                                        <span>S3</span>
-                                    </Link>
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
-                            <SidebarMenuItem>
-                                <SidebarMenuButton asChild tooltip="DynamoDB" isActive={location.pathname.startsWith('/resources/dynamodb')}>
-                                    <Link to="/resources/dynamodb">
-                                        <Database />
-                                        <span>DynamoDB</span>
-                                    </Link>
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
-                            <SidebarMenuItem>
-                                <SidebarMenuButton asChild tooltip="SQS" isActive={location.pathname.startsWith('/resources/sqs')}>
-                                    <Link to="/resources/sqs">
-                                        <Inbox />
-                                        <span>SQS</span>
-                                    </Link>
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
+                            <NavItem 
+                                id="s3"
+                                icon={Box}
+                                label="S3"
+                                to="/resources/s3"
+                                isActive={location.pathname.startsWith('/resources/s3')}
+                                disabled={!isInstanceRunning}
+                                hoveredItem={hoveredItem}
+                                setHoveredItem={setHoveredItem}
+                            />
+                            <NavItem 
+                                id="dynamodb"
+                                icon={Database}
+                                label="DynamoDB"
+                                to="/resources/dynamodb"
+                                isActive={location.pathname.startsWith('/resources/dynamodb')}
+                                disabled={!isInstanceRunning}
+                                hoveredItem={hoveredItem}
+                                setHoveredItem={setHoveredItem}
+                            />
+                            <NavItem 
+                                id="sqs"
+                                icon={Inbox}
+                                label="SQS"
+                                to="/resources/sqs"
+                                isActive={location.pathname.startsWith('/resources/sqs')}
+                                disabled={!isInstanceRunning}
+                                hoveredItem={hoveredItem}
+                                setHoveredItem={setHoveredItem}
+                            />
                         </SidebarMenu>
                     </SidebarGroupContent>
                 </SidebarGroup>
 
                 <SidebarGroup>
-                    <SidebarGroupLabel>COMING SOON</SidebarGroupLabel>
+                    <SidebarGroupLabel className="text-xs">COMING SOON</SidebarGroupLabel>
                     <SidebarGroupContent>
                         <SidebarMenu>
-                            <SidebarMenuItem>
-                                <SidebarMenuButton disabled tooltip="Lambda">
-                                    <Zap />
-                                    <span>Lambda</span>
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
-                            <SidebarMenuItem>
-                                <SidebarMenuButton disabled tooltip="SNS">
-                                    <Bell />
-                                    <span>SNS</span>
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
-                            <SidebarMenuItem>
-                                <SidebarMenuButton disabled tooltip="SSM">
-                                    <Settings2 />
-                                    <span>SSM</span>
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
-                            <SidebarMenuItem>
-                                <SidebarMenuButton disabled tooltip="EventBridge">
-                                    <Network />
-                                    <span>EventBridge</span>
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
+                            <NavItem 
+                                id="lambda"
+                                icon={SquircleDashed}
+                                label="Lambda"
+                                disabled={true}
+                                hoveredItem={hoveredItem}
+                                setHoveredItem={setHoveredItem}
+                            />
+                            <NavItem 
+                                id="sns"
+                                icon={SquircleDashed}
+                                label="SNS"
+                                disabled={true}
+                                hoveredItem={hoveredItem}
+                                setHoveredItem={setHoveredItem}
+                            />
+                            <NavItem 
+                                id="ssm"
+                                icon={SquircleDashed}
+                                label="SSM"
+                                disabled={true}
+                                hoveredItem={hoveredItem}
+                                setHoveredItem={setHoveredItem}
+                            />
+                            <NavItem 
+                                id="eventbridge"
+                                icon={SquircleDashed}
+                                label="EventBridge"
+                                disabled={true}
+                                hoveredItem={hoveredItem}
+                                setHoveredItem={setHoveredItem}
+                            />
                         </SidebarMenu>
                     </SidebarGroupContent>
                 </SidebarGroup>
@@ -176,12 +253,14 @@ export function AppSidebar() {
 
             <SidebarFooter className="p-4">
                 <SidebarMenu>
-                    <SidebarMenuItem>
-                        <SidebarMenuButton tooltip="Settings">
-                            <Settings />
-                            <span>Settings</span>
-                        </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    <NavItem 
+                        id="settings"
+                        icon={Settings}
+                        label="Settings"
+                        to="/settings"
+                        hoveredItem={hoveredItem}
+                        setHoveredItem={setHoveredItem}
+                    />
                 </SidebarMenu>
             </SidebarFooter>
         </Sidebar>

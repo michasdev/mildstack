@@ -81,7 +81,7 @@ func (r *SQLiteRepository) Load() (domain.State, error) {
 		return domain.State{}, err
 	}
 	if len(state.Tables) == 0 {
-		state = domain.NewState()
+		state = domain.NewEmptyState()
 		if err := r.saveLocked(state); err != nil {
 			return domain.State{}, err
 		}

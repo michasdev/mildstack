@@ -12,6 +12,15 @@ pnpm-lock.yaml
 .planning/ROADMAP.md  
 .planning/STATE.md  
 
+
+#BMAD Method
+_bmad
+_bmad-output
+.agent/skills
+.claude
+.cursor
+.AGENTS
+
 AGENTS.md
 
 # go binary

@@ -298,7 +298,7 @@ export function QueuesList() {
                 <SpotlightCard
                   key={queue.QueueUrl}
                   className={cn(
-                    'cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md flex flex-col',
+                    'cursor-pointer transition-all duration-200 hover:shadow-md flex flex-col',
                     selected && 'border-primary/40 bg-primary/5'
                   )}
                   onClick={() => handleQueueClick(queue.QueueName)}

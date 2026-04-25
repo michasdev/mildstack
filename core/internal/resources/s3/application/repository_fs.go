@@ -37,7 +37,7 @@ func (r *FSRepository) Load() (domain.State, error) {
 	data, err := os.ReadFile(r.statePath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return domain.NewState(), nil
+			return domain.NewEmptyState(), nil
 		}
 		return domain.State{}, err
 	}

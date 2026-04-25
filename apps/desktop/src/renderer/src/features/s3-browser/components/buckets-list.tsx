@@ -252,7 +252,7 @@ export function BucketsList() {
                 <SpotlightCard
                   key={bucketName}
                   className={cn(
-                    'cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md',
+                    'cursor-pointer transition-all duration-200 hover:shadow-md',
                     selected && 'border-primary/40 bg-primary/5'
                   )}
                   onClick={() => handleBucketClick(bucketName)}

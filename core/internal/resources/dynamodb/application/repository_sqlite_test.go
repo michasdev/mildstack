@@ -57,14 +57,14 @@ func TestSQLiteRepositoryBootstrapAndPersistAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load initial state: %v", err)
 	}
-	if got, want := len(initial.Tables), 1; got != want {
-		t.Fatalf("unexpected bootstrap table count: got %d want %d", got, want)
+	if got, want := initial.Service, "dynamodb"; got != want {
+		t.Fatalf("unexpected initial service: got %q want %q", got, want)
 	}
-	if got, want := initial.Tables[0].Name, "mildstack-records"; got != want {
-		t.Fatalf("unexpected bootstrap table name: got %q want %q", got, want)
+	if got, want := len(initial.Tables), 0; got != want {
+		t.Fatalf("unexpected initial table count: got %d want %d", got, want)
 	}
 
-	state := domain.NewState()
+	state := domain.NewEmptyState()
 	state.UpsertTable(domain.Table{
 		Name:         "mildstack-archive",
 		PartitionKey: "pk",
@@ -89,7 +89,7 @@ func TestSQLiteRepositoryBootstrapAndPersistAcrossRestart(t *testing.T) {
 			},
 		},
 		Status:    domain.TableStatusCreating,
-		CreatedAt: state.Tables[0].CreatedAt,
+		CreatedAt: time.Date(2026, time.April, 18, 0, 0, 0, 0, time.UTC),
 	})
 	state.UpsertItem(domain.Item{
 		Table: "mildstack-archive",
@@ -117,7 +117,7 @@ func TestSQLiteRepositoryBootstrapAndPersistAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load restarted state: %v", err)
 	}
-	if got, want := len(loaded.Tables), 2; got != want {
+	if got, want := len(loaded.Tables), 1; got != want {
 		t.Fatalf("unexpected table count after restart: got %d want %d", got, want)
 	}
 	archive, ok := loaded.Table("mildstack-archive")
@@ -167,7 +167,7 @@ func TestSQLiteRepositoryIsolatesInstances(t *testing.T) {
 		}
 	}()
 
-	state := domain.NewState()
+	state := domain.NewEmptyState()
 	state.UpsertTable(domain.Table{
 		Name:         "mildstack-archive",
 		PartitionKey: "pk",

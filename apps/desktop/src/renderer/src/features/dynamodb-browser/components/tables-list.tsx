@@ -49,7 +49,7 @@ import {
   SelectItem,
   SelectValue
 } from '@renderer/components/ui/select'
-import { toast} from 'sonner'
+import { toast } from 'sonner'
 import { cn } from '@renderer/lib/utils'
 import type { DynamoDBTableSummary } from '../types'
 import type { DynamoDBBrowserOutletContext } from '../dynamodb-layout'
@@ -293,7 +293,7 @@ export function TablesList() {
                       Type
                     </label>
                     <Select value={partitionKeyType} onValueChange={(val) => setPartitionKeyType(val as 'S' | 'N')}>
-                      <SelectTrigger className="h-9 shadow-xs/5" id="pk-type">
+                      <SelectTrigger className="h-8 shadow-xs/5" id="pk-type">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -322,7 +322,7 @@ export function TablesList() {
                       Type
                     </label>
                     <Select value={sortKeyType} onValueChange={(val) => setSortKeyType(val as 'S' | 'N')}>
-                      <SelectTrigger className="h-9 shadow-xs/5" id="sk-type">
+                      <SelectTrigger className="h-8 shadow-xs/5" id="sk-type">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -380,7 +380,7 @@ export function TablesList() {
                 <SpotlightCard
                   key={table.TableName}
                   className={cn(
-                    'cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md',
+                    'cursor-pointer transition-all duration-200 hover:shadow-md',
                     selected && 'border-primary/40 bg-primary/5'
                   )}
                   onClick={() => handleTableClick(table.TableName)}
