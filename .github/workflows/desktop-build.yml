@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - 'apps/core/**'
       - 'apps/desktop/**'
       - '.github/workflows/desktop-build.yml'
       - '.github/workflows/mildstack-release.yml'
