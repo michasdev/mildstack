@@ -16,10 +16,11 @@ pnpm-lock.yaml
 #BMAD Method
 _bmad
 _bmad-output
-.agent/skills
-.claude
-.cursor
+.agent/skills/bmad-*
+.agents/skills/bmad-*
+.claude/skills/bmad-*
 .AGENTS
+docs/project-scan-report.json
 
 AGENTS.md
 
