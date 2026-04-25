@@ -7,13 +7,12 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogPopup,
-  DialogPanel,
+  DialogContent,
   DialogDescription
 } from '@renderer/components/ui/dialog'
-import { toastManager } from '@renderer/components/ui/toast'
 import { cn } from '@renderer/lib/utils'
 import type { S3BrowserApi } from '../types'
+import { toast } from "sonner"
 
 interface UploadDialogProps {
   api: S3BrowserApi
@@ -81,10 +80,8 @@ export function UploadDialog({
     })
 
     if (invalidFiles.length > 0) {
-      toastManager.add({
-        title: 'File too large',
+      toast.warning('File too large', {
         description: `${invalidFiles.length} file(s) exceed the 20MB limit and were ignored.`,
-        type: 'warning'
       })
     }
 
@@ -122,19 +119,15 @@ export function UploadDialog({
       }
 
       if (successCount > 0) {
-        toastManager.add({
-          title: 'Upload successful',
+        toast.success('Upload successful', {
           description: `Uploaded ${successCount} file(s) to ${bucketName}`,
-          type: 'success'
         })
         onSuccess()
       }
 
       if (errorCount > 0) {
-        toastManager.add({
-          title: 'Upload partially failed',
+        toast.error('Upload partially failed', {
           description: `Failed to upload ${errorCount} file(s).`,
-          type: 'error'
         })
       }
 
@@ -158,7 +151,7 @@ export function UploadDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
-      <DialogPopup className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>Upload Files</DialogTitle>
           <DialogDescription>
@@ -166,7 +159,7 @@ export function UploadDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <DialogPanel>
+        <DialogContent>
           <div
             className={cn(
               'relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 transition-colors',
@@ -227,7 +220,7 @@ export function UploadDialog({
               ))}
             </div>
           )}
-        </DialogPanel>
+        </DialogContent>
 
         <DialogFooter>
           <Button variant="ghost" onClick={handleClose} disabled={uploading}>
@@ -248,7 +241,7 @@ export function UploadDialog({
             )}
           </Button>
         </DialogFooter>
-      </DialogPopup>
+      </DialogContent>
     </Dialog>
   )
 }

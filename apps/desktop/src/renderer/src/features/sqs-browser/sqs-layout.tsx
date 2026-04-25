@@ -5,18 +5,12 @@ import { useLocation, useNavigate, Outlet } from 'react-router'
 import { ArrowLeft, ChevronRight, MessageSquare, RotateCw } from 'lucide-react'
 
 import { Button } from '@renderer/components/ui/button'
-import {
-  Frame,
-  FrameDescription,
-  FrameHeader,
-  FramePanel,
-  FrameTitle
-} from '@renderer/components/ui/frame'
 import { useSQSClient } from './hooks/use-sqs-client'
 import type { SQSBrowserApi } from './types'
-import { Select, SelectTrigger, SelectPopup, SelectItem, SelectValue } from '@renderer/components/ui/select'
-import { Tooltip, TooltipTrigger, TooltipPopup } from '@renderer/components/ui/tooltip'
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@renderer/components/ui/select'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@renderer/components/ui/tooltip'
 import { regions } from '@renderer/constants'
+import { Frame, FrameDescription, FrameHeader, FramePanel, FrameTitle } from '@renderer/components/ui/frame'
 
 export function SQSLayout() {
   const navigate = useNavigate()
@@ -79,29 +73,26 @@ export function SQSLayout() {
                 <SelectTrigger className="h-9 w-[140px] px-3 shadow-xs/5">
                   <SelectValue placeholder="Select region" />
                 </SelectTrigger>
-                <SelectPopup>
+                <SelectContent>
                   {regions.map((value) => (
                     <SelectItem key={value} value={value}>
                       {value}
                     </SelectItem>
                   ))}
-                </SelectPopup>
+                </SelectContent>
               </Select>
 
               <Tooltip>
-                <TooltipTrigger
-                  delay={1200}
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => setRefreshKey((prev) => prev + 1)}
-                    />
-                  }
-                >
-                  <RotateCw className="h-4 w-4" />
+                <TooltipTrigger>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setRefreshKey((prev) => prev + 1)}
+                  >
+                    <RotateCw className="h-4 w-4" />
+                  </Button>
                 </TooltipTrigger>
-                <TooltipPopup>Refresh</TooltipPopup>
+                <TooltipContent>Refresh</TooltipContent>
               </Tooltip>
             </div>
           </div>

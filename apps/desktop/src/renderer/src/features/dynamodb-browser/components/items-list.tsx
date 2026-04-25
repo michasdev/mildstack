@@ -25,7 +25,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogClose
+  AlertDialogCancel
 } from '@renderer/components/ui/alert-dialog'
 import {
   Empty,
@@ -151,7 +151,7 @@ export function ItemsList() {
             <Filter className="h-4 w-4" />
             Filters
             {hasActiveSearch && (
-              <Badge variant="outline" size="sm" className="ml-1 bg-primary/10 text-primary border-primary/30">
+              <Badge variant="outline" className="ml-1 bg-primary/10 text-primary border-primary/30">
                 {fetchMode === 'query' ? 'Query' : activeFilterCount.toString()}
               </Badge>
             )}
@@ -160,8 +160,10 @@ export function ItemsList() {
 
         <div className="flex flex-wrap gap-2">
           {selectedItems.size > 0 && (
-            <Button variant="destructive" onClick={handleBulkDelete} loading={isDeleting}>
-              <Trash2 className="h-4 w-4" />
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={isDeleting}>
+              {isDeleting ? <Spinner className="h-4 w-4" /> : (
+                <Trash2 className="h-4 w-4" />
+              )}
               Delete ({selectedItems.size})
             </Button>
           )}
@@ -207,7 +209,7 @@ export function ItemsList() {
       {/* Data grid */}
       <div className="flex-1 min-h-0 overflow-hidden rounded-2xl border border-border bg-card shadow-xs/5">
         <ScrollArea className="h-full">
-          <Table variant="card">
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-12">
@@ -357,8 +359,13 @@ export function ItemsList() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="ghost" />}>Cancel</AlertDialogClose>
-            <Button variant="destructive" onClick={executeBulkDelete} loading={isDeleting}>
+            <AlertDialogCancel asChild>
+              <Button variant="ghost">Cancel</Button>
+            </AlertDialogCancel>
+            <Button variant="destructive" onClick={executeBulkDelete} disabled={isDeleting}>
+              {isDeleting ? <Spinner className="h-4 w-4" /> : (
+                <Trash2 className="h-4 w-4" />
+              )}
               Delete
             </Button>
           </AlertDialogFooter>

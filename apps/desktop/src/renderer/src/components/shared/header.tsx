@@ -8,16 +8,10 @@ import {
 } from "@renderer/components/ui/breadcrumb";
 import { Fragment } from "react";
 import { Link, useLocation } from "react-router";
-import mildstackLightLogo from "@renderer/assets/logos/mildstack-logo-full-white.svg"
 import { Separator } from "@renderer/components/ui/separator";
 import { useInstanceStore } from "@/store/instance-store";
 import { Badge } from "@renderer/components/ui/badge";
-
-const statusBadgeVariant = {
-    running: "success",
-    not_started: "secondary",
-    errored: "error",
-} as const
+import { cn } from "@renderer/lib/utils";
 
 const Header = () => {
     const currentPath = useLocation();
@@ -45,12 +39,14 @@ const Header = () => {
 
     return (
         <header className="flex flex-row items-center gap-4 px-6">
-            <img className="h-8 w-auto" src={mildstackLightLogo} alt="MildStack Logo" />
             <Separator orientation="vertical" className="h-6" />
             {selectedInstance && (
                 <div className="flex flex-row items-center gap-2">
                     <span className="text-sm font-semibold">Instance {selectedInstance.port}</span>
-                    <Badge variant={statusBadgeVariant[selectedInstance.status] ?? 'secondary'} className="text-[10px] h-4">
+                    <Badge className={cn("text-[10px] h-4", {
+                        'bg-green-500': selectedInstance.status === 'running',
+                        'bg-red-500': selectedInstance.status === 'errored',
+                    })}>
                         {selectedInstance.status}
                     </Badge>
                     <Separator orientation="vertical" className="h-6" />
@@ -66,7 +62,7 @@ const Header = () => {
                                     {isLast ? (
                                         <BreadcrumbPage>{item.label}</BreadcrumbPage>
                                     ) : (
-                                        <BreadcrumbLink render={<Link to={item.path} />}>{item.label}</BreadcrumbLink>
+                                        <BreadcrumbLink asChild><Link to={item.path}>{item.label}</Link></BreadcrumbLink>
                                     )}
                                 </BreadcrumbItem>
                                 {!isLast && <BreadcrumbSeparator>/</BreadcrumbSeparator>}

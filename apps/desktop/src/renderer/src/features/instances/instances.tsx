@@ -21,10 +21,10 @@ import {
 } from "lucide-react";
 import { useInstanceStore, type Instance } from "@/store/instance-store";
 import { useNavigate } from "react-router";
-import { toastManager } from "@renderer/components/ui/toast";
+import { toast } from 'sonner'
 import {
     Dialog,
-    DialogPopup,
+    DialogContent,
     DialogHeader,
     DialogTitle,
     DialogDescription,
@@ -43,12 +43,12 @@ import {
 import { Spinner } from "@renderer/components/ui/spinner";
 import {
     AlertDialog,
-    AlertDialogPopup,
+    AlertDialogContent,
     AlertDialogHeader,
     AlertDialogTitle,
     AlertDialogDescription,
     AlertDialogFooter,
-    AlertDialogClose,
+    AlertDialogCancel,
 } from "@renderer/components/ui/alert-dialog";
 
 const statusBadgeVariant = {
@@ -100,10 +100,8 @@ const InstancesPage = () => {
     const handleCreate = async () => {
         const port = parseInt(newPort, 10);
         if (isNaN(port) || port < 1 || port > 65535) {
-            toastManager.add({
-                title: "Invalid port",
-                description: "Port must be a number between 1 and 65535.",
-                type: "error",
+            toast.error('Invalid port', {
+                description: 'Port must be a number between 1 and 65535.',
             });
             return;
         }
@@ -113,18 +111,14 @@ const InstancesPage = () => {
         setCreating(false);
 
         if (result.success) {
-            toastManager.add({
-                title: "Instance started",
+            toast.success('Instance started', {
                 description: `MildStack instance started on port ${port}.`,
-                type: "success",
             });
             setCreateOpen(false);
             setNewPort("");
         } else {
-            toastManager.add({
-                title: "Failed to start instance",
-                description: result.error || "Unknown error",
-                type: "error",
+            toast.error('Failed to start instance', {
+                description: result.error || 'Unknown error',
             });
         }
     };
@@ -142,16 +136,12 @@ const InstancesPage = () => {
         });
 
         if (result.success) {
-            toastManager.add({
-                title: "Instance stopped",
+            toast.success('Instance stopped', {
                 description: `Instance on port ${instance.port} has been stopped.`,
-                type: "success",
             });
         } else {
-            toastManager.add({
-                title: "Failed to stop instance",
-                description: result.error || "Unknown error",
-                type: "error",
+            toast.error('Failed to stop instance', {
+                description: result.error || 'Unknown error',
             });
         }
     };
@@ -169,16 +159,12 @@ const InstancesPage = () => {
         });
 
         if (result.success) {
-            toastManager.add({
-                title: "Instance started",
+            toast.success('Instance started', {
                 description: `Instance on port ${instance.port} is now running.`,
-                type: "success",
             });
         } else {
-            toastManager.add({
-                title: "Failed to start instance",
-                description: result.error || "Unknown error",
-                type: "error",
+            toast.error('Failed to start instance', {
+                description: result.error || 'Unknown error',
             });
         }
     };
@@ -199,16 +185,12 @@ const InstancesPage = () => {
         });
 
         if (result.success) {
-            toastManager.add({
-                title: "Instance deleted",
+            toast.success('Instance deleted', {
                 description: `Instance on port ${deleteTarget.port} has been deleted.`,
-                type: "success",
             });
         } else {
-            toastManager.add({
-                title: "Failed to delete instance",
-                description: result.error || "Unknown error",
-                type: "error",
+            toast.error('Failed to delete instance', {
+                description: result.error || 'Unknown error',
             });
         }
 
@@ -320,11 +302,10 @@ const InstancesPage = () => {
                                                 <h2 className="font-semibold text-sm font-mono">
                                                     Instance {instance.port}
                                                 </h2>
-                                                <Badge
-                                                    variant={
-                                                        statusBadgeVariant[instance.status] ?? "secondary"
-                                                    }
-                                                >
+                                                <Badge className={cn({
+                                                    'bg-green-500': instance.status === 'running',
+                                                    'bg-red-500': instance.status === 'errored',
+                                                })}>
                                                     {statusLabel[instance.status] ?? instance.status}
                                                 </Badge>
                                                 {instance.pid && (
@@ -407,7 +388,7 @@ const InstancesPage = () => {
 
             {/* Create Instance Dialog */}
             <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-                <DialogPopup>
+                <DialogContent>
                     <DialogHeader>
                         <DialogTitle>New Instance</DialogTitle>
                         <DialogDescription>
@@ -430,20 +411,22 @@ const InstancesPage = () => {
                         />
                     </div>
                     <DialogFooter>
-                        <DialogClose render={<Button variant="outline" />}>
-                            Cancel
+                        <DialogClose asChild>
+                            <Button variant="outline">
+                                Cancel
+                            </Button>
                         </DialogClose>
                         <Button onClick={handleCreate} disabled={creating || !newPort.trim()}>
                             {creating && <Loader2Icon className="h-4 w-4 animate-spin" />}
                             Start Instance
                         </Button>
                     </DialogFooter>
-                </DialogPopup>
+                </DialogContent>
             </Dialog>
 
             {/* Delete Confirmation Dialog */}
             <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-                <AlertDialogPopup>
+                <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>Delete Instance</AlertDialogTitle>
                         <AlertDialogDescription>
@@ -452,14 +435,16 @@ const InstancesPage = () => {
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogClose render={<Button variant="outline" />}>
-                            Cancel
-                        </AlertDialogClose>
+                        <AlertDialogCancel asChild>
+                            <Button variant="outline">
+                                Cancel
+                            </Button>
+                        </AlertDialogCancel>
                         <Button variant="destructive" onClick={handleDeleteConfirm}>
                             Delete
                         </Button>
                     </AlertDialogFooter>
-                </AlertDialogPopup>
+                </AlertDialogContent>
             </AlertDialog>
         </>
     );

@@ -33,24 +33,24 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogClose
+  AlertDialogCancel
 } from '@renderer/components/ui/alert-dialog'
 import {
   CardHeader,
   CardTitle,
   CardDescription,
-  CardPanel,
+  CardContent,
   CardAction
 } from '@renderer/components/ui/card'
 import {
   Select,
   SelectTrigger,
-  SelectPopup,
+  SelectContent,
   SelectItem,
   SelectValue
 } from '@renderer/components/ui/select'
+import { toast} from 'sonner'
 import { cn } from '@renderer/lib/utils'
-import { toastManager } from '@renderer/components/ui/toast'
 import type { DynamoDBTableSummary } from '../types'
 import type { DynamoDBBrowserOutletContext } from '../dynamodb-layout'
 
@@ -92,9 +92,7 @@ export function TablesList() {
       setSelectedTables(new Set())
     } catch (error) {
       console.error('Failed to fetch tables:', error)
-      toastManager.add({
-        title: 'Failed to fetch tables',
-        type: 'error',
+      toast.error('Failed to fetch tables', {
         description: error instanceof Error ? error.message : String(error)
       })
     } finally {
@@ -152,16 +150,12 @@ export function TablesList() {
       setIsCreateOpen(false)
       resetCreateForm()
       await fetchTables()
-      toastManager.add({
-        title: 'Table created',
-        description: `Table "${name}" created successfully.`,
-        type: 'success'
+      toast.success('Table created successfully', {
+        description: `Table "${name}" created successfully.`
       })
     } catch (err) {
       console.error('Failed to create table:', err)
-      toastManager.add({
-        title: 'Failed to create table',
-        type: 'error',
+      toast.error('Failed to create table', {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -186,9 +180,7 @@ export function TablesList() {
           await api.deleteTable(table, region)
         } catch (err) {
           console.error(`Failed to delete table ${table}:`, err)
-          toastManager.add({
-            title: `Failed to delete table ${table}`,
-            type: 'error',
+          toast.error(`Failed to delete table ${table}`, {
             description: err instanceof Error ? err.message : String(err)
           })
         }
@@ -247,16 +239,19 @@ export function TablesList() {
 
         <div className="flex flex-wrap items-center gap-2">
           {selectedTables.size > 0 && (
-            <Button variant="destructive" onClick={handleBulkDelete} loading={isDeleting}>
-              <Trash2 className="h-4 w-4" />
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={isDeleting}>
+              {isDeleting && <Spinner className="h-4 w-4" />}
+              {!isDeleting && <Trash2 className="h-4 w-4" />}
               Delete ({selectedTables.size})
             </Button>
           )}
 
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-            <DialogTrigger render={<Button variant="outline" />}>
-              <Plus className="h-4 w-4" />
-              Create Table
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Plus className="h-4 w-4" />
+                Create Table
+              </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
@@ -301,10 +296,10 @@ export function TablesList() {
                       <SelectTrigger className="h-9 shadow-xs/5" id="pk-type">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectPopup>
+                      <SelectContent>
                         <SelectItem value="S">String (S)</SelectItem>
                         <SelectItem value="N">Number (N)</SelectItem>
-                      </SelectPopup>
+                      </SelectContent>
                     </Select>
                   </div>
                 </div>
@@ -330,21 +325,24 @@ export function TablesList() {
                       <SelectTrigger className="h-9 shadow-xs/5" id="sk-type">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectPopup>
+                      <SelectContent>
                         <SelectItem value="S">String (S)</SelectItem>
                         <SelectItem value="N">Number (N)</SelectItem>
-                      </SelectPopup>
+                      </SelectContent>
                     </Select>
                   </div>
                 </div>
               </div>
               <DialogFooter>
-                <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
+                <DialogClose asChild>
+                  <Button variant="ghost">Cancel</Button>
+                </DialogClose>
                 <Button
                   onClick={handleCreateTable}
                   disabled={!newTableName.trim() || !partitionKeyName.trim()}
-                  loading={isCreating}
                 >
+                  {isCreating && <Spinner className="h-4 w-4" />}
+                  {!isCreating && <Plus className="h-4 w-4" />}
                   Create
                 </Button>
               </DialogFooter>
@@ -408,11 +406,10 @@ export function TablesList() {
                       </div>
                     </div>
                   </CardHeader>
-                  <CardPanel className="flex items-center justify-between gap-3 pt-0">
+                  <CardContent className="flex items-center justify-between gap-3 pt-0">
                     <div className="flex items-center gap-2">
                       <Badge
                         variant="outline"
-                        size="sm"
                         className={statusColor(table.TableStatus)}
                       >
                         {table.TableStatus}
@@ -422,7 +419,7 @@ export function TablesList() {
                       </span>
                     </div>
                     <span className="text-xs text-muted-foreground">Click to browse</span>
-                  </CardPanel>
+                  </CardContent>
                 </SpotlightCard>
               )
             })}
@@ -440,8 +437,12 @@ export function TablesList() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="ghost" />}>Cancel</AlertDialogClose>
-            <Button variant="destructive" onClick={executeBulkDelete} loading={isDeleting}>
+            <AlertDialogCancel asChild>
+              <Button variant="ghost">Cancel</Button>
+            </AlertDialogCancel>
+            <Button variant="destructive" onClick={executeBulkDelete} disabled={isDeleting}>
+              {isDeleting && <Spinner className="h-4 w-4" />}
+              {!isDeleting && <Trash2 className="h-4 w-4" />}
               Delete
             </Button>
           </AlertDialogFooter>

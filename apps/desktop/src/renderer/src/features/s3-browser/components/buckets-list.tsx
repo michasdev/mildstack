@@ -8,7 +8,7 @@ import {
   CardHeader,
   CardTitle,
   CardDescription,
-  CardPanel,
+  CardContent,
   CardAction
 } from '@renderer/components/ui/card'
 import SpotlightCard from '@renderer/components/ui/spotlight-card'
@@ -41,11 +41,11 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogClose
+  AlertDialogCancel
 } from '@renderer/components/ui/alert-dialog'
 import type { S3Bucket } from '../types'
 import type { S3BrowserOutletContext } from '../s3-layout'
-import { toastManager } from '@renderer/components/ui/toast'
+import { toast } from 'sonner'
 
 export function BucketsList() {
   const { api, region } = useOutletContext<S3BrowserOutletContext>()
@@ -111,9 +111,7 @@ export function BucketsList() {
       await fetchBuckets()
     } catch (err) {
       console.error('Failed to create bucket:', err)
-      toastManager.add({
-        title: 'Failed to create bucket',
-        type: 'error',
+      toast.error('Failed to create bucket', {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -130,9 +128,7 @@ export function BucketsList() {
           await api.deleteBucket(bucket, region)
         } catch (err) {
           console.error(`Failed to delete bucket ${bucket}:`, err)
-          toastManager.add({
-            title: `Failed to delete bucket ${bucket}`,
-            type: 'error',
+          toast.error(`Failed to delete bucket ${bucket}`, {
             description: err instanceof Error ? err.message : String(err)
           })
         }
@@ -175,16 +171,19 @@ export function BucketsList() {
 
         <div className="flex flex-wrap items-center gap-2">
           {selectedBuckets.size > 0 && (
-            <Button variant="destructive" onClick={handleBulkDelete} loading={isDeleting}>
-              <Trash2 className="h-4 w-4" />
+            <Button variant="destructive" onClick={handleBulkDelete}>
+              {isDeleting && <Spinner className="h-4 w-4" />}
+              {!isDeleting && <Trash2 className="h-4 w-4" />}
               Delete ({selectedBuckets.size})
             </Button>
           )}
 
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-            <DialogTrigger render={<Button variant="outline" />}>
-              <Plus className="h-4 w-4" />
-              Create Bucket
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Plus className="h-4 w-4" />
+                Create Bucket
+              </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
@@ -207,11 +206,14 @@ export function BucketsList() {
                 />
               </div>
               <DialogFooter>
-                <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
+                <DialogClose asChild>
+                  <Button variant="ghost">
+                    Cancel
+                  </Button>
+                </DialogClose>
                 <Button
                   onClick={handleCreateBucket}
                   disabled={!newBucketName.trim()}
-                  loading={isCreating}
                 >
                   Create
                 </Button>
@@ -275,12 +277,12 @@ export function BucketsList() {
                       </div>
                     </div>
                   </CardHeader>
-                  <CardPanel className="flex items-center justify-between gap-3 pt-0">
-                    <Badge variant="outline" size="sm">
+                  <CardContent className="flex items-center justify-between gap-3 pt-0">
+                    <Badge variant="outline">
                       S3 bucket
                     </Badge>
                     <span className="text-xs text-muted-foreground">Click to browse</span>
-                  </CardPanel>
+                  </CardContent>
                 </SpotlightCard>
               )
             })}
@@ -297,8 +299,12 @@ export function BucketsList() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="ghost" />}>Cancel</AlertDialogClose>
-            <Button variant="destructive" onClick={executeBulkDelete} loading={isDeleting}>
+            <AlertDialogCancel asChild>
+              <Button variant="ghost">
+                Cancel
+              </Button>
+            </AlertDialogCancel>
+            <Button variant="destructive" onClick={executeBulkDelete}>
               Delete
             </Button>
           </AlertDialogFooter>

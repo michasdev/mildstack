@@ -13,8 +13,8 @@ import {
 } from '@renderer/components/ui/frame'
 import { useS3Client } from './hooks/use-s3-client'
 import type { S3BrowserApi } from './types'
-import { Select, SelectTrigger, SelectPopup, SelectItem, SelectValue } from '@renderer/components/ui/select'
-import { Tooltip, TooltipTrigger, TooltipPopup } from '@renderer/components/ui/tooltip'
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@renderer/components/ui/select'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@renderer/components/ui/tooltip'
 import { regions } from '@renderer/constants'
 
 export function S3Layout() {
@@ -113,29 +113,26 @@ export function S3Layout() {
                 <SelectTrigger className="h-9 w-[140px] px-3 shadow-xs/5">
                   <SelectValue placeholder="Select region" />
                 </SelectTrigger>
-                <SelectPopup>
+                <SelectContent>
                   {regions.map((value) => (
                     <SelectItem key={value} value={value}>
                       {value}
                     </SelectItem>
                   ))}
-                </SelectPopup>
+                </SelectContent>
               </Select>
 
               <Tooltip>
-                <TooltipTrigger
-                  delay={1200}
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => setRefreshKey((prev) => prev + 1)}
-                    />
-                  }
-                >
-                  <RotateCw className="h-4 w-4" />
+                <TooltipTrigger>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setRefreshKey((prev) => prev + 1)}
+                  >
+                    <RotateCw className="h-4 w-4" />
+                  </Button>
                 </TooltipTrigger>
-                <TooltipPopup>Refresh</TooltipPopup>
+                <TooltipContent>Refresh</TooltipContent>
               </Tooltip>
             </div>
           </div>

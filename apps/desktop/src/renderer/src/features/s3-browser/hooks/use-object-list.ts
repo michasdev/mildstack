@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useNavigate, useOutletContext, useParams } from 'react-router'
-import { toastManager } from "@/components/ui/toast"
+import { toast } from "sonner"
 import type { S3Object } from '../types'
 import type { S3BrowserOutletContext } from '../s3-layout'
 
@@ -191,18 +191,14 @@ export function useObjectList() {
       const errorCount = result.Errors?.length || 0
 
       if (successCount > 0) {
-        toastManager.add({
-          title: 'Objects deleted',
+        toast.success('Objects deleted', {
           description: `Successfully deleted ${successCount} object(s).`,
-          type: 'success'
         })
       }
 
       if (errorCount > 0) {
-        toastManager.add({
-          title: 'Partial deletion failure',
+        toast.error('Partial deletion failure', {
           description: `Failed to delete ${errorCount} object(s).`,
-          type: 'error'
         })
         console.error('Deletion errors:', result.Errors)
       }
@@ -211,9 +207,7 @@ export function useObjectList() {
       setSelectedObjects(new Set())
     } catch (err) {
       console.error('Bulk delete failed', err)
-      toastManager.add({
-        title: 'Deletion failed',
-        type: 'error',
+      toast.error('Deletion failed', {
         description: err instanceof Error ? err.message : 'A network or system error occurred.'
       })
     } finally {
@@ -234,19 +228,15 @@ export function useObjectList() {
         'application/x-directory',
         region
       )
-      toastManager.add({
-        title: 'Folder created',
+      toast.success('Folder created', {
         description: `Successfully created folder "${newFolderName.trim()}"`,
-        type: 'success'
       })
       setNewFolderName('')
       setIsCreateFolderDialogOpen(false)
       await fetchObjects()
     } catch (err) {
       console.error('Failed to create folder', err)
-      toastManager.add({
-        title: 'Failed to create folder',
-        type: 'error',
+      toast.error('Failed to create folder', {
         description: err instanceof Error ? err.message : 'Unknown error'
       })
     } finally {
@@ -284,9 +274,8 @@ export function useObjectList() {
       URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Download failed', err)
-      toastManager.add({
-        title: 'Failed to download file',
-        type: 'error'
+      toast.error('Failed to download file', {
+        description: err instanceof Error ? err.message : 'Unknown error'
       })
     } finally {
       setDownloadingKey(null)
