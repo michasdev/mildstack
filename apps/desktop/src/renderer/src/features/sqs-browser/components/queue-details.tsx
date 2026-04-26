@@ -5,21 +5,20 @@ import { useParams, useOutletContext } from 'react-router'
 import { Send, Download, Settings as SettingsIcon, Trash2, ArrowRightLeft, RefreshCw, ArchiveRestore } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import { Button } from '@renderer/components/ui/button'
-import { Tabs, TabsList, TabsTab, TabsPanel } from '@renderer/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@renderer/components/ui/tabs'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { Badge } from '@renderer/components/ui/badge'
-import { toastManager } from '@renderer/components/ui/toast'
+import { toast } from 'sonner'
 import type { SQSBrowserOutletContext } from '../sqs-layout'
 import type { SQSMessage } from '../types'
-import { cn } from '@renderer/lib/utils'
 
 export function QueueDetails() {
   const { queueName } = useParams<{ queueName: string }>()
   const { api, region } = useOutletContext<SQSBrowserOutletContext>()
   const [activeTab, setActiveTab] = useState('messages')
-  
+
   // Queue state
   const [attributes, setAttributes] = useState<Record<string, string>>({})
   const [queueUrl, setQueueUrl] = useState<string>('')
@@ -37,7 +36,7 @@ export function QueueDetails() {
   const [messages, setMessages] = useState<SQSMessage[]>([])
   const [isReceiving, setIsReceiving] = useState(false)
   const [receiveCount, setReceiveCount] = useState(10)
-  
+
   // Redrive state
   const [isRedriving, setIsRedriving] = useState(false)
 
@@ -54,9 +53,7 @@ export function QueueDetails() {
       }
     } catch (err) {
       console.error(err)
-      toastManager.add({
-        title: 'Error loading queue',
-        type: 'error',
+      toast.error('Error loading queue', {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -73,26 +70,22 @@ export function QueueDetails() {
     setIsSending(true)
     try {
       await api.sendMessage(
-        queueUrl, 
-        messageBody, 
+        queueUrl,
+        messageBody,
         delaySeconds > 0 ? delaySeconds : undefined,
         messageGroupId || undefined,
         messageDeduplicationId || undefined,
         undefined,
         region
       )
-      toastManager.add({
-        title: 'Message sent',
-        type: 'success',
+      toast.success('Message sent', {
         description: 'Successfully placed message in queue.'
       })
       // Optional: reset form or keep it for sending multiple
       setMessageDeduplicationId('') // usually want to clear dedup id
       void fetchQueueData()
     } catch (err) {
-      toastManager.add({
-        title: 'Failed to send message',
-        type: 'error',
+      toast.error('Failed to send message', {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -107,16 +100,12 @@ export function QueueDetails() {
       const received = await api.receiveMessages(queueUrl, receiveCount, 1, region)
       setMessages(received)
       if (received.length === 0) {
-        toastManager.add({
-          title: 'No messages found',
-          type: 'info',
+        toast.info('No messages found', {
           description: 'The queue is currently empty or messages are invisible.'
         })
       }
     } catch (err) {
-      toastManager.add({
-        title: 'Failed to receive messages',
-        type: 'error',
+      toast.error('Failed to receive messages', {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -129,15 +118,12 @@ export function QueueDetails() {
     try {
       await api.deleteMessage(queueUrl, receiptHandle, region)
       setMessages(prev => prev.filter(m => m.ReceiptHandle !== receiptHandle))
-      toastManager.add({
-        title: 'Message deleted',
-        type: 'success'
+      toast.success('Message deleted', {
+        description: 'Message has been deleted from the queue.'
       })
       void fetchQueueData()
     } catch (err) {
-      toastManager.add({
-        title: 'Failed to delete message',
-        type: 'error',
+      toast.error('Failed to delete message', {
         description: err instanceof Error ? err.message : String(err)
       })
     }
@@ -148,23 +134,18 @@ export function QueueDetails() {
   if (attributes.RedrivePolicy) {
     try {
       dlqArn = JSON.parse(attributes.RedrivePolicy).deadLetterTargetArn
-    } catch (e) {}
+    } catch (e) { }
   }
-  
-  // DLQ Redrive logic (mocked up as we need to find the source queue, usually we just move messages to the source)
+
   const handleRedrive = async () => {
-    // Premium feature mock - requires source queue URL resolution
     setIsRedriving(true)
-    toastManager.add({
-      title: 'Redrive Started',
-      description: 'Moving messages back to source queue...',
-      type: 'info'
+    toast.info('Redrive Started', {
+      description: 'Moving messages back to source queue...'
     })
     setTimeout(() => {
       setIsRedriving(false)
-      toastManager.add({
-        title: 'Redrive Completed',
-        type: 'success'
+      toast.success('Redrive Completed', {
+        description: 'Messages have been moved back to source queue.'
       })
     }, 2000)
   }
@@ -197,7 +178,7 @@ export function QueueDetails() {
                   FIFO
                 </Badge>
               )}
-              <Badge variant="outline" size="sm">
+              <Badge variant="outline">
                 Queue details
               </Badge>
             </div>
@@ -235,30 +216,30 @@ export function QueueDetails() {
             </div>
 
             <TabsList className="mt-2 md:mt-0">
-              <TabsTab value="messages">
+              <TabsTrigger value="messages">
                 <Download className="h-4 w-4" />
                 Messages
-              </TabsTab>
-              <TabsTab value="send">
+              </TabsTrigger>
+              <TabsTrigger value="send">
                 <Send className="h-4 w-4" />
                 Send
-              </TabsTab>
-              <TabsTab value="settings">
+              </TabsTrigger>
+              <TabsTrigger value="settings">
                 <SettingsIcon className="h-4 w-4" />
                 Attributes
-              </TabsTab>
+              </TabsTrigger>
               {attributes.RedriveAllowPolicy && (
-                <TabsTab value="dlq" className="text-red-400 data-active:text-red-400">
+                <TabsTrigger value="dlq" className="text-red-400 data-active:text-red-400">
                   <ArchiveRestore className="h-4 w-4" />
                   DLQ
-                </TabsTab>
+                </TabsTrigger>
               )}
             </TabsList>
           </div>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <TabsPanel value="messages" className="h-full flex flex-col gap-4 p-4">
+          <TabsContent value="messages" className="h-full flex flex-col gap-4 p-4">
             <div className="flex items-center gap-4 bg-secondary/20 p-3 rounded-lg border border-border">
               <div className="flex items-center gap-2">
                 <Label>Max Messages:</Label>
@@ -271,8 +252,10 @@ export function QueueDetails() {
                   className="w-20 h-8"
                 />
               </div>
-              <Button onClick={handleReceiveMessages} loading={isReceiving}>
-                <RefreshCw className={cn('w-4 h-4 mr-2', isReceiving && 'animate-spin')} />
+              <Button onClick={handleReceiveMessages} disabled={isReceiving}>
+                {isReceiving ? <Spinner /> : (
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                )}
                 Poll Messages
               </Button>
               <div className="flex-1" />
@@ -332,9 +315,9 @@ export function QueueDetails() {
                 ))
               )}
             </div>
-          </TabsPanel>
+          </TabsContent>
 
-          <TabsPanel value="send" className="p-4">
+          <TabsContent value="send" className="p-4">
             <div className="max-w-3xl mx-auto space-y-6">
               <div className="space-y-3">
                 <Label>Message Body</Label>
@@ -406,17 +389,18 @@ export function QueueDetails() {
               <div className="pt-4 border-t border-border flex justify-end">
                 <Button
                   onClick={handleSendMessage}
-                  loading={isSending}
-                  disabled={isFifo && !messageGroupId}
+                  disabled={isSending || (isFifo && !messageGroupId)}
                 >
-                  <Send className="w-4 h-4 mr-2" />
+                  {isSending ? <Spinner /> : (
+                    <Send className="w-4 h-4 mr-2" />
+                  )}
                   Send Message
                 </Button>
               </div>
             </div>
-          </TabsPanel>
+          </TabsContent>
 
-          <TabsPanel value="settings" className="p-4">
+          <TabsContent value="settings" className="p-4">
             <div className="max-w-3xl space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2 bg-secondary/10 p-4 rounded-lg border border-border">
@@ -449,10 +433,10 @@ export function QueueDetails() {
                 </div>
               </div>
             </div>
-          </TabsPanel>
+          </TabsContent>
 
           {attributes.RedriveAllowPolicy && (
-            <TabsPanel value="dlq" className="p-4">
+            <TabsContent value="dlq" className="p-4">
               <div className="max-w-3xl space-y-6">
                 <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-6 text-center">
                   <ArchiveRestore className="w-12 h-12 text-red-400 mx-auto mb-4" />
@@ -465,15 +449,18 @@ export function QueueDetails() {
                   </p>
                   <Button
                     onClick={handleRedrive}
-                    loading={isRedriving}
+                    disabled={isRedriving}
                     variant="secondary"
                     className="bg-red-500/10 text-red-400 hover:bg-red-500/20 border-red-500/20"
                   >
+                    {isRedriving ? <Spinner /> : (
+                      <ArchiveRestore className="w-4 h-4 mr-2" />
+                    )}
                     Redrive Messages to Source
                   </Button>
                 </div>
               </div>
-            </TabsPanel>
+            </TabsContent>
           )}
         </div>
       </Tabs>

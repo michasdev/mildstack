@@ -136,9 +136,13 @@ export function ItemEditor({ tableInfo, item, isOpen, onClose, onSave }: ItemEdi
         </div>
 
         <DialogFooter>
-          <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
-          <Button onClick={handleSave} loading={isSaving}>
-            {isEditMode ? 'Save Changes' : 'Create Item'}
+          <DialogClose asChild>
+            <Button variant="ghost">Cancel</Button>
+          </DialogClose>
+          <Button onClick={handleSave} disabled={isSaving}>
+            {isSaving ? <Spinner /> : (
+              <>{isEditMode ? 'Save Changes' : 'Create Item'}</>
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

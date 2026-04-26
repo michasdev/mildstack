@@ -4,7 +4,7 @@ import { useOutletContext, useParams } from 'react-router'
 import { Database, Key, Rows3 } from 'lucide-react'
 
 import { Badge } from '@renderer/components/ui/badge'
-import { Tabs, TabsList, TabsTab, TabsPanel } from '@renderer/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@renderer/components/ui/tabs'
 import { ItemsList } from './items-list'
 import { TableSchema } from './table-schema'
 import { TableIndexes } from './table-indexes'
@@ -41,7 +41,7 @@ export function TableDetails() {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-semibold">{tableName}</h2>
-              <Badge variant="outline" size="sm">
+              <Badge variant="outline">
                 Table details
               </Badge>
             </div>
@@ -50,32 +50,32 @@ export function TableDetails() {
             </p>
           </div>
           <TabsList className="mx-4 mt-2">
-            <TabsTab value="items">
+            <TabsTrigger value="items">
               <Rows3 className="h-4 w-4" />
               Items
-            </TabsTab>
-            <TabsTab value="schema">
+            </TabsTrigger>
+            <TabsTrigger value="schema">
               <Key className="h-4 w-4" />
               Schema
-            </TabsTab>
-            <TabsTab value="indexes">
+            </TabsTrigger>
+            <TabsTrigger value="indexes">
               <Database className="h-4 w-4" />
               Indexes
-            </TabsTab>
+            </TabsTrigger>
           </TabsList>
         </div>
 
-        <TabsPanel value="items" className="flex-1 min-h-0">
+        <TabsContent value="items" className="flex-1 min-h-0">
           <ItemsList />
-        </TabsPanel>
+        </TabsContent>
 
-        <TabsPanel value="schema" className="flex-1 min-h-0 overflow-y-auto">
+        <TabsContent value="schema" className="flex-1 min-h-0 overflow-y-auto">
           <TableSchema tableInfo={tableInfo} loading={loadingInfo} />
-        </TabsPanel>
+        </TabsContent>
 
-        <TabsPanel value="indexes" className="flex-1 min-h-0 overflow-y-auto">
+        <TabsContent value="indexes" className="flex-1 min-h-0 overflow-y-auto">
           <TableIndexes tableInfo={tableInfo} loading={loadingInfo} />
-        </TabsPanel>
+        </TabsContent>
       </Tabs>
     </div>
   )

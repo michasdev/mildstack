@@ -7,11 +7,11 @@ import { Badge } from '@renderer/components/ui/badge'
 import {
   Select,
   SelectTrigger,
-  SelectPopup,
+  SelectContent,
   SelectItem,
   SelectValue
 } from '@renderer/components/ui/select'
-import { Tabs, TabsList, TabsTab, TabsPanel } from '@renderer/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@renderer/components/ui/tabs'
 import { COMPARISON_OPERATORS, type ComparisonOperator, type FetchMode, type FilterCondition } from '../types'
 
 interface QueryFilterPanelProps {
@@ -102,7 +102,7 @@ export function QueryFilterPanel({
           <Filter className="h-4 w-4 text-primary" />
           <span className="text-sm font-medium">Advanced Search</span>
           {activeFilterCount > 0 && (
-            <Badge variant="outline" size="sm" className="bg-primary/10 text-primary border-primary/30">
+            <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30">
               {activeFilterCount} filter{activeFilterCount !== 1 ? 's' : ''}
             </Badge>
           )}
@@ -118,19 +118,19 @@ export function QueryFilterPanel({
         className="px-4 pt-3"
       >
         <TabsList>
-          <TabsTab value="scan">Scan</TabsTab>
-          <TabsTab value="query">Query</TabsTab>
+          <TabsTrigger value="scan">Scan</TabsTrigger>
+          <TabsTrigger value="query">Query</TabsTrigger>
         </TabsList>
 
         {/* Scan panel */}
-        <TabsPanel value="scan" className="py-3 space-y-3">
+        <TabsContent value="scan" className="py-3 space-y-3">
           <p className="text-xs text-muted-foreground">
             Scan reads every item and applies optional filters. Use for exploring data when you don't know the key.
           </p>
-        </TabsPanel>
+        </TabsContent>
 
         {/* Query panel */}
-        <TabsPanel value="query" className="py-3 space-y-4">
+        <TabsContent value="query" className="py-3 space-y-4">
           <p className="text-xs text-muted-foreground">
             Query uses the partition key (required) for efficient lookups. Optionally add a sort key condition and choose an index.
           </p>
@@ -143,7 +143,7 @@ export function QueryFilterPanel({
                 <SelectTrigger className="h-8 shadow-xs/5">
                   <SelectValue placeholder="Table (default)" />
                 </SelectTrigger>
-                <SelectPopup>
+                <SelectContent>
                   {availableIndexes.map((idx) => (
                     <SelectItem key={idx.name || '__table'} value={idx.name}>
                       {idx.name || 'Table (Primary Key)'}
@@ -152,7 +152,7 @@ export function QueryFilterPanel({
                       )}
                     </SelectItem>
                   ))}
-                </SelectPopup>
+                </SelectContent>
               </Select>
             </div>
           )}
@@ -185,13 +185,13 @@ export function QueryFilterPanel({
                   <SelectTrigger className="h-8 w-[150px] shadow-xs/5">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectPopup>
+                  <SelectContent>
                     {SK_OPERATORS.map((op) => (
                       <SelectItem key={op} value={op}>
                         {COMPARISON_OPERATORS.find((c) => c.value === op)?.label ?? op}
                       </SelectItem>
                     ))}
-                  </SelectPopup>
+                  </SelectContent>
                 </Select>
                 <Input
                   type="text"
@@ -220,7 +220,7 @@ export function QueryFilterPanel({
               {querySortAsc ? 'Ascending' : 'Descending'}
             </Button>
           </div>
-        </TabsPanel>
+        </TabsContent>
       </Tabs>
 
       {/* Filter conditions — shared between Scan and Query */}
@@ -260,13 +260,13 @@ export function QueryFilterPanel({
                   <SelectTrigger className="h-8 w-[140px] shadow-xs/5">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectPopup>
+                  <SelectContent>
                     {COMPARISON_OPERATORS.map((op) => (
                       <SelectItem key={op.value} value={op.value}>
                         {op.label}
                       </SelectItem>
                     ))}
-                  </SelectPopup>
+                  </SelectContent>
                 </Select>
                 {needsValue(condition.operator) && (
                   <>
@@ -284,11 +284,11 @@ export function QueryFilterPanel({
                       <SelectTrigger className="h-8 w-20 shadow-xs/5">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectPopup>
+                      <SelectContent>
                         <SelectItem value="S">String</SelectItem>
                         <SelectItem value="N">Number</SelectItem>
                         <SelectItem value="BOOL">Bool</SelectItem>
-                      </SelectPopup>
+                      </SelectContent>
                     </Select>
                   </>
                 )}

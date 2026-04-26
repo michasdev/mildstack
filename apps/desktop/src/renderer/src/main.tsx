@@ -1,9 +1,9 @@
-import './assets/main.css'
+import './main.css'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { RouterProvider } from 'react-router'
 import { router } from '@renderer/router'
-import { AnchoredToastProvider, ToastProvider } from '@renderer/components/ui/toast'
+import { Toaster } from '@renderer/components/ui/sonner'
 import { TooltipProvider } from '@renderer/components/ui/tooltip'
 import * as monaco from 'monaco-editor'
 import { loader } from '@monaco-editor/react'
@@ -38,12 +38,9 @@ loader.config({ monaco })
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ToastProvider>
-      <AnchoredToastProvider>
-        <TooltipProvider>
-          <RouterProvider router={router} />
-        </TooltipProvider>
-      </AnchoredToastProvider>
-    </ToastProvider>
+    <Toaster richColors position="top-center" />
+    <TooltipProvider>
+      <RouterProvider router={router} />
+    </TooltipProvider>
   </StrictMode>
 )

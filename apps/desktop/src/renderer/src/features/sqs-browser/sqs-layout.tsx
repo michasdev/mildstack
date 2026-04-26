@@ -2,21 +2,15 @@
 
 import { useState } from 'react'
 import { useLocation, useNavigate, Outlet } from 'react-router'
-import { ArrowLeft, ChevronRight, MessageSquare, RotateCw } from 'lucide-react'
+import { ChevronRight, RotateCw } from 'lucide-react'
 
 import { Button } from '@renderer/components/ui/button'
-import {
-  Frame,
-  FrameDescription,
-  FrameHeader,
-  FramePanel,
-  FrameTitle
-} from '@renderer/components/ui/frame'
 import { useSQSClient } from './hooks/use-sqs-client'
 import type { SQSBrowserApi } from './types'
-import { Select, SelectTrigger, SelectPopup, SelectItem, SelectValue } from '@renderer/components/ui/select'
-import { Tooltip, TooltipTrigger, TooltipPopup } from '@renderer/components/ui/tooltip'
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@renderer/components/ui/select'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@renderer/components/ui/tooltip'
 import { regions } from '@renderer/constants'
+import { Frame, FrameDescription, FrameHeader, FramePanel, FrameTitle } from '@renderer/components/ui/frame'
 
 export function SQSLayout() {
   const navigate = useNavigate()
@@ -43,12 +37,8 @@ export function SQSLayout() {
       <FrameHeader className="flex-none">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between w-full">
           <div className="flex items-start gap-3">
-            <Button variant="ghost" size="icon" onClick={() => navigate('/resources')}>
-              <ArrowLeft className="w-4 h-4" />
-            </Button>
             <div className="space-y-2">
               <FrameTitle className="flex items-center gap-2">
-                <MessageSquare className="w-5 h-5 text-primary" />
                 SQS Resource Browser
               </FrameTitle>
               <FrameDescription className="flex flex-wrap items-center gap-2">
@@ -76,32 +66,29 @@ export function SQSLayout() {
             <span className="text-sm text-muted-foreground">Region</span>
             <div className="flex items-center gap-2">
               <Select value={region} onValueChange={(val) => setRegion(val as string)}>
-                <SelectTrigger className="h-9 w-[140px] px-3 shadow-xs/5">
+                <SelectTrigger className="h-8 w-[140px] px-3 shadow-xs/5">
                   <SelectValue placeholder="Select region" />
                 </SelectTrigger>
-                <SelectPopup>
+                <SelectContent>
                   {regions.map((value) => (
                     <SelectItem key={value} value={value}>
                       {value}
                     </SelectItem>
                   ))}
-                </SelectPopup>
+                </SelectContent>
               </Select>
 
               <Tooltip>
-                <TooltipTrigger
-                  delay={1200}
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => setRefreshKey((prev) => prev + 1)}
-                    />
-                  }
-                >
-                  <RotateCw className="h-4 w-4" />
+                <TooltipTrigger>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setRefreshKey((prev) => prev + 1)}
+                  >
+                    <RotateCw className="h-4 w-4" />
+                  </Button>
                 </TooltipTrigger>
-                <TooltipPopup>Refresh</TooltipPopup>
+                <TooltipContent>Refresh</TooltipContent>
               </Tooltip>
             </div>
           </div>

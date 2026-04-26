@@ -1,15 +1,13 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useOutletContext, useParams } from 'react-router'
-import { toastManager } from '@renderer/components/ui/toast'
+import { toast } from 'sonner'
 import type { DynamoDBItem, DynamoDBTableSummary, FilterCondition, FetchMode, ComparisonOperator } from '../types'
 import type { DynamoDBBrowserOutletContext } from '../dynamodb-layout'
 import { valueToAttr } from '../types'
 
 export type SortKey = string
 export type SortOrder = 'asc' | 'desc'
-
-/* ── Expression builder ─────────────────────────────────────────────── */
 
 function buildExpressions(conditions: FilterCondition[]) {
   const validConditions = conditions.filter((c) => c.attribute.trim())
@@ -61,8 +59,6 @@ function resolveValue(raw: string, type: 'S' | 'N' | 'BOOL') {
       return valueToAttr(raw)
   }
 }
-
-/* ── Hook ───────────────────────────────────────────────────────────── */
 
 export function useItemsList() {
   const { api, region } = useOutletContext<DynamoDBBrowserOutletContext>()
@@ -258,9 +254,7 @@ export function useItemsList() {
         setLastEvaluatedKey(response.lastEvaluatedKey)
       } catch (error) {
         console.error('Failed to fetch items:', error)
-        toastManager.add({
-          title: fetchMode === 'query' ? 'Query failed' : 'Scan failed',
-          type: 'error',
+        toast.error(fetchMode === 'query' ? 'Query failed' : 'Scan failed', {
           description: error instanceof Error ? error.message : String(error)
         })
       } finally {
@@ -403,18 +397,14 @@ export function useItemsList() {
       }
 
       if (successCount > 0) {
-        toastManager.add({
-          title: 'Items deleted',
-          description: `Successfully deleted ${successCount} item(s).`,
-          type: 'success'
+        toast.success('Items deleted', {
+          description: `Successfully deleted ${successCount} item(s).`
         })
       }
 
       if (errorCount > 0) {
-        toastManager.add({
-          title: 'Partial deletion failure',
-          description: `Failed to delete ${errorCount} item(s).`,
-          type: 'error'
+        toast.error('Partial deletion failure', {
+          description: `Failed to delete ${errorCount} item(s).`
         })
       }
 
@@ -422,9 +412,7 @@ export function useItemsList() {
       setSelectedItems(new Set())
     } catch (err) {
       console.error('Bulk delete failed:', err)
-      toastManager.add({
-        title: 'Deletion failed',
-        type: 'error',
+      toast.error('Deletion Failed', {
         description: err instanceof Error ? err.message : 'A network or system error occurred.'
       })
     } finally {
@@ -446,18 +434,13 @@ export function useItemsList() {
     if (!tableName) return
     try {
       await api.putItem(tableName, item, region)
-      toastManager.add({
-        title: editingItem ? 'Item updated' : 'Item created',
-        type: 'success'
-      })
+      toast.success(editingItem ? 'Item updated' : 'Item created')
       setIsEditorOpen(false)
       setEditingItem(null)
       await fetchItems()
     } catch (err) {
       console.error('Failed to save item:', err)
-      toastManager.add({
-        title: 'Failed to save item',
-        type: 'error',
+      toast.error('Failed to save item', {
         description: err instanceof Error ? err.message : String(err)
       })
     }
@@ -467,13 +450,11 @@ export function useItemsList() {
     if (!tableName) return
     try {
       await api.deleteItem(tableName, extractKey(item), region)
-      toastManager.add({ title: 'Item deleted', type: 'success' })
+      toast.success('Item deleted')
       await fetchItems()
     } catch (err) {
       console.error('Failed to delete item:', err)
-      toastManager.add({
-        title: 'Failed to delete item',
-        type: 'error',
+      toast.error('Failed to delete item', {
         description: err instanceof Error ? err.message : String(err)
       })
     }

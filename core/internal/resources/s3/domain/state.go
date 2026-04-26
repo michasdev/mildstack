@@ -169,6 +169,12 @@ type DeleteObjectsResult struct {
 	Errors  []DeleteObjectsError
 }
 
+func NewEmptyState() State {
+	return State{
+		Service: "s3",
+	}
+}
+
 func NewState() State {
 	aws := awscontext.Default()
 	return State{

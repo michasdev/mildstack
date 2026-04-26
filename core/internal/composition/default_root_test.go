@@ -145,6 +145,9 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 		if got, want := state["service"], "dynamodb"; got != want {
 			t.Fatalf("unexpected dynamodb state: got %v want %v", got, want)
 		}
+		if got, want := len(state["tables"].([]any)), 0; got != want {
+			t.Fatalf("unexpected dynamodb table count: got %d want %d", got, want)
+		}
 	}
 
 	value, ok := hook.Get(s3domain.StateKey)
@@ -154,6 +157,9 @@ func TestDefaultRootIncludesS3AndDynamoDBWithDeterministicRoutes(t *testing.T) {
 	state := value.(map[string]any)
 	if got, want := state["service"], "s3"; got != want {
 		t.Fatalf("unexpected s3 state: got %v want %v", got, want)
+	}
+	if got, want := len(state["buckets"].([]any)), 0; got != want {
+		t.Fatalf("unexpected s3 bucket count: got %d want %d", got, want)
 	}
 
 	if value, ok := hook.Get(sqsdomain.StateKey); !ok {

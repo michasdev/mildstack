@@ -1,0 +1,55 @@
+{
+  "repository_type": "monorepo",
+  "project_name": "mildstack",
+  "parts": [
+    {
+      "part_id": "core",
+      "name": "Core Runtime",
+      "project_type_id": "backend",
+      "root_path": "core",
+      "primary_language": "Go",
+      "entry_points": [
+        "core/cmd/mildstack/main.go"
+      ],
+      "focus_level": "deep"
+    },
+    {
+      "part_id": "desktop",
+      "name": "Desktop App",
+      "project_type_id": "desktop",
+      "root_path": "apps/desktop",
+      "primary_language": "TypeScript",
+      "entry_points": [
+        "apps/desktop/src/main/index.ts",
+        "apps/desktop/src/renderer/src/main.tsx"
+      ],
+      "focus_level": "light"
+    },
+    {
+      "part_id": "web",
+      "name": "Website",
+      "project_type_id": "web",
+      "root_path": "apps/web/www",
+      "primary_language": "TypeScript",
+      "entry_points": [
+        "apps/web/www/src/main.tsx"
+      ],
+      "focus_level": "light"
+    }
+  ],
+  "integration_points": [
+    {
+      "from": "desktop",
+      "to": "core",
+      "type": "local runtime integration",
+      "details": "Electron main process routes user actions via IPC handlers into core-compatible operations and instance lifecycle controls."
+    },
+    {
+      "from": "web",
+      "to": "core",
+      "type": "indirect product integration",
+      "details": "Website documents/distributes product but does not host direct runtime API integration in this repository."
+    }
+  ]
+}
+

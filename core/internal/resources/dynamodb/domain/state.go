@@ -125,6 +125,12 @@ func (v AttributeValue) Any() any {
 	return attributeValueToAny(v)
 }
 
+func NewEmptyState() State {
+	return State{
+		Service: "dynamodb",
+	}
+}
+
 func NewState() State {
 	return State{
 		Service: "dynamodb",

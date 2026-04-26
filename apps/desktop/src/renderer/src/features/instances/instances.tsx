@@ -12,19 +12,29 @@ import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/utils";
 import {
     AlertCircleIcon,
+    ChevronUpIcon,
     Loader2Icon,
     PlayIcon,
     PlusIcon,
     RefreshCwIcon,
     SquareIcon,
+    Trash2,
     Trash2Icon,
+    X,
 } from "lucide-react";
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow
+} from "@renderer/components/ui/table";
 import { useInstanceStore, type Instance } from "@/store/instance-store";
-import { useNavigate } from "react-router";
-import { toastManager } from "@renderer/components/ui/toast";
+import { toast } from 'sonner'
 import {
     Dialog,
-    DialogPopup,
+    DialogContent,
     DialogHeader,
     DialogTitle,
     DialogDescription,
@@ -43,12 +53,12 @@ import {
 import { Spinner } from "@renderer/components/ui/spinner";
 import {
     AlertDialog,
-    AlertDialogPopup,
+    AlertDialogContent,
     AlertDialogHeader,
     AlertDialogTitle,
     AlertDialogDescription,
     AlertDialogFooter,
-    AlertDialogClose,
+    AlertDialogCancel,
 } from "@renderer/components/ui/alert-dialog";
 
 const statusBadgeVariant = {
@@ -64,7 +74,6 @@ const statusLabel = {
 } as const;
 
 const InstancesPage = () => {
-    const navigate = useNavigate();
     const {
         instances,
         loading,
@@ -88,7 +97,9 @@ const InstancesPage = () => {
     const handleInstanceClick = (instance: Instance) => {
         if (instance.status !== "running") return;
         selectInstance(instance.instanceId);
-        navigate(`/instances/${instance.instanceId}/resources`);
+        toast.success('Instance selected', {
+            description: `Instance on port ${instance.port} is now active.`,
+        });
     };
 
     const handleRefresh = useCallback(async () => {
@@ -100,10 +111,8 @@ const InstancesPage = () => {
     const handleCreate = async () => {
         const port = parseInt(newPort, 10);
         if (isNaN(port) || port < 1 || port > 65535) {
-            toastManager.add({
-                title: "Invalid port",
-                description: "Port must be a number between 1 and 65535.",
-                type: "error",
+            toast.error('Invalid port', {
+                description: 'Port must be a number between 1 and 65535.',
             });
             return;
         }
@@ -113,18 +122,14 @@ const InstancesPage = () => {
         setCreating(false);
 
         if (result.success) {
-            toastManager.add({
-                title: "Instance started",
+            toast.success('Instance started', {
                 description: `MildStack instance started on port ${port}.`,
-                type: "success",
             });
             setCreateOpen(false);
             setNewPort("");
         } else {
-            toastManager.add({
-                title: "Failed to start instance",
-                description: result.error || "Unknown error",
-                type: "error",
+            toast.error('Failed to start instance', {
+                description: result.error || 'Unknown error',
             });
         }
     };
@@ -142,16 +147,12 @@ const InstancesPage = () => {
         });
 
         if (result.success) {
-            toastManager.add({
-                title: "Instance stopped",
+            toast.success('Instance stopped', {
                 description: `Instance on port ${instance.port} has been stopped.`,
-                type: "success",
             });
         } else {
-            toastManager.add({
-                title: "Failed to stop instance",
-                description: result.error || "Unknown error",
-                type: "error",
+            toast.error('Failed to stop instance', {
+                description: result.error || 'Unknown error',
             });
         }
     };
@@ -169,16 +170,12 @@ const InstancesPage = () => {
         });
 
         if (result.success) {
-            toastManager.add({
-                title: "Instance started",
+            toast.success('Instance started', {
                 description: `Instance on port ${instance.port} is now running.`,
-                type: "success",
             });
         } else {
-            toastManager.add({
-                title: "Failed to start instance",
-                description: result.error || "Unknown error",
-                type: "error",
+            toast.error('Failed to start instance', {
+                description: result.error || 'Unknown error',
             });
         }
     };
@@ -199,16 +196,12 @@ const InstancesPage = () => {
         });
 
         if (result.success) {
-            toastManager.add({
-                title: "Instance deleted",
+            toast.success('Instance deleted', {
                 description: `Instance on port ${deleteTarget.port} has been deleted.`,
-                type: "success",
             });
         } else {
-            toastManager.add({
-                title: "Failed to delete instance",
-                description: result.error || "Unknown error",
-                type: "error",
+            toast.error('Failed to delete instance', {
+                description: result.error || 'Unknown error',
             });
         }
 
@@ -293,109 +286,125 @@ const InstancesPage = () => {
                         </EmptyContent>
                     </Empty>
                 ) : (
-                    instances.map((instance) => {
-                        const action = actionLoading[instance.instanceId];
-                        const isLoading = !!action;
+                    <div className="flex-1 min-h-0 overflow-hidden rounded-md border border-border bg-card">
+                        <Table>
+                            <TableHeader>
+                                <TableRow className="hover:bg-transparent">
+                                    <TableHead className="pl-4">
+                                        <div className="flex items-center gap-1 text-xs font-semibold tracking-wider text-muted-foreground">
+                                            PORT <ChevronUpIcon className="h-3 w-3 text-primary" />
+                                        </div>
+                                    </TableHead>
+                                    <TableHead>
+                                        <span className="text-xs font-semibold tracking-wider text-muted-foreground">STATUS</span>
+                                    </TableHead>
+                                    <TableHead>
+                                        <span className="text-xs font-semibold tracking-wider text-muted-foreground">PID</span>
+                                    </TableHead>
+                                    <TableHead>
+                                        <span className="text-xs font-semibold tracking-wider text-muted-foreground">ENDPOINT</span>
+                                    </TableHead>
+                                    <TableHead className="text-right pr-4">
+                                        <span className="text-xs font-semibold tracking-wider text-muted-foreground">ACTIONS</span>
+                                    </TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {instances.map((instance) => {
+                                    const action = actionLoading[instance.instanceId];
+                                    const isLoading = !!action;
 
-                        return (
-                            <FramePanel
-                                className={cn("cursor-pointer transition-colors", {
-                                    "border-success/50 hover:border-success":
-                                        instance.status === "running",
-                                    "border-border hover:border-muted-foreground/30":
-                                        instance.status === "not_started",
-                                    "border-destructive/50 hover:border-destructive":
-                                        instance.status === "errored",
-                                    "pointer-events-none opacity-60": isLoading,
-                                    "cursor-not-allowed opacity-70":
-                                        instance.status !== "running" && !isLoading,
-                                })}
-                                key={instance.instanceId}
-                                onClick={() => handleInstanceClick(instance)}
-                            >
-                                <div className="flex flex-row gap-2 w-full">
-                                    <div className="flex flex-col gap-1.5 w-full">
-                                        <div className="flex flex-row justify-between w-full gap-2 items-center">
-                                            <div className="flex flex-row gap-2 items-center">
-                                                <h2 className="font-semibold text-sm font-mono">
-                                                    Instance {instance.port}
-                                                </h2>
+                                    return (
+                                        <TableRow
+                                            key={instance.instanceId}
+                                            className={cn("cursor-pointer transition-colors", {
+                                                "pointer-events-none opacity-60": isLoading,
+                                                "cursor-not-allowed opacity-70":
+                                                    instance.status !== "running" && !isLoading,
+                                            })}
+                                            onClick={() => handleInstanceClick(instance)}
+                                        >
+                                            <TableCell className="font-mono font-medium text-sm pl-4">
+                                                <div className="flex items-center gap-2">
+                                                    <div className={cn("h-1.5 w-1.5 rounded-full", {
+                                                        "bg-green-500": instance.status === "running",
+                                                        "bg-muted-foreground/30": instance.status === "not_started",
+                                                        "bg-red-500": instance.status === "errored"
+                                                    })} />
+                                                    {instance.port}
+                                                </div>
+                                            </TableCell>
+                                            <TableCell>
                                                 <Badge
-                                                    variant={
-                                                        statusBadgeVariant[instance.status] ?? "secondary"
-                                                    }
+                                                    variant="outline"
+                                                    className={cn("uppercase text-[10px] tracking-wider font-bold border-transparent", {
+                                                        "bg-green-500/15 text-green-400": instance.status === "running",
+                                                        "bg-white/5 text-muted-foreground": instance.status === "not_started",
+                                                        "bg-red-500/15 text-red-400": instance.status === "errored",
+                                                    })}
                                                 >
                                                     {statusLabel[instance.status] ?? instance.status}
                                                 </Badge>
-                                                {instance.pid && (
-                                                    <span className="text-xs text-muted-foreground font-mono">
-                                                        PID {instance.pid}
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <div className="flex flex-row gap-1 items-center">
-                                                {isLoading ? (
-                                                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground px-2">
-                                                        <Loader2Icon className="h-3.5 w-3.5 animate-spin" />
-                                                        <span className="capitalize">{action}…</span>
-                                                    </div>
-                                                ) : (
-                                                    <>
-                                                        {instance.status === "not_started" && (
+                                            </TableCell>
+                                            <TableCell className="font-mono text-muted-foreground text-xs">
+                                                {instance.pid || "-"}
+                                            </TableCell>
+                                            <TableCell className="font-mono text-muted-foreground text-xs">
+                                                http://localhost:{instance.port}
+                                            </TableCell>
+                                            <TableCell className="text-right pr-4">
+                                                <div className="flex items-center justify-end gap-1">
+                                                    {isLoading ? (
+                                                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground px-2">
+                                                            <Loader2Icon className="h-3.5 w-3.5 animate-spin" />
+                                                            <span className="capitalize">{action}…</span>
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            {instance.status === "not_started" && (
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    onClick={(e) => handleStart(e, instance)}
+                                                                    title="Start instance"
+                                                                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                                                >
+                                                                    <PlayIcon className="h-4 w-4" />
+                                                                </Button>
+                                                            )}
+                                                            {instance.status === "running" && (
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    onClick={(e) => handleStop(e, instance)}
+                                                                    title="Stop instance"
+                                                                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                                                >
+                                                                    <SquareIcon className="h-4 w-4" />
+                                                                </Button>
+                                                            )}
                                                             <Button
                                                                 variant="ghost"
                                                                 size="icon"
-                                                                onClick={(e) => handleStart(e, instance)}
-                                                                title="Start instance"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setDeleteTarget(instance);
+                                                                }}
+                                                                title="Delete instance"
+                                                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
                                                             >
-                                                                <PlayIcon className="h-4 w-4" />
+                                                                <Trash2Icon className="h-4 w-4" />
                                                             </Button>
-                                                        )}
-                                                        {instance.status === "running" && (
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                onClick={(e) => handleStop(e, instance)}
-                                                                title="Stop instance"
-                                                            >
-                                                                <SquareIcon className="h-4 w-4" />
-                                                            </Button>
-                                                        )}
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setDeleteTarget(instance);
-                                                            }}
-                                                            title="Delete instance"
-                                                            className="text-muted-foreground hover:text-destructive"
-                                                        >
-                                                            <Trash2Icon className="h-4 w-4" />
-                                                        </Button>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <div className="flex flex-col gap-0.5">
-                                            <p className="text-sm text-muted-foreground">
-                                                Endpoint:{" "}
-                                                <span className="text-xs font-mono text-foreground/80">
-                                                    http://localhost:{instance.port}
-                                                </span>
-                                            </p>
-                                            {instance.error && (
-                                                <p className="text-sm text-destructive flex items-center gap-1">
-                                                    <AlertCircleIcon className="h-3.5 w-3.5 shrink-0" />
-                                                    {instance.error}
-                                                </p>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            </FramePanel>
-                        );
-                    })
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
+                                    );
+                                })}
+                            </TableBody>
+                        </Table>
+                    </div>
                 )}
 
                 <FrameFooter>
@@ -407,7 +416,7 @@ const InstancesPage = () => {
 
             {/* Create Instance Dialog */}
             <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-                <DialogPopup>
+                <DialogContent>
                     <DialogHeader>
                         <DialogTitle>New Instance</DialogTitle>
                         <DialogDescription>
@@ -430,20 +439,22 @@ const InstancesPage = () => {
                         />
                     </div>
                     <DialogFooter>
-                        <DialogClose render={<Button variant="outline" />}>
-                            Cancel
+                        <DialogClose asChild>
+                            <Button variant="outline">
+                                Cancel
+                            </Button>
                         </DialogClose>
                         <Button onClick={handleCreate} disabled={creating || !newPort.trim()}>
                             {creating && <Loader2Icon className="h-4 w-4 animate-spin" />}
                             Start Instance
                         </Button>
                     </DialogFooter>
-                </DialogPopup>
+                </DialogContent>
             </Dialog>
 
             {/* Delete Confirmation Dialog */}
             <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-                <AlertDialogPopup>
+                <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>Delete Instance</AlertDialogTitle>
                         <AlertDialogDescription>
@@ -452,14 +463,17 @@ const InstancesPage = () => {
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogClose render={<Button variant="outline" />}>
-                            Cancel
-                        </AlertDialogClose>
+                        <AlertDialogCancel asChild>
+                            <Button variant="outline">
+                                <X className="h-4 w-4" />
+                                Cancel
+                            </Button>
+                        </AlertDialogCancel>
                         <Button variant="destructive" onClick={handleDeleteConfirm}>
-                            Delete
+                            <Trash2 className="h-4 w-4" />
                         </Button>
                     </AlertDialogFooter>
-                </AlertDialogPopup>
+                </AlertDialogContent>
             </AlertDialog>
         </>
     );

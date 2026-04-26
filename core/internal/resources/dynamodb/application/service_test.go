@@ -159,7 +159,7 @@ func TestServicePersistsAcrossRestart(t *testing.T) {
 	}()
 
 	tables := restarted.ListTables()
-	if got, want := len(tables), 2; got != want {
+	if got, want := len(tables), 1; got != want {
 		t.Fatalf("unexpected table count after restart: got %d want %d", got, want)
 	}
 
@@ -187,7 +187,7 @@ func TestServicePersistsAcrossRestart(t *testing.T) {
 	}
 	state := value.(map[string]any)
 	items := state["items"].([]any)
-	if got, want := len(items), 2; got != want {
+	if got, want := len(items), 1; got != want {
 		t.Fatalf("unexpected snapshot item count after restart: got %d want %d", got, want)
 	}
 }

@@ -34,17 +34,17 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogClose
+  AlertDialogCancel
 } from '@renderer/components/ui/alert-dialog'
 import {
   CardHeader,
   CardTitle,
   CardDescription,
-  CardPanel,
+  CardContent,
   CardAction
 } from '@renderer/components/ui/card'
 import { cn } from '@renderer/lib/utils'
-import { toastManager } from '@renderer/components/ui/toast'
+import { toast } from 'sonner' 
 import type { SQSQueueSummary } from '../types'
 import type { SQSBrowserOutletContext } from '../sqs-layout'
 
@@ -70,9 +70,7 @@ export function QueuesList() {
       setSelectedQueues(new Set())
     } catch (error) {
       console.error('Failed to fetch queues:', error)
-      toastManager.add({
-        title: 'Failed to fetch queues',
-        type: 'error',
+      toast.error('Failed to fetch queues', {
         description: error instanceof Error ? error.message : String(error)
       })
     } finally {
@@ -118,16 +116,12 @@ export function QueuesList() {
       setIsCreateOpen(false)
       resetCreateForm()
       await fetchQueues()
-      toastManager.add({
-        title: 'Queue created',
-        description: `Queue "${name}" created successfully.`,
-        type: 'success'
+      toast.success('Queue created', {
+        description: `Queue "${name}" created successfully.`
       })
     } catch (err) {
       console.error('Failed to create queue:', err)
-      toastManager.add({
-        title: 'Failed to create queue',
-        type: 'error',
+      toast.error('Failed to create queue', {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -149,9 +143,7 @@ export function QueuesList() {
           await api.deleteQueue(queueUrl, region)
         } catch (err) {
           console.error(`Failed to delete queue ${queueUrl}:`, err)
-          toastManager.add({
-            title: `Failed to delete queue`,
-            type: 'error',
+          toast.error('Failed to delete queue', {
             description: err instanceof Error ? err.message : String(err)
           })
         }
@@ -171,16 +163,12 @@ export function QueuesList() {
     e.stopPropagation()
     try {
       await api.purgeQueue(queueUrl, region)
-      toastManager.add({
-        title: 'Queue purged',
-        description: 'All messages have been cleared from the queue.',
-        type: 'success'
+      toast.success('Queue purged', {
+        description: 'All messages have been cleared from the queue.'
       })
       await fetchQueues()
     } catch (err) {
-      toastManager.add({
-        title: 'Failed to purge queue',
-        type: 'error',
+      toast.error('Failed to purge queue', {
         description: err instanceof Error ? err.message : String(err)
       })
     }
@@ -202,16 +190,20 @@ export function QueuesList() {
 
         <div className="flex flex-wrap items-center gap-2">
           {selectedQueues.size > 0 && (
-            <Button variant="destructive" onClick={handleBulkDelete} loading={isDeleting}>
-              <Trash2 className="h-4 w-4" />
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={isDeleting}>
+              {isDeleting ? <Spinner /> : (
+                <Trash2 className="h-4 w-4" />
+              )}
               Delete ({selectedQueues.size})
             </Button>
           )}
 
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-            <DialogTrigger render={<Button variant="outline" />}>
-              <Plus className="h-4 w-4" />
-              Create Queue
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Plus className="h-4 w-4" />
+                Create Queue
+              </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
@@ -260,12 +252,16 @@ export function QueuesList() {
                 </p>
               </div>
               <DialogFooter>
-                <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
+                <DialogClose asChild>
+                  <Button variant="ghost">Cancel</Button>
+                </DialogClose>
                 <Button
                   onClick={handleCreateQueue}
-                  disabled={!newQueueName.trim()}
-                  loading={isCreating}
+                  disabled={!newQueueName.trim() || isCreating}
                 >
+                  {isCreating ? <Spinner /> : (
+                    <Plus className="h-4 w-4" />
+                  )}
                   Create
                 </Button>
               </DialogFooter>
@@ -302,7 +298,7 @@ export function QueuesList() {
                 <SpotlightCard
                   key={queue.QueueUrl}
                   className={cn(
-                    'cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md flex flex-col',
+                    'cursor-pointer transition-all duration-200 hover:shadow-md flex flex-col',
                     selected && 'border-primary/40 bg-primary/5'
                   )}
                   onClick={() => handleQueueClick(queue.QueueName)}
@@ -318,8 +314,8 @@ export function QueuesList() {
                     <div className="flex items-center gap-3 w-full min-w-0 pr-8">
                       <div className={cn(
                         "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border",
-                        queue.IsFifo 
-                          ? "border-amber-500/20 bg-amber-500/10 text-amber-500" 
+                        queue.IsFifo
+                          ? "border-amber-500/20 bg-amber-500/10 text-amber-500"
                           : "border-primary/20 bg-primary/10 text-primary"
                       )}>
                         <MessageSquare className="h-5 w-5" />
@@ -331,25 +327,25 @@ export function QueuesList() {
                         </CardTitle>
                         <CardDescription className="mt-1 truncate flex items-center gap-3">
                           <span className="flex items-center gap-1 text-xs" title="Available Messages">
-                            <span className="font-medium text-foreground">{queue.MessagesAvailable}</span> 
+                            <span className="font-medium text-foreground">{queue.MessagesAvailable}</span>
                             <span className="text-muted-foreground">avail</span>
                           </span>
                           <span className="flex items-center gap-1 text-xs" title="Messages in Flight (Invisible)">
-                            <span className="font-medium text-foreground">{queue.MessagesInvisible}</span> 
+                            <span className="font-medium text-foreground">{queue.MessagesInvisible}</span>
                             <span className="text-muted-foreground">flight</span>
                           </span>
                         </CardDescription>
                       </div>
                     </div>
                   </CardHeader>
-                  <CardPanel className="flex items-center justify-between gap-3 pt-0 mt-auto">
+                  <CardContent className="flex items-center justify-between gap-3 pt-0 mt-auto">
                     <div className="flex items-center gap-2">
                       <Button variant="ghost" size="icon-sm" onClick={(e) => handlePurge(e, queue.QueueUrl)} title="Purge Queue">
                         <Zap className="h-4 w-4 text-muted-foreground hover:text-foreground" />
                       </Button>
                     </div>
                     <span className="text-xs text-muted-foreground">Click to view messages</span>
-                  </CardPanel>
+                  </CardContent>
                 </SpotlightCard>
               )
             })}
@@ -367,8 +363,13 @@ export function QueuesList() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="ghost" />}>Cancel</AlertDialogClose>
-            <Button variant="destructive" onClick={executeBulkDelete} loading={isDeleting}>
+            <AlertDialogCancel asChild>
+              <Button variant="ghost">Cancel</Button>
+            </AlertDialogCancel>
+            <Button variant="destructive" onClick={executeBulkDelete} disabled={isDeleting}>
+              {isDeleting ? <Spinner /> : (
+                <Trash2 className="h-4 w-4" />
+              )}
               Delete
             </Button>
           </AlertDialogFooter>

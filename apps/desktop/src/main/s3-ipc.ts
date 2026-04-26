@@ -78,7 +78,37 @@ export function registerS3IpcHandlers(): void {
   })
 
   registerValidatedHandler('s3:deleteBucket', async (_event, args: { name: string; region?: string }) => {
-    await getClient(args.region).send(new DeleteBucketCommand({ Bucket: args.name }))
+    const client = getClient(args.region)
+
+    let hasMore = true
+    let continuationToken: string | undefined = undefined
+
+    while (hasMore) {
+      const listResponse = await client.send(
+        new ListObjectsV2Command({
+          Bucket: args.name,
+          ContinuationToken: continuationToken
+        })
+      )
+
+      const contents = listResponse.Contents ?? []
+      if (contents.length > 0) {
+        await client.send(
+          new DeleteObjectsCommand({
+            Bucket: args.name,
+            Delete: {
+              Objects: contents.map((obj) => ({ Key: obj.Key! })),
+              Quiet: true
+            }
+          })
+        )
+      }
+
+      hasMore = listResponse.IsTruncated ?? false
+      continuationToken = listResponse.NextContinuationToken
+    }
+
+    await client.send(new DeleteBucketCommand({ Bucket: args.name }))
     return null
   })
 

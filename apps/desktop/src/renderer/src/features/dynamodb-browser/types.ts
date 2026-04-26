@@ -100,8 +100,6 @@ export interface DynamoDBBrowserApi {
   getItem(tableName: string, key: DynamoDBItem, region?: string): Promise<DynamoDBItem | null>
 }
 
-/* ── Filter / Query types for the UI ────────────────────────────────── */
-
 export const COMPARISON_OPERATORS = [
   { value: '=', label: '= (equals)' },
   { value: '<>', label: '<> (not equals)' },
@@ -127,7 +125,6 @@ export interface FilterCondition {
 
 export type FetchMode = 'scan' | 'query'
 
-/* ── Marshalling utilities ──────────────────────────────────────────── */
 
 /**
  * Convert a single DynamoDB AttributeValue to a plain JS value.

@@ -15,7 +15,7 @@ interface SpotlightCardProps extends React.PropsWithChildren {
 const SpotlightCard: React.FC<SpotlightCardProps> = ({
   children,
   className = '',
-  spotlightColor = 'rgba(255, 255, 255, 0.25)',
+  spotlightColor = 'rgba(176, 155, 246, 0.24)',
   onClick
 }) => {
   const divRef = useRef<HTMLDivElement>(null);
@@ -59,7 +59,7 @@ const SpotlightCard: React.FC<SpotlightCardProps> = ({
       onClick={onClick}
       data-slot="card"
       className={cn(
-        "relative flex flex-col rounded-2xl border-border border bg-card text-card-foreground overflow-hidden shadow-xs/5",
+        "relative flex flex-col rounded-2xl border-border border bg-card text-card-foreground overflow-hidden shadow-xs/5 py-4",
         className
       )}
     >

@@ -30,7 +30,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogClose
+  AlertDialogCancel
 } from '@renderer/components/ui/alert-dialog'
 import {
   Empty,
@@ -50,7 +50,7 @@ import {
 import { cn } from '@renderer/lib/utils'
 import { ObjectViewer } from './object-viewer'
 import { UploadDialog } from './upload-dialog'
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogTitle } from '@renderer/components/ui/dialog'
+import { Dialog, DialogClose, DialogDescription, DialogFooter, DialogHeader, DialogContent, DialogTitle } from '@renderer/components/ui/dialog'
 import { useObjectList, type SortKey } from '../hooks/use-object-list'
 
 export function ObjectList() {
@@ -160,8 +160,10 @@ export function ObjectList() {
 
         <div className="flex flex-wrap gap-2">
           {selectedObjects.size > 0 && (
-            <Button variant="destructive" onClick={handleBulkDelete} loading={isDeleting}>
-              <Trash2 className="h-4 w-4" />
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={isDeleting}>
+              {isDeleting ? <Spinner /> : (
+                <Trash2 className="h-4 w-4" />
+              )}
               Delete ({selectedObjects.size})
             </Button>
           )}
@@ -178,7 +180,7 @@ export function ObjectList() {
 
       <div className="flex-1 min-h-0 overflow-hidden rounded-2xl border border-border bg-card shadow-xs/5">
         <ScrollArea className="h-full">
-          <Table variant="card">
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-12">
@@ -327,17 +329,19 @@ export function ObjectList() {
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => handleDownload(itemKey)}
-                                loading={downloadingKey === itemKey}
+                                disabled={downloadingKey === itemKey}
                                 title="Download"
                               >
-                                <Download className="h-4 w-4" />
+                                {downloadingKey === itemKey ? <Spinner /> : (
+                                  <Download className="h-4 w-4" />
+                                )}
                               </Button>
                               {(() => {
                                 const isImage = itemKey.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i) !== null
                                 const isVideo = itemKey.match(/\.(mp4|webm|ogg)$/i) !== null
                                 const isText =
                                   itemKey.match(/\.(txt|md|json|csv|js|ts|tsx|jsx|html|css)$/i) !==
-                                    null ||
+                                  null ||
                                   (!isImage && !isVideo)
                                 const canView = !isText || (object.Size ?? 0) <= 15360
 
@@ -416,8 +420,13 @@ export function ObjectList() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="ghost" />}>Cancel</AlertDialogClose>
-            <Button variant="destructive" onClick={executeBulkDelete} loading={isDeleting}>
+            <AlertDialogCancel asChild>
+              <Button variant="ghost">Cancel</Button>
+            </AlertDialogCancel>
+            <Button variant="destructive" onClick={executeBulkDelete} disabled={isDeleting}>
+              {isDeleting ? <Spinner /> : (
+                <Trash2 className="h-4 w-4" />
+              )}
               Delete
             </Button>
           </AlertDialogFooter>
@@ -432,7 +441,7 @@ export function ObjectList() {
               Enter a name for the new folder in the current directory.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="py-4">
+          <DialogContent className="py-4">
             <Input
               autoFocus
               placeholder="Folder name..."
@@ -444,15 +453,18 @@ export function ObjectList() {
                 }
               }}
             />
-          </DialogPanel>
+          </DialogContent>
           <DialogFooter>
-            <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
+            <DialogClose asChild>
+              <Button variant="ghost">Cancel</Button>
+            </DialogClose>
             <Button
-              variant="default"
               onClick={handleCreateFolder}
-              loading={isCreatingFolder}
-              disabled={!newFolderName.trim()}
+              disabled={!newFolderName.trim() || isCreatingFolder}
             >
+              {isCreatingFolder ? <Spinner /> : (
+                <FolderPlus className="h-4 w-4" />
+              )}
               Create Folder
             </Button>
           </DialogFooter>

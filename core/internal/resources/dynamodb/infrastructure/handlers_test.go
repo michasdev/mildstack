@@ -28,13 +28,8 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	handlers := infrastructure.NewHandlers(service)
 
 	tables := handlers.ListTables()
-	if got, want := len(tables.Tables), 1; got != want {
+	if got, want := len(tables.Tables), 0; got != want {
 		t.Fatalf("unexpected initial table count: got %d want %d", got, want)
-	}
-	tables.Tables[0].Name = "mutated"
-	again := handlers.ListTables()
-	if got, want := again.Tables[0].Name, "mildstack-records"; got != want {
-		t.Fatalf("table payload was not copied: got %q want %q", got, want)
 	}
 
 	createResp, err := handlers.CreateTable(infrastructure.CreateTableRequest{
@@ -49,9 +44,15 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	if got, want := createResp.Table.Name, "mildstack-archive"; got != want {
 		t.Fatalf("unexpected table name: got %q want %q", got, want)
 	}
+	tableName := createResp.Table.Name
+	createResp.Table.Name = "mutated"
+	again := handlers.ListTables()
+	if got, want := again.Tables[0].Name, "mildstack-archive"; got != want {
+		t.Fatalf("table payload was not copied: got %q want %q", got, want)
+	}
 
 	putResp, err := handlers.PutItem(infrastructure.PutItemRequest{
-		Table: createResp.Table.Name,
+		Table: tableName,
 		Key:   "item#1",
 		Attributes: map[string]domain.AttributeValue{
 			"id":       domain.StringValue("item#1"),
@@ -68,7 +69,7 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	}
 
 	getResp, err := handlers.GetItem(infrastructure.GetItemRequest{
-		Table: createResp.Table.Name,
+		Table: tableName,
 		Key:   putResp.Item.Key,
 	})
 	if err != nil {
@@ -79,7 +80,7 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	}
 
 	updateResp, err := handlers.UpdateItem(infrastructure.UpdateItemRequest{
-		Table:                createResp.Table.Name,
+		Table:                tableName,
 		Key:                  putResp.Item.Key,
 		UpdateExpression:     "SET title = :title ADD version :inc REMOVE obsolete",
 		ExpressionAttributeValues: map[string]domain.AttributeValue{
@@ -102,7 +103,7 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 
 	updateResp.Item.Attributes["title"] = "mutated"
 	againItem, err := handlers.GetItem(infrastructure.GetItemRequest{
-		Table: createResp.Table.Name,
+		Table: tableName,
 		Key:   putResp.Item.Key,
 	})
 	if err != nil {
@@ -113,7 +114,7 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 	}
 
 	deleteResp, err := handlers.DeleteItem(infrastructure.DeleteItemRequest{
-		Table: createResp.Table.Name,
+		Table: tableName,
 		Key:   putResp.Item.Key,
 	})
 	if err != nil {
@@ -123,7 +124,7 @@ func TestHandlersDriveRealServiceAndReturnCopies(t *testing.T) {
 		t.Fatal("expected delete response to report success")
 	}
 	if _, err := handlers.GetItem(infrastructure.GetItemRequest{
-		Table: createResp.Table.Name,
+		Table: tableName,
 		Key:   putResp.Item.Key,
 	}); err == nil {
 		t.Fatal("expected deleted item lookup to fail")
