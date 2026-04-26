@@ -1,3 +1,6 @@
+# generated AWS API reference docs (regenerate with docs/fetch-aws-api-docs.sh)
+docs/aws/
+
 node_modules
 dist
 out

@@ -1,0 +1,93 @@
+---
+title: Services
+description: "Overview of the MildStack services and their capabilities."
+---
+
+# Introduction to MildStack Services
+
+MildStack provides a set of local emulated services that behave like their real AWS counterparts. This allows you to develop and test your cloud applications locally without needing access to AWS or running containers for every service.
+
+## Current Services
+
+The following services are currently supported:
+
+- [Amazon S3](s3.mdx): Object storage for files and static assets.
+- [Amazon DynamoDB](dynamodb.mdx): NoSQL database for key-value and document data.
+- [Amazon SQS](sqs.mdx): Message queueing for asynchronous communication between services.
+
+## Getting Started
+
+To start using these services locally:
+
+1. **Start the MildStack Runtime**:
+   Follow the instructions in the [Getting Started](../getting-started.mdx) guide to start the local runtime.
+
+2. **Configure Your Application**:
+   Configure your application to point to the local MildStack endpoints:
+   - **Endpoint URL**: `http://localhost:27001`
+   - **Region**: `us-east-1` (or your desired local region)
+   - **Access Keys**: Use any dummy credentials as they are ignored by the local runtime
+
+3. **Use AWS SDKs**: 
+   Use your favorite AWS SDK (JavaScript, Python, Go, etc.) with the configuration above. The SDKs will automatically route requests to the local runtime.
+
+## Example: S3 Bucket Creation
+
+Here's a quick example of creating an S3 bucket using the AWS SDK for JavaScript:
+
+```javascript
+import { S3Client } from "@aws-sdk/client-s3";
+
+const s3Client = new S3Client({
+  region: "us-east-1",
+  endpoint: "http://localhost:27001",
+  credentials: {
+    accessKeyId: "test",
+    secretAccessKey: "test",
+  },
+});
+
+async function createBucket() {
+  try {
+    await s3Client.send(
+      new PutBucketCommand({
+        Bucket: "my-local-bucket",
+      })
+    );
+    console.log("Bucket created successfully");
+  } catch (error) {
+    console.error("Error creating bucket:", error);
+  }
+}
+```
+
+## Supported Operations
+
+Each service supports a subset of the AWS API operations relevant to local development. Refer to each service's documentation for the complete list of supported operations:
+
+- [S3 API Reference](../s3/api.mdx)
+- [DynamoDB API Reference](../dynamodb/api.mdx)
+- [SQS API Reference](../sqs/api.mdx)
+
+## Development Workflow
+
+Using MildStack services locally can significantly speed up your development workflow:
+
+1. **No External Dependencies**: Test cloud features without needing an internet connection or AWS account
+2. **Fast Feedback Loop**: Changes are reflected immediately without deployment delays
+3. **Cost Savings**: Avoid unnecessary AWS costs during development
+4. **Privacy**: Keep sensitive development data local and secure
+5. **Easy Testing**: Set up complex scenarios (e.g., failed SQS deliveries) deterministically
+
+## Future Enhancements
+
+We are continuously working on expanding our service offerings. Future plans include:
+
+- Amazon Cognito: User authentication and identity management
+- Amazon Lambda: Serverless compute functions
+- Amazon SNS: Push notifications and pub/sub messaging
+- Amazon EventBridge: Event routing and serverless event bus
+
+## API Compatibility
+
+MildStack aims for high compatibility with the AWS APIs, but there may be some differences. If you encounter issues, please check the API reference for each service or [report an issue](https://github.com/mildstack/mildstack/issues).

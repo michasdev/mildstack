@@ -1,6 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,100..900;1,100..900&display=swap');
 @import 'tailwindcss';
-@import 'fumadocs-ui/css/dusk.css';
+@import 'fumadocs-ui/css/black.css';
 @import 'fumadocs-ui/css/preset.css';
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -57,6 +57,10 @@ html > body[data-scroll-locked] {
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* FumaDocs*/
+  --color-fd-primary: var(--primary);
+  
 }
 
 :root {
