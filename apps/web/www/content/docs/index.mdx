@@ -1,0 +1,72 @@
+---
+title: Introduction
+description: |
+  MildStack is a lightweight, local-first AWS emulator built for fast feedback loops.
+  No Docker is required, and the API is designed to start in around 200ms.
+---
+
+## Introduction
+
+MildStack is a lightweight, open-source alternative to LocalStack for day-to-day local development.
+
+It gives you a local AWS-compatible runtime that is fast to start, easy to inspect, and designed to keep your feedback loop short while you build and test cloud-backed applications.
+
+> MildStack is built for speed and simplicity: no Docker required, and the API is designed to start in around `200ms`.
+
+### What MildStack Is
+
+MildStack is organized into three parts:
+
+| Part | Purpose |
+| --- | --- |
+| `core` | The Go runtime that emulates AWS-compatible APIs and stores instance-scoped state. |
+| `desktop` | The Electron app for browsing and managing local resources visually. |
+| `web` | The public website and documentation surface. |
+
+### Why MildStack
+
+- **No Docker required**: run a local cloud environment without container overhead.
+- **Fast startup**: the API is designed to start in around `200ms`.
+- **Developer-first**: keep your workflow local, fast, and predictable.
+- **Offline-friendly**: build and test even when you are disconnected.
+- **Open source**: easy to inspect, extend, and contribute to.
+
+### What You Can Use Today
+
+MildStack currently focuses on the services that matter most in local development:
+
+- S3
+- DynamoDB
+- SQS
+
+You can interact with MildStack through the CLI, the desktop app, or the underlying API depending on your workflow.
+
+### How It Fits Together
+
+The architecture is intentionally simple:
+
+- The `core` owns emulation and persistence.
+- The `desktop` app provides a visual control plane.
+- The `web` experience communicates product value and documentation.
+
+This separation keeps the runtime focused and makes the user-facing tools easier to evolve.
+
+### Getting Started
+
+If this is your first time here, start with:
+
+1. Installation
+2. Quick Start
+3. Supported Services
+4. Desktop App
+5. API Reference
+
+### Documentation Map
+
+Use the rest of this docs site to go deeper:
+
+- **Installation** for setup instructions.
+- **Quick Start** for your first run.
+- **Supported Services** for the current feature surface.
+- **Architecture** for the system design and boundaries.
+- **Troubleshooting** when something does not work as expected.

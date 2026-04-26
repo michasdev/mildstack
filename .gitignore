@@ -12,7 +12,6 @@ pnpm-lock.yaml
 .planning/ROADMAP.md  
 .planning/STATE.md  
 
-
 #BMAD Method
 _bmad
 _bmad-output
@@ -23,11 +22,11 @@ _bmad-output
 docs/project-scan-report.json
 
 AGENTS.md
-
-# go binary
 mildstack
-
 *.env*
 !.env.example
-
 **/resources/bin
+# React Router
+.react-router
+.source
+apps/web/www/build

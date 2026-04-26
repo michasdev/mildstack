@@ -1,14 +1,16 @@
-import path from "path"
-import tailwindcss from "@tailwindcss/vite"
-import react from "@vitejs/plugin-react"
-import { defineConfig } from "vite"
+import { reactRouter } from '@react-router/dev/vite';
+import tailwindcss from '@tailwindcss/vite';
+import { defineConfig } from 'vite';
+import mdx from 'fumadocs-mdx/vite';
+import * as MdxConfig from './source.config';
+import path from 'path';
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [mdx(MdxConfig), tailwindcss(), reactRouter()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(__dirname, "./app"),
     },
+    tsconfigPaths: true,
   },
-})
+});
