@@ -78,6 +78,118 @@ func (stubSNSService) PublishBatch(domain.PublishBatchRequest) (domain.PublishBa
 	return domain.PublishBatchResult{}, domain.ErrValidation
 }
 
+func (stubSNSService) AddPermission(string, string, []string, []string) error {
+	return domain.ErrValidation
+}
+
+func (stubSNSService) RemovePermission(string, string) error {
+	return domain.ErrValidation
+}
+
+func (stubSNSService) TagResource(string, map[string]string) error {
+	return domain.ErrValidation
+}
+
+func (stubSNSService) UntagResource(string, []string) error {
+	return domain.ErrValidation
+}
+
+func (stubSNSService) ListTagsForResource(string) (map[string]string, error) {
+	return nil, domain.ErrValidation
+}
+
+func (stubSNSService) PutDataProtectionPolicy(string, string) error {
+	return domain.ErrValidation
+}
+
+func (stubSNSService) GetDataProtectionPolicy(string) (string, error) {
+	return "", domain.ErrValidation
+}
+
+func (stubSNSService) CreatePlatformApplication(string, string, map[string]string) (domain.PlatformApplication, error) {
+	return domain.PlatformApplication{}, domain.ErrValidation
+}
+
+func (stubSNSService) DeletePlatformApplication(string) error {
+	return domain.ErrValidation
+}
+
+func (stubSNSService) GetPlatformApplicationAttributes(string) (map[string]string, error) {
+	return nil, domain.ErrValidation
+}
+
+func (stubSNSService) SetPlatformApplicationAttributes(string, map[string]string) (map[string]string, error) {
+	return nil, domain.ErrValidation
+}
+
+func (stubSNSService) ListPlatformApplications(string) ([]domain.PlatformApplication, string, error) {
+	return nil, "", domain.ErrValidation
+}
+
+func (stubSNSService) CreatePlatformEndpoint(string, string, string, map[string]string) (domain.PlatformEndpoint, error) {
+	return domain.PlatformEndpoint{}, domain.ErrValidation
+}
+
+func (stubSNSService) DeleteEndpoint(string) error {
+	return domain.ErrValidation
+}
+
+func (stubSNSService) GetEndpointAttributes(string) (map[string]string, error) {
+	return nil, domain.ErrValidation
+}
+
+func (stubSNSService) SetEndpointAttributes(string, map[string]string) (map[string]string, error) {
+	return nil, domain.ErrValidation
+}
+
+func (stubSNSService) ListEndpointsByPlatformApplication(string, string) ([]domain.PlatformEndpoint, string, error) {
+	return nil, "", domain.ErrValidation
+}
+
+func (stubSNSService) SetSMSAttributes(map[string]string) error {
+	return domain.ErrValidation
+}
+
+func (stubSNSService) GetSMSAttributes([]string) (map[string]string, error) {
+	return nil, domain.ErrValidation
+}
+
+func (stubSNSService) CheckIfPhoneNumberIsOptedOut(string) (bool, error) {
+	return false, domain.ErrValidation
+}
+
+func (stubSNSService) OptInPhoneNumber(string) error {
+	return domain.ErrValidation
+}
+
+func (stubSNSService) ListPhoneNumbersOptedOut(string) ([]string, string, error) {
+	return nil, "", domain.ErrValidation
+}
+
+func (stubSNSService) ListOriginationNumbers(string) ([]string, string, error) {
+	return nil, "", domain.ErrValidation
+}
+
+func (stubSNSService) GetSMSSandboxAccountStatus() (bool, error) {
+	return false, domain.ErrValidation
+}
+
+func (stubSNSService) CreateSMSSandboxPhoneNumber(string, string) error {
+	return domain.ErrValidation
+}
+
+func (stubSNSService) VerifySMSSandboxPhoneNumber(string, string) error {
+	return domain.ErrValidation
+}
+
+func (stubSNSService) DeleteSMSSandboxPhoneNumber(string) error {
+	return domain.ErrValidation
+}
+
+func (stubSNSService) ListSMSSandboxPhoneNumbers(string) ([]domain.SMSSandboxPhoneNumber, string, error) {
+	return nil, "", domain.ErrValidation
+}
+
 func TestSNSContractMissingActionReturnsMissingActionError(t *testing.T) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

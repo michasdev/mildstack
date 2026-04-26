@@ -266,3 +266,142 @@ func snsMessageAttributesFromValues(values url.Values, prefix string) map[string
 	}
 	return result
 }
+
+func snsPermissionAWSAccountIDsFromValues(values url.Values) []string {
+	return snsUniqueValues(
+		append(
+			snsMemberValues(values, "AWSAccountId"),
+			snsMemberValues(values, "AWSAccountIds")...,
+		),
+	)
+}
+
+func snsPermissionActionNamesFromValues(values url.Values) []string {
+	return snsUniqueValues(
+		append(
+			snsMemberValues(values, "ActionName"),
+			snsMemberValues(values, "ActionNames")...,
+		),
+	)
+}
+
+func snsTagKeysFromValues(values url.Values) []string {
+	return snsUniqueValues(
+		append(
+			snsMemberValues(values, "TagKeys"),
+			snsMemberValues(values, "TagKey")...,
+		),
+	)
+}
+
+func snsSMSAttributeNamesFromValues(values url.Values) []string {
+	return snsUniqueValues(
+		append(
+			append(
+				snsMemberValues(values, "attributes"),
+				snsMemberValues(values, "AttributeNames")...,
+			),
+			snsMemberValues(values, "AttributeName")...,
+		),
+	)
+}
+
+func snsPhoneNumberFromValues(values url.Values) string {
+	for _, key := range []string{"PhoneNumber", "phoneNumber"} {
+		if value := strings.TrimSpace(values.Get(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func snsNextTokenFromValues(values url.Values) string {
+	for _, key := range []string{"NextToken", "nextToken"} {
+		if value := strings.TrimSpace(values.Get(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func snsMemberValues(values url.Values, root string) []string {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return nil
+	}
+
+	type indexedValue struct {
+		index int
+		value string
+	}
+
+	direct := make([]string, 0)
+	indexed := make([]indexedValue, 0)
+
+	for rawKey, bucket := range values {
+		if len(bucket) == 0 {
+			continue
+		}
+		value := strings.TrimSpace(bucket[0])
+		if value == "" {
+			continue
+		}
+
+		if strings.EqualFold(strings.TrimSpace(rawKey), root) {
+			direct = append(direct, value)
+			continue
+		}
+
+		parts := strings.Split(rawKey, ".")
+		if len(parts) < 2 || !strings.EqualFold(parts[0], root) {
+			continue
+		}
+
+		switch {
+		case strings.EqualFold(parts[1], "member") && len(parts) >= 3:
+			index, err := strconv.Atoi(parts[2])
+			if err != nil || index <= 0 {
+				continue
+			}
+			indexed = append(indexed, indexedValue{index: index, value: value})
+		default:
+			index, err := strconv.Atoi(parts[1])
+			if err != nil || index <= 0 {
+				continue
+			}
+			indexed = append(indexed, indexedValue{index: index, value: value})
+		}
+	}
+
+	sort.Slice(indexed, func(i, j int) bool { return indexed[i].index < indexed[j].index })
+
+	result := make([]string, 0, len(direct)+len(indexed))
+	result = append(result, direct...)
+	for _, item := range indexed {
+		result = append(result, item.value)
+	}
+	return result
+}
+
+func snsUniqueValues(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}

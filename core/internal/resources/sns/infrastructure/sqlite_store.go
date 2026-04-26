@@ -263,6 +263,16 @@ CREATE INDEX IF NOT EXISTS idx_published_messages_dedup ON published_messages(te
 ALTER TABLE delivery_attempts ADD COLUMN request_snapshot_json TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE delivery_attempts ADD COLUMN response_snapshot_json TEXT NOT NULL DEFAULT '{}';
 	`,
+	4: `
+ALTER TABLE platform_applications ADD COLUMN tags_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE platform_endpoints ADD COLUMN tags_json TEXT NOT NULL DEFAULT '{}';
+
+CREATE TABLE IF NOT EXISTS sms_attributes (
+  tenant_key TEXT PRIMARY KEY,
+  attributes_json TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL
+);
+	`,
 }
 
 func migrationVersions() []int {

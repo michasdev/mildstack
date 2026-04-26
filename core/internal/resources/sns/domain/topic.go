@@ -80,6 +80,9 @@ func (t Topic) AttributesView(ownerAccountID string, subscriptionsConfirmed, sub
 	}
 	view["TopicArn"] = t.ARN
 	view["Owner"] = strings.TrimSpace(ownerAccountID)
+	if policy := strings.TrimSpace(t.PolicyJSON); policy != "" && policy != "{}" {
+		view["Policy"] = policy
+	}
 	if t.IsFIFO {
 		view["FifoTopic"] = "true"
 	} else if _, ok := view["FifoTopic"]; !ok {

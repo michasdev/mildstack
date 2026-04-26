@@ -29,7 +29,7 @@ func NewSNSRegistry() SNSRegistry {
 	byName := make(map[string]SNSRegistrySpec, len(actions))
 
 	for _, action := range actions {
-		supported := isSNSTopicSubscriptionAction(action)
+		supported := isSNSSupportedAction(action)
 		spec := SNSRegistrySpec{
 			Action:         action,
 			Version:        snsAPIVersion,
@@ -67,7 +67,7 @@ func (r SNSRegistry) String() string {
 	return fmt.Sprintf("sns registry: %d actions", len(r.ordered))
 }
 
-func isSNSTopicSubscriptionAction(action string) bool {
+func isSNSSupportedAction(action string) bool {
 	switch action {
 	case "CreateTopic",
 		"DeleteTopic",
@@ -82,7 +82,35 @@ func isSNSTopicSubscriptionAction(action string) bool {
 		"GetSubscriptionAttributes",
 		"SetSubscriptionAttributes",
 		"ListSubscriptions",
-		"ListSubscriptionsByTopic":
+		"ListSubscriptionsByTopic",
+		"AddPermission",
+		"RemovePermission",
+		"TagResource",
+		"UntagResource",
+		"ListTagsForResource",
+		"GetDataProtectionPolicy",
+		"PutDataProtectionPolicy",
+		"CreatePlatformApplication",
+		"DeletePlatformApplication",
+		"GetPlatformApplicationAttributes",
+		"SetPlatformApplicationAttributes",
+		"ListPlatformApplications",
+		"CreatePlatformEndpoint",
+		"DeleteEndpoint",
+		"GetEndpointAttributes",
+		"SetEndpointAttributes",
+		"ListEndpointsByPlatformApplication",
+		"SetSMSAttributes",
+		"GetSMSAttributes",
+		"CheckIfPhoneNumberIsOptedOut",
+		"OptInPhoneNumber",
+		"ListPhoneNumbersOptedOut",
+		"ListOriginationNumbers",
+		"GetSMSSandboxAccountStatus",
+		"CreateSMSSandboxPhoneNumber",
+		"VerifySMSSandboxPhoneNumber",
+		"DeleteSMSSandboxPhoneNumber",
+		"ListSMSSandboxPhoneNumbers":
 		return true
 	default:
 		return false
