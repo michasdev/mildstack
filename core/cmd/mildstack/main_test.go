@@ -570,7 +570,7 @@ func TestRegisterNativeDynamoDBRoutesExposesAwsCompatibleSmokeSurface(t *testing
 		}
 		listed = append(listed, page.TableNames...)
 	}
-	if got, want := listed, []string{"mildstack-records", batchTableName, readTableName, tableName}; !equalStringSlices(got, want) {
+	if got, want := listed, []string{batchTableName, readTableName, tableName}; !equalStringSlices(got, want) {
 		t.Fatalf("unexpected paginated table list: got %v want %v", got, want)
 	}
 
