@@ -29,11 +29,12 @@ func NewSNSRegistry() SNSRegistry {
 	byName := make(map[string]SNSRegistrySpec, len(actions))
 
 	for _, action := range actions {
+		supported := isSNSTopicSubscriptionAction(action)
 		spec := SNSRegistrySpec{
 			Action:         action,
 			Version:        snsAPIVersion,
-			Supported:      false,
-			DomainDeferred: true,
+			Supported:      supported,
+			DomainDeferred: !supported,
 		}
 		ordered = append(ordered, spec)
 		byName[action] = spec
@@ -64,4 +65,26 @@ func (r SNSRegistry) Resolve(ctx SNSRequestContext) (SNSRegistrySpec, error) {
 
 func (r SNSRegistry) String() string {
 	return fmt.Sprintf("sns registry: %d actions", len(r.ordered))
+}
+
+func isSNSTopicSubscriptionAction(action string) bool {
+	switch action {
+	case "CreateTopic",
+		"DeleteTopic",
+		"GetTopicAttributes",
+		"SetTopicAttributes",
+		"ListTopics",
+		"Publish",
+		"PublishBatch",
+		"Subscribe",
+		"ConfirmSubscription",
+		"Unsubscribe",
+		"GetSubscriptionAttributes",
+		"SetSubscriptionAttributes",
+		"ListSubscriptions",
+		"ListSubscriptionsByTopic":
+		return true
+	default:
+		return false
+	}
 }

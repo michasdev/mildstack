@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michasdev/mildstack/core/internal/resources/sns/domain"
 )
 
 type SNSXMLErrorResponse struct {
@@ -59,6 +60,12 @@ func classifySNSError(err error) (int, string, string) {
 		return http.StatusBadRequest, "InvalidAction", "The action or operation requested is invalid."
 	case errors.Is(err, ErrSNSUnsupported):
 		return http.StatusBadRequest, "InvalidAction", "The action is valid for SNS but not implemented in the local runtime yet."
+	case errors.Is(err, domain.ErrValidation), errors.Is(err, domain.ErrInvalidToken):
+		return http.StatusBadRequest, "InvalidParameter", err.Error()
+	case errors.Is(err, domain.ErrNotFound):
+		return http.StatusNotFound, "NotFound", "The requested resource does not exist."
+	case strings.Contains(strings.ToLower(err.Error()), "not initialized"), strings.Contains(strings.ToLower(err.Error()), "not configured"):
+		return http.StatusInternalServerError, "InternalError", "SNS persistence is not available."
 	default:
 		return http.StatusBadRequest, "ValidationError", err.Error()
 	}

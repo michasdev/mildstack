@@ -245,6 +245,24 @@ CREATE TABLE IF NOT EXISTS opt_out_phone_numbers (
 );
 CREATE INDEX IF NOT EXISTS idx_opt_out_tenant ON opt_out_phone_numbers(tenant_key);
 `,
+	2: `
+ALTER TABLE subscriptions ADD COLUMN owner_account_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE subscriptions ADD COLUMN attributes_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE subscriptions ADD COLUMN confirmed_at TEXT;
+CREATE INDEX IF NOT EXISTS idx_subscriptions_tenant_topic_endpoint ON subscriptions(tenant_key, topic_arn, protocol, endpoint);
+`,
+	3: `
+ALTER TABLE published_messages ADD COLUMN message_structure TEXT NOT NULL DEFAULT 'plain';
+ALTER TABLE published_messages ADD COLUMN message_group_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE published_messages ADD COLUMN message_deduplication_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE published_messages ADD COLUMN sequence_number TEXT NOT NULL DEFAULT '';
+ALTER TABLE published_messages ADD COLUMN dedup_scope_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE published_messages ADD COLUMN deduplicated INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_published_messages_dedup ON published_messages(tenant_key, topic_arn, dedup_scope_key, message_deduplication_id, published_at);
+
+ALTER TABLE delivery_attempts ADD COLUMN request_snapshot_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE delivery_attempts ADD COLUMN response_snapshot_json TEXT NOT NULL DEFAULT '{}';
+	`,
 }
 
 func migrationVersions() []int {

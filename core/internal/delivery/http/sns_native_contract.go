@@ -6,7 +6,11 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/michasdev/mildstack/core/internal/resources/sns/domain"
 )
 
 const snsAPIVersion = "2010-03-31"
@@ -124,4 +128,141 @@ func normalizeSNSPath(rawPath string) string {
 		trimmed = "/" + trimmed
 	}
 	return path.Clean(trimmed)
+}
+
+func snsPublishRequestFromValues(values url.Values) domain.PublishRequest {
+	return domain.PublishRequest{
+		TopicARN:               strings.TrimSpace(values.Get("TopicArn")),
+		TargetARN:              strings.TrimSpace(values.Get("TargetArn")),
+		PhoneNumber:            strings.TrimSpace(values.Get("PhoneNumber")),
+		Message:                values.Get("Message"),
+		Subject:                values.Get("Subject"),
+		MessageStructure:       strings.TrimSpace(values.Get("MessageStructure")),
+		MessageAttributes:      snsMessageAttributesFromValues(values, "MessageAttributes.entry."),
+		MessageGroupID:         strings.TrimSpace(values.Get("MessageGroupId")),
+		MessageDeduplicationID: strings.TrimSpace(values.Get("MessageDeduplicationId")),
+	}
+}
+
+func snsPublishBatchRequestFromValues(values url.Values) domain.PublishBatchRequest {
+	entriesByIndex := map[int]url.Values{}
+	for key, bucket := range values {
+		if len(bucket) == 0 {
+			continue
+		}
+		if !strings.HasPrefix(key, "PublishBatchRequestEntries.member.") {
+			continue
+		}
+
+		suffix := strings.TrimPrefix(key, "PublishBatchRequestEntries.member.")
+		parts := strings.Split(suffix, ".")
+		if len(parts) < 2 {
+			continue
+		}
+		index, err := strconv.Atoi(parts[0])
+		if err != nil || index <= 0 {
+			continue
+		}
+		entryValues := entriesByIndex[index]
+		if entryValues == nil {
+			entryValues = url.Values{}
+			entriesByIndex[index] = entryValues
+		}
+		entryValues.Set(strings.Join(parts[1:], "."), bucket[0])
+	}
+
+	indices := make([]int, 0, len(entriesByIndex))
+	for index := range entriesByIndex {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+
+	entries := make([]domain.PublishBatchRequestEntry, 0, len(indices))
+	for _, index := range indices {
+		entryValues := entriesByIndex[index]
+		entries = append(entries, domain.PublishBatchRequestEntry{
+			ID:                     strings.TrimSpace(entryValues.Get("Id")),
+			Message:                entryValues.Get("Message"),
+			Subject:                entryValues.Get("Subject"),
+			MessageStructure:       strings.TrimSpace(entryValues.Get("MessageStructure")),
+			MessageAttributes:      snsMessageAttributesFromValues(entryValues, "MessageAttributes.entry."),
+			MessageGroupID:         strings.TrimSpace(entryValues.Get("MessageGroupId")),
+			MessageDeduplicationID: strings.TrimSpace(entryValues.Get("MessageDeduplicationId")),
+		})
+	}
+
+	return domain.PublishBatchRequest{
+		TopicARN: strings.TrimSpace(values.Get("TopicArn")),
+		Entries:  entries,
+	}
+}
+
+func snsMessageAttributesFromValues(values url.Values, prefix string) map[string]domain.MessageAttributeValue {
+	type parsedAttribute struct {
+		name  string
+		value domain.MessageAttributeValue
+	}
+
+	byIndex := map[int]*parsedAttribute{}
+	for rawKey, bucket := range values {
+		if !strings.HasPrefix(rawKey, prefix) {
+			continue
+		}
+		if len(bucket) == 0 {
+			continue
+		}
+
+		suffix := strings.TrimPrefix(rawKey, prefix)
+		parts := strings.Split(suffix, ".")
+		if len(parts) < 2 {
+			continue
+		}
+		index, err := strconv.Atoi(parts[0])
+		if err != nil || index <= 0 {
+			continue
+		}
+
+		entry := byIndex[index]
+		if entry == nil {
+			entry = &parsedAttribute{}
+			byIndex[index] = entry
+		}
+
+		switch strings.ToLower(parts[1]) {
+		case "name":
+			entry.name = strings.TrimSpace(bucket[0])
+		case "value":
+			if len(parts) < 3 {
+				continue
+			}
+			switch strings.ToLower(parts[2]) {
+			case "datatype":
+				entry.value.DataType = strings.TrimSpace(bucket[0])
+			case "stringvalue":
+				entry.value.StringValue = bucket[0]
+			case "binaryvalue":
+				entry.value.BinaryValue = bucket[0]
+			}
+		}
+	}
+
+	if len(byIndex) == 0 {
+		return map[string]domain.MessageAttributeValue{}
+	}
+
+	indices := make([]int, 0, len(byIndex))
+	for index := range byIndex {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+
+	result := make(map[string]domain.MessageAttributeValue, len(indices))
+	for _, index := range indices {
+		entry := byIndex[index]
+		if entry == nil || strings.TrimSpace(entry.name) == "" {
+			continue
+		}
+		result[entry.name] = entry.value
+	}
+	return result
 }
