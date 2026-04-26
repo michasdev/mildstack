@@ -1,0 +1,51 @@
+package contracts
+
+// ActionNames returns the full SNS action catalog recognized by the native adapter.
+func ActionNames() []string {
+	return append([]string(nil), actionNames...)
+}
+
+var actionNames = []string{
+	"AddPermission",
+	"CheckIfPhoneNumberIsOptedOut",
+	"ConfirmSubscription",
+	"CreatePlatformApplication",
+	"CreatePlatformEndpoint",
+	"CreateSMSSandboxPhoneNumber",
+	"CreateTopic",
+	"DeleteEndpoint",
+	"DeletePlatformApplication",
+	"DeleteSMSSandboxPhoneNumber",
+	"DeleteTopic",
+	"GetDataProtectionPolicy",
+	"GetEndpointAttributes",
+	"GetPlatformApplicationAttributes",
+	"GetSMSAttributes",
+	"GetSMSSandboxAccountStatus",
+	"GetSubscriptionAttributes",
+	"GetTopicAttributes",
+	"ListEndpointsByPlatformApplication",
+	"ListOriginationNumbers",
+	"ListPhoneNumbersOptedOut",
+	"ListPlatformApplications",
+	"ListSMSSandboxPhoneNumbers",
+	"ListSubscriptions",
+	"ListSubscriptionsByTopic",
+	"ListTagsForResource",
+	"ListTopics",
+	"OptInPhoneNumber",
+	"Publish",
+	"PublishBatch",
+	"PutDataProtectionPolicy",
+	"RemovePermission",
+	"SetEndpointAttributes",
+	"SetPlatformApplicationAttributes",
+	"SetSMSAttributes",
+	"SetSubscriptionAttributes",
+	"SetTopicAttributes",
+	"Subscribe",
+	"TagResource",
+	"Unsubscribe",
+	"UntagResource",
+	"VerifySMSSandboxPhoneNumber",
+}

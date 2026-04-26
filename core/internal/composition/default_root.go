@@ -9,6 +9,7 @@ import (
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	"github.com/michasdev/mildstack/core/internal/resources/dynamodb"
 	"github.com/michasdev/mildstack/core/internal/resources/s3"
+	"github.com/michasdev/mildstack/core/internal/resources/sns"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs"
 )
 
@@ -16,6 +17,7 @@ type DefaultRootConfig struct {
 	InstanceID             string
 	S3StorageBaseDir       string
 	DynamoDBStorageBaseDir string
+	SNSStorageBaseDir      string
 	SQSStorageBaseDir      string
 }
 
@@ -60,7 +62,18 @@ func defaultRootWithHook(hook orchestrator.StateHook, config DefaultRootConfig) 
 		panic(fmt.Sprintf("composition: init sqs service: %v", err))
 	}
 
-	services := []orchestrator.Service{s3Service, dynamoService, sqsService}
+	snsService, err := sns.NewWithStorage(sns.StorageConfig{
+		BaseDir:    config.SNSStorageBaseDir,
+		InstanceID: instanceID,
+	})
+	if err != nil {
+		_ = s3Service.Stop(context.Background())
+		_ = dynamoService.Stop(context.Background())
+		_ = sqsService.Stop(context.Background())
+		panic(fmt.Sprintf("composition: init sns service: %v", err))
+	}
+
+	services := []orchestrator.Service{s3Service, dynamoService, sqsService, snsService}
 	for _, service := range services {
 		if err := service.AttachState(hook); err != nil {
 			for _, candidate := range services {

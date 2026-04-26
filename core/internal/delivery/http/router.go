@@ -82,6 +82,14 @@ func (r *Router) Registrar() *Registrar {
 	return r.registrar
 }
 
+// RegisterSNSNative wires the SNS AWS-compatible native adapter middleware.
+func (r *Router) RegisterSNSNative(service SNSNativeService) {
+	if r == nil {
+		return
+	}
+	RegisterSNSNativeRoutes(r.engine, service)
+}
+
 func normalizeConfig(config Config) Config {
 	config.BasePath = normalizeBasePath(config.BasePath)
 	return config

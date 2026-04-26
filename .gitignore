@@ -23,7 +23,7 @@ _bmad-output
 .claude/skills/bmad-*
 .AGENTS
 docs/project-scan-report.json
-
+.specify/
 AGENTS.md
 *.env*
 !.env.example
@@ -32,3 +32,4 @@ AGENTS.md
 .react-router
 .source
 apps/web/www/build
+specs/

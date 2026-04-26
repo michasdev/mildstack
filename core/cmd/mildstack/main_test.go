@@ -744,6 +744,28 @@ func TestRegisterNativeSQSRoutesExposesAwsCompatibleSmokeSurface(t *testing.T) {
 	}
 }
 
+func TestRegisterNativeSNSRoutesExposesQueryValidationSurface(t *testing.T) {
+	t.Helper()
+
+	root := composition.DefaultRoot("test-instance")
+	manager := runtime.New(root.Services)
+	router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
+
+	if err := registerNativeSNSRoutes(router, root.Services); err != nil {
+		t.Fatalf("register native sns routes: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/?Action=CreateTopic", nil)
+	router.Engine().ServeHTTP(recorder, request)
+
+	if got, want := recorder.Code, http.StatusBadRequest; got != want {
+		t.Fatalf("unexpected sns validation status: got %d want %d", got, want)
+	}
+	if !strings.Contains(recorder.Body.String(), "MissingParameter") {
+		t.Fatalf("expected sns missing version error, got %q", recorder.Body.String())
+	}
+}
 
 func newDynamoDBSmokeClient(t *testing.T, endpoint string) *dynamodb.Client {
 	t.Helper()

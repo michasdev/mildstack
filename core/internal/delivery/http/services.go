@@ -10,6 +10,13 @@ import (
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 )
 
+// SNSNativeService describes the minimum SNS service contract required by
+// the native AWS Query/XML adapter lifecycle.
+type SNSNativeService interface {
+	Policy() orchestrator.EmulationPolicy
+	Metadata() orchestrator.Metadata
+}
+
 type servicesHandler struct {
 	snapshotter Snapshotter
 	registrar   *Registrar
