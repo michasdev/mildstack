@@ -32,7 +32,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: './apps/web/www/package-lock.json'
 
@@ -43,12 +43,12 @@ jobs:
         run: npm run build
 
       - name: Add Custom Domain CNAME
-        run: echo "mildstack.dev" > dist/CNAME
+        run: echo "mildstack.dev" > build/client/CNAME
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./apps/web/www/dist
+          path: ./apps/web/www/build/client
 
   deploy:
     name: Deploy to GitHub Pages

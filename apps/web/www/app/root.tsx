@@ -47,6 +47,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta property="twitter:title" content="MildStack - Open Source LocalStack Alternative" />
         <meta property="twitter:description" content="Lightweight, local-first AWS emulator for developers. Fast, simple, and memory-efficient local cloud API." />
         <meta property="twitter:image" content="/og-image.png" />
+        {/* spa-github-pages: restore real URL from 404.html redirect */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(l){if(l.search[1]=='/'){var decoded=l.search.slice(1).split('&').map(function(s){return s.replace(/~and~/g,'&')}).join('?');window.history.replaceState(null,null,l.pathname.slice(0,-1)+decoded+l.hash)}}(window.location))`,
+          }}
+        />
         <Meta />
         <Links />
       </head>
