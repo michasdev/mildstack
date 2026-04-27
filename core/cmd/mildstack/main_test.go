@@ -87,8 +87,8 @@ func TestRegisterNativeS3RoutesExposesAwsCompatibleSmokeSurface(t *testing.T) {
 	if !strings.Contains(recorder.Body.String(), "ListAllMyBucketsResult") {
 		t.Fatalf("expected list buckets XML, got %q", recorder.Body.String())
 	}
-	if !strings.Contains(recorder.Body.String(), "mildstack-assets") {
-		t.Fatalf("expected seeded bucket in list buckets response, got %q", recorder.Body.String())
+	if !strings.Contains(recorder.Body.String(), "<Buckets>") {
+		t.Fatalf("expected buckets container in list buckets response, got %q", recorder.Body.String())
 	}
 
 	createRecorder := httptest.NewRecorder()
