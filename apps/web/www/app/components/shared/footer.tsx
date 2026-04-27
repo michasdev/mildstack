@@ -18,7 +18,7 @@ export function Footer() {
         },
         {
             title: 'Docs',
-            href: '#',
+            href: 'https://mildstack.dev/docs',
         }
     ];
 
@@ -82,7 +82,7 @@ export function Footer() {
                 <div className="bg-border absolute inset-x-0 h-px w-full" />
                 <div className="flex max-w-4xl flex-col justify-between gap-2 pt-2 pb-5">
                     <p className="text-muted-foreground text-center text-sm font-light">
-                        © <a href="https://mildstack.dev">MildStack {year}</a>. MIT Licensed. <a href="https://github.com/michasdev/mildstack" target="_blank" rel="noopener noreferrer">View Repository.</a>
+                        © <a href="https://mildstack.dev">MildStack {year}</a>. GPL-3.0 licensed. <a href="https://github.com/michasdev/mildstack" target="_blank" rel="noopener noreferrer">View Repository.</a>
                     </p>
                 </div>
             </div>

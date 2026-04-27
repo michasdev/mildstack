@@ -5,13 +5,18 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import logoFullWhite from '../../assets/logos/mildstack-logo-full-white.png'
 
-const NAV_LINKS = [
-  { label: 'Home', variant: 'outline' },
+type NavLink = {
+  label: string;
+  variant: 'outline' | 'ghost';
+  href?: string;
+};
+
+const NAV_LINKS: NavLink[] = [
+  { label: 'Home', variant: 'outline', href: '/' },
   { label: 'Features', variant: 'ghost' },
   { label: 'Services', variant: 'ghost' },
-  { label: 'Docs', variant: 'ghost' },
-  { label: 'Community', variant: 'ghost' },
-] as const;
+  { label: 'Docs', variant: 'ghost', href: '/docs' },
+];
 
 export const Navbar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -29,17 +34,32 @@ export const Navbar: React.FC = () => {
   const NavLinks = ({ isMobile = false, closeMenu }: { isMobile?: boolean; closeMenu?: () => void }) => (
     <>
       {NAV_LINKS.map((link) => (
-        <Button
-          key={link.label}
-          variant={isMobile && link.label === 'Home' ? 'secondary' : link.variant}
-          className={cn(
-            'rounded-full transition-all',
-            isMobile ? 'px-8 h-12 text-lg w-full max-w-[280px]' : 'h-9 px-4 text-sm hover:text-gray-300'
-          )}
-          onClick={closeMenu}
-        >
-          {link.label}
-        </Button>
+        link.href ? (
+          <Button
+            asChild
+            key={link.label}
+            variant={isMobile && link.label === 'Home' ? 'secondary' : link.variant}
+            className={cn(
+              'rounded-full transition-all',
+              isMobile ? 'px-8 h-12 text-lg w-full max-w-[280px]' : 'h-9 px-4 text-sm hover:text-gray-300'
+            )}
+            onClick={closeMenu}
+          >
+            <a href={link.href}>{link.label}</a>
+          </Button>
+        ) : (
+          <Button
+            key={link.label}
+            variant={isMobile && link.label === 'Home' ? 'secondary' : link.variant}
+            className={cn(
+              'rounded-full transition-all',
+              isMobile ? 'px-8 h-12 text-lg w-full max-w-[280px]' : 'h-9 px-4 text-sm hover:text-gray-300'
+            )}
+            onClick={closeMenu}
+          >
+            {link.label}
+          </Button>
+        )
       ))}
     </>
   );

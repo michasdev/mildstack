@@ -7,80 +7,138 @@
 </p>
 
 <p align="center">
-  <strong>The Lightweight, Drop-in Replacement for LocalStack.</strong><br />
-  Fast, Open Source, and Developer-First.
+  <strong>The Free Drop-in Replacement for LocalStack. Run AWS services locally.</strong><br />
+  Fast, lightweight, local-first, and built to run without Docker.
 </p>
 
 <p align="center">
-  <a href="https://mildstack.dev">Website</a> •
-  <a href="#key-features">Key Features</a> •
-  <a href="#supported-services">Supported Services</a> •
-  <a href="https://discord.gg/your-invite">Community</a>
+  <a href="https://mildstack.dev">Website</a> |
+  <a href="https://mildstack.dev/docs">Docs</a> |
+  <a href="#supported-services">Supported Services</a> |
+  <a href="#quick-start">Quick Start</a>
 </p>
 
 ---
 
-## ⚡️ What is MildStack?
+## What is MildStack?
 
-MildStack is a high-performance, local-first AWS emulator designed to streamline your cloud development workflow. Unlike heavy alternatives that require Docker and significant system resources, MildStack is built in **Go** for maximum efficiency and speed.
+MildStack is a local-first AWS emulator that helps developers build and test cloud workflows on their own machine, without the need for Docker or containers. It runs natively in Go, does not require Docker, starts in around 200ms (with ~15MB of RAM usage), and keeps the feedback loop short.
 
-Stop waiting for containers to spin up. Start building instantly with a local cloud that feels "mild" on your CPU but "spicy" on productivity.
+It is designed for day-to-day AWS development: point your SDKs and CLI to a local endpoint, keep your state on disk, and use the desktop app to inspect resources visually.
 
-## ✨ Why MildStack?
+## Why MildStack?
 
-- **🚀 Instant-On**: No Docker required. MildStack runs as a native binary, starting in milliseconds.
-- **🖥️ Desktop App**: A beautiful, intuitive UI to browse S3 buckets, query DynamoDB tables, and monitor SQS queues without leaving your IDE.
-- **🍃 Ultra-Lightweight**: Minimal RAM and CPU footprint. Keep your machine cool while simulating complex cloud architectures.
-- **🔌 Drop-in Compatibility**: Works seamlessly with official AWS SDKs and CLI. Just change your endpoint URL.
-- **📡 Offline-First**: Build and test your cloud applications on a plane, a train, or anywhere without an internet connection.
-- **💰 100% Free**: No "Pro" tiers for basic features. Everything you need for local development, open-source and free.
+- No Docker or containers required.
+- Native runtime built for speed and low overhead.
+- Desktop app for browsing and managing local AWS resources.
+- Works with official AWS SDKs and the AWS CLI.
+- Offline-first development with persistent local state.
+- Free and open source under GPL-3.0.
 
-## 🛠 Supported Services
+## Supported Services
 
-MildStack is rapidly evolving. We currently provide robust support for core AWS services:
+MildStack currently supports the AWS services that cover the most common local development workflows.
 
-| Service | Status | Features |
-| :--- | :--- | :--- |
-| **S3** | ✅ Active | Bucket management, Multipart uploads, Metadata support |
-| **DynamoDB** | ✅ Active | Tables, GSI/LSI support, Rich querying & filtering |
-| **SQS** | ✅ Active | Message queues, DLQ redrive, FIFO support |
-| **SNS** |  📅 Planned | Topic publishing, basic subscriptions |
-| **Lambda** | 📅 Planned | Local execution of serverless functions |
-| **EventBridge** | 📅 Planned | Event-driven architecture simulation |
+| Service | Status | Notes |
+| --- | --- | --- |
+| S3 | Active | Buckets, objects, multipart uploads, versioning, metadata, and more |
+| DynamoDB | Active | Tables, items, queries, scans, indexes, and batch operations |
+| SQS | Active | Standard and FIFO queues, DLQs, visibility timeout, and message operations |
+| SNS | Active | Topics, subscriptions, publish flows, and notifications |
+| Lambda | In progress | Local function execution is being built now |
+| EventBridge | Planned | Event routing and event-driven workflows |
+| CloudWatch | Planned | Logs and observability support |
 
-## 📦 The Ecosystem
+For the full API surface, examples, and service-specific details, visit the docs at [mildstack.dev/docs](https://mildstack.dev/docs).
 
-MildStack isn't just an emulator; it's a complete development environment:
+## Quick Start
 
-### 1. The Core Engine
-Written in Go, our core provides a high-concurrency, low-latency API that mimics AWS service behavior with precision.
+Start a MildStack instance:
 
-### 2. The MildStack CLI
-A modern, terminal-based control center (powered by Charm/BubbleTea) to manage your local instances, view logs, and monitor service health.
+```bash
+mildstack start
+# or: mildstack start 8080
+# or: mildstack start --detach
+```
 
-### 3. The Desktop Browser
-An Electron-powered visual console that gives you a "Production-like" experience for inspecting your local resources. Browse objects, edit items, and peek at messages with ease.
+The runtime starts on your machine in around 200ms. Once it is running, point your app or SDK to `http://localhost:4566`:
 
----
+```bash
+aws s3 mb s3://my-bucket --endpoint-url http://localhost:4566
+aws s3 cp ./hello.txt s3://my-bucket/ --endpoint-url http://localhost:4566
+```
 
-## 🗺 Roadmap
+## AWS CLI
 
-Our goal is to cover the 80% of AWS services used in 95% of applications. Check our [Roadmap](https://mildstack.dev/roadmap) to see what's coming next, including Lambda support, IAM simulation, and more.
+MildStack works with the standard AWS CLI. The simplest setup is to create a local profile and reuse it with `--endpoint-url`.
 
-## 🤝 Contributing
+```bash
+aws configure set aws_access_key_id test --profile mildstack
+aws configure set aws_secret_access_key test --profile mildstack
+aws configure set region us-east-1 --profile mildstack
+```
 
-We love contributors! Whether you're fixing a bug, adding a new service, or improving the documentation, your help is welcome.
+Then use that profile with your commands:
 
-1. Check out our [Contribution Guidelines](CONTRIBUTING.md).
-2. Join our [Discord community](https://discord.gg/your-invite) to discuss ideas.
-3. Spread the word! 🌟
+```bash
+aws s3 ls --endpoint-url http://localhost:4566 --profile mildstack
+aws dynamodb list-tables --endpoint-url http://localhost:4566 --profile mildstack
+aws sqs list-queues --endpoint-url http://localhost:4566 --profile mildstack
+aws sns list-topics --endpoint-url http://localhost:4566 --profile mildstack
+```
 
-## 📄 License
+If you prefer, create an alias to keep commands short:
 
-MildStack is released under the **MIT License**. Build freely.
+```bash
+alias awslocal='aws --endpoint-url http://localhost:4566 --profile mildstack'
+```
+
+Then the same commands become:
+
+```bash
+awslocal s3 ls
+awslocal dynamodb list-tables
+awslocal sqs list-queues
+awslocal sns list-topics
+```
+
+MildStack ignores credentials entirely, so any dummy values work as long as the CLI has something to send.
+
+## Ecosystem
+
+MildStack is split into three parts that work together:
+
+### Core Runtime
+
+The Go engine owns AWS emulation logic, persistence, and instance-scoped state.
+
+### MildStack CLI
+
+The terminal interface manages instances, logs, and runtime health.
+
+### Desktop App
+
+The Electron app gives you a visual console to browse buckets, tables, queues, and topics.
+
+## Documentation
+
+The full documentation lives at [mildstack.dev/docs](https://mildstack.dev/docs).
+
+- Getting started - overview, installation, and quick start
+- Services - API coverage for each supported AWS service
+- MildStack CLI - instance management and AWS Local usage
+- Desktop App - browsing and managing local resources
+
+## Contributing
+
+We welcome bug reports and pull requests. If you find a missing feature or unexpected behavior, please open an issue on GitHub and include the steps to reproduce it.
+
+## License
+
+MildStack is released under the GPL-3.0 license. It is free and open source, and you can use, study, modify, and redistribute it under the same license terms. If you distribute modified versions, the GPL requires that they remain under compatible open-source terms.
 
 ---
 
 <p align="center">
-  Built with ❤️ for developers.
+  MildStack: Run AWS services locally.
 </p>
