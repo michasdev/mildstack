@@ -13,6 +13,7 @@
     "s3:smoke": "node scripts/s3-smoke.cjs",
     "sqs:smoke": "node scripts/sqs-smoke.cjs",
     "dynamo:smoke": "node scripts/dynamo-smoke.cjs",
+    "sns:smoke": "node scripts/sns-smoke.cjs",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
@@ -36,6 +37,7 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1032.0",
     "@aws-sdk/client-s3": "^3.1032.0",
+    "@aws-sdk/client-sns": "^3.1037.0",
     "@aws-sdk/client-sqs": "^3.1033.0",
     "@aws-sdk/s3-request-presigner": "^3.1033.0",
     "@base-ui/react": "^1.4.1",

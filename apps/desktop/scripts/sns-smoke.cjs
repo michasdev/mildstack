@@ -2,6 +2,7 @@
 'use strict';
 
 const { randomUUID } = require('node:crypto');
+const { setTimeout: sleep } = require('node:timers/promises');
 const {
   SNSClient,
   AddPermissionCommand,
@@ -84,12 +85,14 @@ async function main() {
   const platformName = uniqueName('smoke-platform');
   const sandboxPhone = '+12065550100';
   const targetPhone = '+12065550101';
+  const subscriptionEndpoint = 'http://127.0.0.1:7788/sns';
   const cleanup = {
     topicArn: '',
     subscriptionArn: '',
     endpointArn: '',
     platformApplicationArn: '',
     sandboxPhoneCreated: false,
+    sandboxPhone,
   };
 
   try {
@@ -118,21 +121,13 @@ async function main() {
     const subscribe = await execute(client, 'Subscribe', new SubscribeCommand({
       TopicArn: cleanup.topicArn,
       Protocol: 'http',
-      Endpoint: 'http://127.0.0.1:7788/sns',
+      Endpoint: subscriptionEndpoint,
       ReturnSubscriptionArn: true,
     }));
     cleanup.subscriptionArn = subscribe.SubscriptionArn || '';
     expectDefined(cleanup.subscriptionArn, 'Subscribe SubscriptionArn');
 
-    const subscriptions = await execute(client, 'ListSubscriptions', new ListSubscriptionsCommand({}));
-    const subFound = subscriptions.Subscriptions?.some((item) => item.SubscriptionArn === cleanup.subscriptionArn);
-    expectEqual(subFound, true, 'ListSubscriptions should include created subscription');
-
-    const subscriptionsByTopic = await execute(client, 'ListSubscriptionsByTopic', new ListSubscriptionsByTopicCommand({
-      TopicArn: cleanup.topicArn,
-    }));
-    const subByTopicFound = subscriptionsByTopic.Subscriptions?.some((item) => item.SubscriptionArn === cleanup.subscriptionArn);
-    expectEqual(subByTopicFound, true, 'ListSubscriptionsByTopic should include created subscription');
+    await assertSubscriptionVisible(client, cleanup.topicArn, subscriptionEndpoint);
 
     await execute(client, 'SetSubscriptionAttributes', new SetSubscriptionAttributesCommand({
       SubscriptionArn: cleanup.subscriptionArn,
@@ -152,7 +147,7 @@ async function main() {
         TopicArn: cleanup.topicArn,
         Token: 'invalid-token',
       }),
-      'NotFound'
+      'NotFoundException'
     );
 
     console.log('\n--- Publish and PublishBatch ---');
@@ -305,7 +300,7 @@ async function main() {
     expectEqual(Array.isArray(optedOutList.phoneNumbers), true, 'ListPhoneNumbersOptedOut returns list');
 
     const sandboxStatusBefore = await execute(client, 'GetSMSSandboxAccountStatus (before verify)', new GetSMSSandboxAccountStatusCommand({}));
-    expectEqual(sandboxStatusBefore.isInSandbox, true, 'Account should start in sandbox');
+    expectEqual(sandboxStatusBefore.IsInSandbox, true, 'Account should start in sandbox');
 
     await execute(client, 'CreateSMSSandboxPhoneNumber', new CreateSMSSandboxPhoneNumberCommand({
       PhoneNumber: sandboxPhone,
@@ -323,10 +318,10 @@ async function main() {
     }));
 
     const sandboxStatusAfter = await execute(client, 'GetSMSSandboxAccountStatus (after verify)', new GetSMSSandboxAccountStatusCommand({}));
-    expectEqual(sandboxStatusAfter.isInSandbox, false, 'Account should leave sandbox after verification');
+    expectEqual(sandboxStatusAfter.IsInSandbox, false, 'Account should leave sandbox after verification');
 
     const origination = await execute(client, 'ListOriginationNumbers', new ListOriginationNumbersCommand({}));
-    const originFound = origination.phoneNumbers?.includes(sandboxPhone);
+    const originFound = origination.PhoneNumbers?.some((item) => item.PhoneNumber === sandboxPhone);
     expectEqual(originFound, true, 'ListOriginationNumbers should include verified sandbox phone');
 
     console.log('\n--- Cleanup Operations ---');
@@ -366,36 +361,88 @@ async function bestEffortCleanup(client, cleanup) {
     return;
   }
 
-  const tasks = [];
   if (cleanup.endpointArn) {
-    tasks.push(execute(client, 'Cleanup DeleteEndpoint', new DeleteEndpointCommand({
+    await runCleanupStep(client, 'Cleanup DeleteEndpoint', new DeleteEndpointCommand({
       EndpointArn: cleanup.endpointArn,
-    })).catch(() => undefined));
+    }));
   }
   if (cleanup.platformApplicationArn) {
-    tasks.push(execute(client, 'Cleanup DeletePlatformApplication', new DeletePlatformApplicationCommand({
+    await runCleanupStep(client, 'Cleanup DeletePlatformApplication', new DeletePlatformApplicationCommand({
       PlatformApplicationArn: cleanup.platformApplicationArn,
-    })).catch(() => undefined));
+    }));
   }
   if (cleanup.sandboxPhoneCreated) {
-    tasks.push(execute(client, 'Cleanup DeleteSMSSandboxPhoneNumber', new DeleteSMSSandboxPhoneNumberCommand({
-      PhoneNumber: '+12065550100',
-    })).catch(() => undefined));
+    await runCleanupStep(client, 'Cleanup DeleteSMSSandboxPhoneNumber', new DeleteSMSSandboxPhoneNumberCommand({
+      PhoneNumber: cleanup.sandboxPhone,
+    }));
   }
   if (cleanup.subscriptionArn) {
-    tasks.push(execute(client, 'Cleanup Unsubscribe', new UnsubscribeCommand({
+    await runCleanupStep(client, 'Cleanup Unsubscribe', new UnsubscribeCommand({
       SubscriptionArn: cleanup.subscriptionArn,
-    })).catch(() => undefined));
+    }));
   }
   if (cleanup.topicArn) {
-    tasks.push(execute(client, 'Cleanup DeleteTopic', new DeleteTopicCommand({
+    await runCleanupStep(client, 'Cleanup DeleteTopic', new DeleteTopicCommand({
       TopicArn: cleanup.topicArn,
-    })).catch(() => undefined));
+    }));
+  }
+}
+
+async function assertSubscriptionVisible(client, topicArn, endpoint) {
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const subscriptions = await execute(client, `ListSubscriptions (attempt ${attempt})`, new ListSubscriptionsCommand({}));
+    const subFound = subscriptions.Subscriptions?.some((item) => item.TopicArn === topicArn && item.Endpoint === endpoint);
+    if (subFound) {
+      break;
+    }
+    if (attempt === 5) {
+      throw new Error('Validation Failed [ListSubscriptions should include created subscription]: subscription not found by topic+endpoint');
+    }
+    await sleep(150);
   }
 
-  if (tasks.length > 0) {
-    await Promise.all(tasks);
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const subscriptionsByTopic = await execute(client, `ListSubscriptionsByTopic (attempt ${attempt})`, new ListSubscriptionsByTopicCommand({
+      TopicArn: topicArn,
+    }));
+    const subByTopicFound = subscriptionsByTopic.Subscriptions?.some((item) => item.TopicArn === topicArn && item.Endpoint === endpoint);
+    if (subByTopicFound) {
+      return;
+    }
+    if (attempt === 5) {
+      throw new Error('Validation Failed [ListSubscriptionsByTopic should include created subscription]: subscription not found by topic+endpoint');
+    }
+    await sleep(150);
   }
+}
+
+async function runCleanupStep(client, name, command) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      if (debug) {
+        console.log(`\nExecuting ${name} (attempt ${attempt})...`);
+      }
+      await client.send(command);
+      if (debug) {
+        console.log(`✓ ${name} succeeded.`);
+      }
+      return;
+    } catch (error) {
+      if (attempt < 3 && isSQLiteBusyError(error)) {
+        await sleep(150 * attempt);
+        continue;
+      }
+      if (debug) {
+        console.warn(`Cleanup step failed: ${name}`, error?.message || error);
+      }
+      return;
+    }
+  }
+}
+
+function isSQLiteBusyError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return message.includes('database is locked') || message.includes('sqlite_busy');
 }
 
 async function execute(client, name, command) {

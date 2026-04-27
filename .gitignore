@@ -3,11 +3,21 @@ docs/aws/
 
 node_modules
 dist
+build
 out
+*.out
+*.test
+*.exe
+vendor/
 .DS_Store
+Thumbs.db
 .eslintcache
 *.log*
+*.tmp
+*.swp
 tmp
+.vscode/
+.idea/
 pnpm-lock.yaml
 .planning/
 .planning/*
