@@ -62,7 +62,7 @@ The core is the strategic center of the platform and contains most of the domain
 
 ## Key Features (Current Core Scope)
 
-- Local instance lifecycle (`serve`, `status`, `instances`, `stop`, `delete`)
+- Local instance lifecycle (`start`, `status`, `instances`, `stop`, `delete`)
 - Instance-scoped persistent storage rooted in `~/.mildstack/instances/<instanceId>/...`
 - S3 AWS-compatible HTTP surface with rich subresources (versioning, object lock, replication, multipart, tagging, ACL, bucket-level controls)
 - DynamoDB compatible target-based API (`X-Amz-Target`) plus internal runtime routes

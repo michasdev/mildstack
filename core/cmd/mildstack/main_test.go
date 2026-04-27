@@ -608,7 +608,7 @@ func TestInstanceRegistrarPersistsAndReleasesActiveInstance(t *testing.T) {
 	registrar := instanceRegistrar{manager: manager, storage: storage}
 
 	if err := registrar.Serve(context.Background(), 9090); err != nil {
-		t.Fatalf("serve: %v", err)
+		t.Fatalf("start: %v", err)
 	}
 
 	ports, err := storage.LoadActivePorts()
@@ -664,7 +664,7 @@ func TestInstanceRegistrarServeSkipsDuplicateLoadedPort(t *testing.T) {
 	registrar := instanceRegistrar{manager: manager, storage: storage}
 
 	if err := registrar.Serve(context.Background(), 9090); err != nil {
-		t.Fatalf("serve: %v", err)
+		t.Fatalf("start: %v", err)
 	}
 
 	ports, err := storage.LoadActivePorts()

@@ -22,7 +22,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	// Manager starts with no services; services are wired per-serve call once
+	// Manager starts with no services; services are wired per-start call once
 	// the port (and therefore the instanceId) is known.
 	manager := runtime.NewWithPorts(nil, activePorts)
 

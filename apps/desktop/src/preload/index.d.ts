@@ -192,7 +192,7 @@ interface MildStackInstancesResponse {
 
 interface MildStackApi {
   instances(): Promise<MildStackInstancesResponse>
-  serve(port: number): Promise<{ success: boolean; error?: string }>
+  start(port: number): Promise<{ success: boolean; error?: string }>
   stop(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
   delete(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
   validateInstance(): Promise<{ valid: boolean; error?: string }>

@@ -87,7 +87,7 @@ export const useInstanceStore = create<InstanceState>((set, get) => ({
     },
 
     serveInstance: async (port: number) => {
-        const result = await window.api.mildstack.serve(port);
+        const result = await window.api.mildstack.start(port);
         if (result.success) {
             // Refresh instances after starting
             await get().fetchInstances();

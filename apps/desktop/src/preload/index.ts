@@ -194,7 +194,7 @@ interface MildStackInstancesResponse {
 
 interface MildStackApi {
   instances(): Promise<MildStackInstancesResponse>
-  serve(port: number): Promise<{ success: boolean; error?: string }>
+  start(port: number): Promise<{ success: boolean; error?: string }>
   stop(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
   delete(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
   validateInstance(): Promise<{ valid: boolean; error?: string }>
@@ -304,7 +304,7 @@ const api: { s3: S3BrowserApi; dynamodb: DynamoDBBrowserApi; sqs: SQSBrowserApi;
   },
   mildstack: {
     instances: () => ipcRenderer.invoke('mildstack:instances'),
-    serve: (port) => ipcRenderer.invoke('mildstack:serve', port),
+    start: (port) => ipcRenderer.invoke('mildstack:start', port),
     stop: (port?, all?) => ipcRenderer.invoke('mildstack:stop', { port, all }),
     delete: (port?, all?) => ipcRenderer.invoke('mildstack:delete', { port, all }),
     validateInstance: () => ipcRenderer.invoke('mildstack:validateInstance')

@@ -37,8 +37,8 @@ Main executable: `core/cmd/mildstack/main.go`
 1. Resolve runtime paths (`~/.mildstack/...`) with migration fallback.
 2. Load active ports from storage.
 3. Create `runtime.Manager` with known ports.
-4. Build CLI command set (`serve`, `instances`, `status`, `stop`, `delete`).
-5. On `serve`:
+4. Build CLI command set (`start`, `instances`, `status`, `stop`, `delete`).
+5. On `start`:
    - Resolve `instanceId` for port
    - Build `composition.DefaultRoot(instanceId)`
    - Register service routes in runtime registrar
@@ -106,7 +106,7 @@ The runtime route `Registrar` validates and catalogs service routes with duplica
 - command composition
 - lifecycle operations
 - storage-backed instance metadata
-- detached serve mode readiness signaling
+- detached start mode readiness signaling
 
 ## 7. State and Persistence Model
 

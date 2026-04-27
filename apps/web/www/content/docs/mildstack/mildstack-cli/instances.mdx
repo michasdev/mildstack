@@ -21,10 +21,10 @@ Start instances on different ports:
 
 ```bash
 # Start a "development" instance
-mildstack serve 4566
+mildstack start 4566
 
 # In another terminal, start a "testing" instance
-mildstack serve 8080
+mildstack start 8080
 ```
 
 Each instance is fully independent. Creating a bucket on port `4566` has no effect on port `8080`.
@@ -68,7 +68,7 @@ mildstack stop 4566
 Stopping preserves all data. Restart on the same port to pick up where you left off:
 
 ```bash
-mildstack serve 4566
+mildstack start 4566
 ```
 
 ### Delete an instance (remove data)
@@ -84,14 +84,14 @@ This permanently removes the instance and all of its stored resources.
 Use `--detach` (or `-d`) to start an instance in the background:
 
 ```bash
-mildstack serve 4566 --detach
+mildstack start 4566 --detach
 ```
 
 The command returns immediately after the instance is ready. This is useful for scripts and CI pipelines:
 
 ```bash
 # Start MildStack in the background, run tests, then stop
-mildstack serve 4566 --detach
+mildstack start 4566 --detach
 npm test
 mildstack stop 4566
 ```

@@ -11,7 +11,7 @@ The MildStack CLI lets you control your local AWS environment directly from the 
 
 | Command | Description |
 | --- | --- |
-| `mildstack serve` | Start a new local instance |
+| `mildstack start` | Start a new local instance |
 | `mildstack instances` | List all known instances |
 | `mildstack status` | Show the status of a running instance |
 | `mildstack stop` | Stop a running instance |
@@ -21,16 +21,16 @@ The MildStack CLI lets you control your local AWS environment directly from the 
 
 ```bash
 # Start on the default port (4566)
-mildstack serve
+mildstack start
 
 # Start on a specific port
-mildstack serve 8080
+mildstack start 8080
 
 # Start in the background
-mildstack serve --detach
+mildstack start --detach
 ```
 
-When you run `mildstack serve`, the runtime starts an AWS-compatible API server on the specified port. All three services (S3, DynamoDB, SQS) are available immediately.
+When you run `mildstack start`, the runtime starts an AWS-compatible API server on the specified port. All three services (S3, DynamoDB, SQS) are available immediately.
 
 <Callout type="info">
   If port `4566` is already in use, MildStack will automatically try the next available port.

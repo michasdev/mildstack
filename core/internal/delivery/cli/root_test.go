@@ -12,7 +12,7 @@ func TestNewRootCommandRegistersSubcommandsInFixedOrder(t *testing.T) {
 	t.Helper()
 
 	cmd := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{}, Commands{
-		Serve:     &cobra.Command{Use: "serve"},
+		Serve:     &cobra.Command{Use: "start"},
 		Instances: &cobra.Command{Use: "instances"},
 		Stop:      &cobra.Command{Use: "stop"},
 		Delete:    &cobra.Command{Use: "delete"},
@@ -27,7 +27,7 @@ func TestNewRootCommandRegistersSubcommandsInFixedOrder(t *testing.T) {
 		t.Fatalf("expected 4 subcommands, got %d", len(subcommands))
 	}
 
-	for i, want := range []string{"serve", "instances", "stop", "delete"} {
+	for i, want := range []string{"start", "instances", "stop", "delete"} {
 		if got := subcommands[i].Use; got != want {
 			t.Fatalf("unexpected subcommand at %d: got %q want %q", i, got, want)
 		}
@@ -52,7 +52,7 @@ func TestNewRootCommandRegistersStatusAlias(t *testing.T) {
 	t.Helper()
 
 	cmd := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{}, Commands{
-		Serve:     &cobra.Command{Use: "serve"},
+		Serve:     &cobra.Command{Use: "start"},
 		Instances: &cobra.Command{Use: "instances"},
 		Stop:      &cobra.Command{Use: "stop"},
 		Delete:    &cobra.Command{Use: "delete"},
