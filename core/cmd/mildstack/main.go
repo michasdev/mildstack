@@ -22,7 +22,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	// Manager starts with no services; services are wired per-serve call once
+	// Manager starts with no services; services are wired per-start call once
 	// the port (and therefore the instanceId) is known.
 	manager := runtime.NewWithPorts(nil, activePorts)
 
@@ -46,6 +46,9 @@ func main() {
 			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port, instanceID: instanceID}
 		}
 		if err := registerNativeSQSRoutes(router, root.Services); err != nil {
+			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port, instanceID: instanceID}
+		}
+		if err := registerNativeSNSRoutes(router, root.Services); err != nil {
 			return recordingHTTPServer{server: failedHTTPServer{err: err}, storage: storage, port: port, instanceID: instanceID}
 		}
 		registrar := instanceRegistrar{manager: manager, storage: storage, instanceID: instanceID}
@@ -196,6 +199,27 @@ func registerNativeSQSRoutes(router *deliveryhttp.Router, services []orchestrato
 			return fmt.Errorf("sqs service does not expose the native http surface")
 		}
 		deliveryhttp.RegisterSQSNativeRoutes(router.Engine(), sqsService)
+		return nil
+	}
+
+	return nil
+}
+
+func registerNativeSNSRoutes(router *deliveryhttp.Router, services []orchestrator.Service) error {
+	if router == nil {
+		return nil
+	}
+
+	for _, service := range services {
+		if service == nil || service.Metadata().Name != "sns" {
+			continue
+		}
+
+		snsService, ok := service.(deliveryhttp.SNSNativeService)
+		if !ok {
+			return fmt.Errorf("sns service does not expose the native http surface")
+		}
+		deliveryhttp.RegisterSNSNativeRoutes(router.Engine(), snsService)
 		return nil
 	}
 

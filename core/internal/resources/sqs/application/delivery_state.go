@@ -99,10 +99,11 @@ func IsDeadLetterEligible(message domain.Message, queue domain.Queue, now time.T
 	if trimName(message.DeadLetterQueue) != "" {
 		return false
 	}
-	if !CanRedeliver(message, queue, now) {
+	threshold := deadLetterThreshold(queue)
+	if threshold <= 0 || message.Recovery.Attempts < threshold {
 		return false
 	}
-	return deadLetterThreshold(queue) > 0 && message.Recovery.Attempts >= deadLetterThreshold(queue)
+	return CanRedeliver(message, queue, now) || IsVisible(message, queue, now)
 }
 
 func leaseDeadline(message domain.Message, queue domain.Queue) time.Time {

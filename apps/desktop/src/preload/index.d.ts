@@ -86,6 +86,87 @@ interface SQSBrowserApi {
   deleteMessage(queueUrl: string, receiptHandle: string, region?: string): Promise<void>
 }
 
+interface SNSBrowserApi {
+  listTopics(region?: string): Promise<any[]>
+  createTopic(name: string, attributes?: Record<string, string>, region?: string): Promise<string>
+  deleteTopic(topicArn: string, region?: string): Promise<void>
+  getTopicAttributes(topicArn: string, region?: string): Promise<Record<string, string>>
+  setTopicAttribute(topicArn: string, attributeName: string, attributeValue: string, region?: string): Promise<void>
+  listSubscriptions(region?: string): Promise<any[]>
+  listSubscriptionsByTopic(topicArn: string, region?: string): Promise<any[]>
+  subscribe(
+    topicArn: string,
+    protocol: string,
+    endpoint: string,
+    attributes?: Record<string, string>,
+    returnSubscriptionArn?: boolean,
+    region?: string
+  ): Promise<string>
+  confirmSubscription(topicArn: string, token: string, region?: string): Promise<string>
+  unsubscribe(subscriptionArn: string, region?: string): Promise<void>
+  getSubscriptionAttributes(subscriptionArn: string, region?: string): Promise<Record<string, string>>
+  setSubscriptionAttribute(subscriptionArn: string, attributeName: string, attributeValue: string, region?: string): Promise<void>
+  publish(
+    topicArn?: string,
+    targetArn?: string,
+    phoneNumber?: string,
+    message?: string,
+    subject?: string,
+    messageStructure?: string,
+    messageAttributes?: Record<string, any>,
+    messageGroupId?: string,
+    messageDeduplicationId?: string,
+    region?: string
+  ): Promise<string>
+  publishBatch(
+    topicArn: string,
+    entries: Array<{
+      Id: string
+      Message: string
+      Subject?: string
+      MessageStructure?: string
+      MessageAttributes?: Record<string, any>
+      MessageGroupId?: string
+      MessageDeduplicationId?: string
+    }>,
+    region?: string
+  ): Promise<{ Successful: any[]; Failed: any[] }>
+  addPermission(topicArn: string, label: string, awsAccountIDs: string[], actionNames: string[], region?: string): Promise<void>
+  removePermission(topicArn: string, label: string, region?: string): Promise<void>
+  tagResource(resourceArn: string, tags: Record<string, string>, region?: string): Promise<void>
+  untagResource(resourceArn: string, tagKeys: string[], region?: string): Promise<void>
+  listTagsForResource(resourceArn: string, region?: string): Promise<any[]>
+  getDataProtectionPolicy(resourceArn: string, region?: string): Promise<string>
+  putDataProtectionPolicy(resourceArn: string, policyDocument: string, region?: string): Promise<void>
+  listPlatformApplications(region?: string): Promise<any[]>
+  createPlatformApplication(name: string, platform: string, attributes?: Record<string, string>, region?: string): Promise<string>
+  deletePlatformApplication(platformApplicationArn: string, region?: string): Promise<void>
+  getPlatformApplicationAttributes(platformApplicationArn: string, region?: string): Promise<Record<string, string>>
+  setPlatformApplicationAttributes(platformApplicationArn: string, attributes: Record<string, string>, region?: string): Promise<void>
+  createPlatformEndpoint(
+    platformApplicationArn: string,
+    token: string,
+    customUserData?: string,
+    attributes?: Record<string, string>,
+    region?: string
+  ): Promise<string>
+  deleteEndpoint(endpointArn: string, region?: string): Promise<void>
+  getEndpointAttributes(endpointArn: string, region?: string): Promise<Record<string, string>>
+  setEndpointAttributes(endpointArn: string, attributes: Record<string, string>, region?: string): Promise<void>
+  listEndpointsByPlatformApplication(platformApplicationArn: string, region?: string): Promise<any[]>
+  setSMSAttributes(attributes: Record<string, string>, region?: string): Promise<void>
+  getSMSAttributes(attributeNames?: string[], region?: string): Promise<Record<string, string>>
+  checkIfPhoneNumberIsOptedOut(phoneNumber: string, region?: string): Promise<boolean>
+  optInPhoneNumber(phoneNumber: string, region?: string): Promise<void>
+  listPhoneNumbersOptedOut(region?: string): Promise<any[]>
+  listOriginationNumbers(region?: string): Promise<any[]>
+  getSMSSandboxAccountStatus(region?: string): Promise<boolean>
+  createSMSSandboxPhoneNumber(phoneNumber: string, languageCode: string, region?: string): Promise<void>
+  verifySMSSandboxPhoneNumber(phoneNumber: string, oneTimePassword: string, region?: string): Promise<void>
+  deleteSMSSandboxPhoneNumber(phoneNumber: string, region?: string): Promise<void>
+  listSMSSandboxPhoneNumbers(region?: string): Promise<any[]>
+}
+
 interface InstanceApi {
   setSelected(port: number): Promise<void>
 }
@@ -111,7 +192,7 @@ interface MildStackInstancesResponse {
 
 interface MildStackApi {
   instances(): Promise<MildStackInstancesResponse>
-  serve(port: number): Promise<{ success: boolean; error?: string }>
+  start(port: number): Promise<{ success: boolean; error?: string }>
   stop(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
   delete(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
   validateInstance(): Promise<{ valid: boolean; error?: string }>
@@ -124,6 +205,7 @@ declare global {
       s3: S3BrowserApi
       dynamodb: DynamoDBBrowserApi
       sqs: SQSBrowserApi
+      sns: SNSBrowserApi
       instance: InstanceApi
       mildstack: MildStackApi
     }

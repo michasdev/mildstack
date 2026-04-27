@@ -1,0 +1,7 @@
+{
+  "title": "MildStack CLI",
+  "pages": [
+    "instances",
+    "aws-local"
+  ]
+}

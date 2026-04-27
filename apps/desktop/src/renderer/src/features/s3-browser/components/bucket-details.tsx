@@ -24,7 +24,7 @@ export function BucketDetails() {
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold">{bucketName}</h2>
-            <Badge variant="outline" size="sm">
+            <Badge variant="outline">
               Bucket details
             </Badge>
           </div>

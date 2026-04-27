@@ -11,6 +11,8 @@ import { TableDetails } from '@renderer/features/dynamodb-browser/components/tab
 import { SQSLayout } from '@renderer/features/sqs-browser/sqs-layout'
 import { QueuesList } from '@renderer/features/sqs-browser/components/queues-list'
 import { QueueDetails } from '@renderer/features/sqs-browser/components/queue-details'
+import { SNSLayout } from '@renderer/features/sns-browser/sns-layout'
+import { SNSBrowser } from '@renderer/features/sns-browser/sns-browser'
 
 export const router = createHashRouter([
   {
@@ -40,6 +42,14 @@ export const router = createHashRouter([
         children: [
           { index: true, element: <QueuesList /> },
           { path: ':queueName/*', element: <QueueDetails /> }
+        ]
+      },
+      {
+        path: '/resources/sns',
+        element: <SNSLayout />,
+        children: [
+          { index: true, element: <SNSBrowser /> },
+          { path: ':topicName/*', element: <SNSBrowser /> }
         ]
       },
       { path: '*', element: <NotFoundPage /> },

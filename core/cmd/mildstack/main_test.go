@@ -69,7 +69,7 @@ func TestRegisterServiceRoutesRegistersS3BeforeServing(t *testing.T) {
 func TestRegisterNativeS3RoutesExposesAwsCompatibleSmokeSurface(t *testing.T) {
 	t.Helper()
 
-	root := composition.DefaultRoot("test-instance")
+	root := composition.DefaultRoot(fmt.Sprintf("test-instance-smoke-%d", time.Now().UnixNano()))
 	manager := runtime.New(root.Services)
 	router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
 
@@ -87,8 +87,8 @@ func TestRegisterNativeS3RoutesExposesAwsCompatibleSmokeSurface(t *testing.T) {
 	if !strings.Contains(recorder.Body.String(), "ListAllMyBucketsResult") {
 		t.Fatalf("expected list buckets XML, got %q", recorder.Body.String())
 	}
-	if !strings.Contains(recorder.Body.String(), "mildstack-assets") {
-		t.Fatalf("expected seeded bucket in list buckets response, got %q", recorder.Body.String())
+	if !strings.Contains(recorder.Body.String(), "<Buckets>") {
+		t.Fatalf("expected buckets container in list buckets response, got %q", recorder.Body.String())
 	}
 
 	createRecorder := httptest.NewRecorder()
@@ -184,7 +184,7 @@ func TestRegisterNativeDynamoDBRoutesExposesAwsCompatibleSmokeSurface(t *testing
 	if createOut.TableDescription == nil {
 		t.Fatal("expected create table response to include table description")
 	}
-	if got, want := string(createOut.TableDescription.TableStatus), string(types.TableStatusCreating); got != want {
+	if got, want := string(createOut.TableDescription.TableStatus), string(types.TableStatusActive); got != want {
 		t.Fatalf("unexpected create status: got %q want %q", got, want)
 	}
 	if createOut.TableDescription.CreationDateTime == nil || createOut.TableDescription.CreationDateTime.IsZero() {
@@ -570,7 +570,7 @@ func TestRegisterNativeDynamoDBRoutesExposesAwsCompatibleSmokeSurface(t *testing
 		}
 		listed = append(listed, page.TableNames...)
 	}
-	if got, want := listed, []string{"mildstack-records", batchTableName, readTableName, tableName}; !equalStringSlices(got, want) {
+	if got, want := listed, []string{batchTableName, readTableName, tableName}; !equalStringSlices(got, want) {
 		t.Fatalf("unexpected paginated table list: got %v want %v", got, want)
 	}
 
@@ -608,7 +608,7 @@ func TestInstanceRegistrarPersistsAndReleasesActiveInstance(t *testing.T) {
 	registrar := instanceRegistrar{manager: manager, storage: storage}
 
 	if err := registrar.Serve(context.Background(), 9090); err != nil {
-		t.Fatalf("serve: %v", err)
+		t.Fatalf("start: %v", err)
 	}
 
 	ports, err := storage.LoadActivePorts()
@@ -664,7 +664,7 @@ func TestInstanceRegistrarServeSkipsDuplicateLoadedPort(t *testing.T) {
 	registrar := instanceRegistrar{manager: manager, storage: storage}
 
 	if err := registrar.Serve(context.Background(), 9090); err != nil {
-		t.Fatalf("serve: %v", err)
+		t.Fatalf("start: %v", err)
 	}
 
 	ports, err := storage.LoadActivePorts()
@@ -692,7 +692,7 @@ func TestInstanceRegistrarServeSkipsDuplicateLoadedPort(t *testing.T) {
 func TestRegisterNativeSQSRoutesExposesAwsCompatibleSmokeSurface(t *testing.T) {
 	t.Helper()
 
-	root := composition.DefaultRoot("test-instance")
+	root := composition.DefaultRoot(fmt.Sprintf("test-instance-smoke-%d", time.Now().UnixNano()))
 	manager := runtime.New(root.Services)
 	router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
 
@@ -744,6 +744,28 @@ func TestRegisterNativeSQSRoutesExposesAwsCompatibleSmokeSurface(t *testing.T) {
 	}
 }
 
+func TestRegisterNativeSNSRoutesExposesQueryValidationSurface(t *testing.T) {
+	t.Helper()
+
+	root := composition.DefaultRoot(fmt.Sprintf("test-instance-smoke-%d", time.Now().UnixNano()))
+	manager := runtime.New(root.Services)
+	router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
+
+	if err := registerNativeSNSRoutes(router, root.Services); err != nil {
+		t.Fatalf("register native sns routes: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/?Action=CreateTopic", nil)
+	router.Engine().ServeHTTP(recorder, request)
+
+	if got, want := recorder.Code, http.StatusBadRequest; got != want {
+		t.Fatalf("unexpected sns validation status: got %d want %d", got, want)
+	}
+	if !strings.Contains(recorder.Body.String(), "MissingParameter") {
+		t.Fatalf("expected sns missing version error, got %q", recorder.Body.String())
+	}
+}
 
 func newDynamoDBSmokeClient(t *testing.T, endpoint string) *dynamodb.Client {
 	t.Helper()

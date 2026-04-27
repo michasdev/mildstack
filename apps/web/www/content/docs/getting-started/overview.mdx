@@ -1,0 +1,91 @@
+---
+title: Overview
+description: |
+  MildStack is a lightweight, open-source, local-first AWS emulator. No Docker required.
+  Start emulating S3, DynamoDB, and SQS in under 200ms.
+---
+
+## What is MildStack?
+
+MildStack is a high-performance, local-first AWS emulator designed to streamline your cloud development workflow. Unlike heavyweight alternatives that require Docker and significant system resources, MildStack is built in **Go** for maximum efficiency and speed.
+
+Stop waiting for containers to spin up. Start building instantly with a local cloud that runs natively on your machine.
+
+<Callout title="Fast by default">
+  No Docker required. The MildStack runtime starts in approximately **200ms** and uses minimal CPU and RAM.
+</Callout>
+
+## Why MildStack?
+
+| Feature | MildStack | LocalStack (Free) |
+| --- | --- | --- |
+| **Startup time** | ~200ms | 30–60s |
+| **Docker required** | No | Yes |
+| **Memory usage** | ~20 MB | ~500 MB+ |
+| **Desktop GUI** | ✅ Built-in | ❌ |
+| **S3, DynamoDB, SQS** | ✅ | ✅ |
+| **Cost** | Free & Open Source | Free (limited) |
+
+## The Ecosystem
+
+MildStack is organized into three parts that work together:
+
+<Cards>
+  <Card title="Core Runtime" href="/docs/mildstack/services">
+    The Go engine that emulates AWS-compatible APIs with instance-scoped persistent state.
+  </Card>
+  <Card title="MildStack CLI" href="/docs/mildstack/mildstack-cli">
+    A modern terminal-based control center to manage local instances, view logs, and monitor services.
+  </Card>
+  <Card title="Desktop App" href="/docs/mildstack/mildstack-desktop">
+    An Electron-powered visual console to browse S3 buckets, query DynamoDB tables, and inspect SQS queues.
+  </Card>
+</Cards>
+
+## Supported Services
+
+MildStack currently focuses on the services that matter most in local development:
+
+| Service | Status | Highlights |
+| --- | --- | --- |
+| **Amazon S3** | ✅ Active | Buckets, objects, multipart uploads, versioning, object lock, tagging, ACLs |
+| **Amazon DynamoDB** | ✅ Active | Tables, items, GSI/LSI, query/scan, batch and transaction operations |
+| **Amazon SQS** | ✅ Active | Standard and FIFO queues, DLQ redrive, message move tasks, visibility timeout |
+
+### Coming Soon
+
+- **Amazon SNS** — Topic publishing and subscriptions
+- **AWS Lambda** — Local serverless function execution
+- **Amazon EventBridge** — Event-driven architecture simulation
+
+## How It Works
+
+The architecture is intentionally simple:
+
+1. The **Core Runtime** owns all AWS emulation logic and persistent state.
+2. The **CLI** and **Desktop App** communicate with the runtime over HTTP — they never embed emulation logic.
+3. Your application connects to the local endpoint using standard **AWS SDKs** — just change the endpoint URL.
+
+```
+┌─────────────┐     ┌──────────────┐     ┌───────────────────┐
+│  Your App   │────▶│  MildStack   │────▶│  Instance State   │
+│  (AWS SDK)  │     │  Core (Go)   │     │  (~/.mildstack/)  │
+└─────────────┘     └──────────────┘     └───────────────────┘
+       ▲                    ▲
+       │                    │
+┌──────┴──────┐     ┌──────┴──────┐
+│  Desktop    │     │    CLI      │
+│  App        │     │             │
+└─────────────┘     └─────────────┘
+```
+
+## Next Steps
+
+<Cards>
+  <Card title="Installation" href="/docs/getting-started/installation">
+    Set up MildStack on macOS, Windows, or Linux.
+  </Card>
+  <Card title="Quick Start" href="/docs/getting-started/quick-start">
+    Get your first local AWS environment running in under a minute.
+  </Card>
+</Cards>

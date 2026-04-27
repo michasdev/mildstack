@@ -23,9 +23,9 @@
 
 ### CLI
 
-- Root command and subcommands (`serve`, `instances`, `status`, `stop`, `delete`)
+- Root command and subcommands (`start`, `instances`, `status`, `stop`, `delete`)
 - Storage abstraction for active/saved instance records
-- Detached serve launcher and readiness signaling
+- Detached start launcher and readiness signaling
 
 ## Service Components
 

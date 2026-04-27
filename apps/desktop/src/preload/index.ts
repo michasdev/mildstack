@@ -88,6 +88,87 @@ interface SQSBrowserApi {
   deleteMessage(queueUrl: string, receiptHandle: string, region?: string): Promise<void>
 }
 
+interface SNSBrowserApi {
+  listTopics(region?: string): Promise<any[]>
+  createTopic(name: string, attributes?: Record<string, string>, region?: string): Promise<string>
+  deleteTopic(topicArn: string, region?: string): Promise<void>
+  getTopicAttributes(topicArn: string, region?: string): Promise<Record<string, string>>
+  setTopicAttribute(topicArn: string, attributeName: string, attributeValue: string, region?: string): Promise<void>
+  listSubscriptions(region?: string): Promise<any[]>
+  listSubscriptionsByTopic(topicArn: string, region?: string): Promise<any[]>
+  subscribe(
+    topicArn: string,
+    protocol: string,
+    endpoint: string,
+    attributes?: Record<string, string>,
+    returnSubscriptionArn?: boolean,
+    region?: string
+  ): Promise<string>
+  confirmSubscription(topicArn: string, token: string, region?: string): Promise<string>
+  unsubscribe(subscriptionArn: string, region?: string): Promise<void>
+  getSubscriptionAttributes(subscriptionArn: string, region?: string): Promise<Record<string, string>>
+  setSubscriptionAttribute(subscriptionArn: string, attributeName: string, attributeValue: string, region?: string): Promise<void>
+  publish(
+    topicArn?: string,
+    targetArn?: string,
+    phoneNumber?: string,
+    message?: string,
+    subject?: string,
+    messageStructure?: string,
+    messageAttributes?: Record<string, any>,
+    messageGroupId?: string,
+    messageDeduplicationId?: string,
+    region?: string
+  ): Promise<string>
+  publishBatch(
+    topicArn: string,
+    entries: Array<{
+      Id: string
+      Message: string
+      Subject?: string
+      MessageStructure?: string
+      MessageAttributes?: Record<string, any>
+      MessageGroupId?: string
+      MessageDeduplicationId?: string
+    }>,
+    region?: string
+  ): Promise<{ Successful: any[]; Failed: any[] }>
+  addPermission(topicArn: string, label: string, awsAccountIDs: string[], actionNames: string[], region?: string): Promise<void>
+  removePermission(topicArn: string, label: string, region?: string): Promise<void>
+  tagResource(resourceArn: string, tags: Record<string, string>, region?: string): Promise<void>
+  untagResource(resourceArn: string, tagKeys: string[], region?: string): Promise<void>
+  listTagsForResource(resourceArn: string, region?: string): Promise<any[]>
+  getDataProtectionPolicy(resourceArn: string, region?: string): Promise<string>
+  putDataProtectionPolicy(resourceArn: string, policyDocument: string, region?: string): Promise<void>
+  listPlatformApplications(region?: string): Promise<any[]>
+  createPlatformApplication(name: string, platform: string, attributes?: Record<string, string>, region?: string): Promise<string>
+  deletePlatformApplication(platformApplicationArn: string, region?: string): Promise<void>
+  getPlatformApplicationAttributes(platformApplicationArn: string, region?: string): Promise<Record<string, string>>
+  setPlatformApplicationAttributes(platformApplicationArn: string, attributes: Record<string, string>, region?: string): Promise<void>
+  createPlatformEndpoint(
+    platformApplicationArn: string,
+    token: string,
+    customUserData?: string,
+    attributes?: Record<string, string>,
+    region?: string
+  ): Promise<string>
+  deleteEndpoint(endpointArn: string, region?: string): Promise<void>
+  getEndpointAttributes(endpointArn: string, region?: string): Promise<Record<string, string>>
+  setEndpointAttributes(endpointArn: string, attributes: Record<string, string>, region?: string): Promise<void>
+  listEndpointsByPlatformApplication(platformApplicationArn: string, region?: string): Promise<any[]>
+  setSMSAttributes(attributes: Record<string, string>, region?: string): Promise<void>
+  getSMSAttributes(attributeNames?: string[], region?: string): Promise<Record<string, string>>
+  checkIfPhoneNumberIsOptedOut(phoneNumber: string, region?: string): Promise<boolean>
+  optInPhoneNumber(phoneNumber: string, region?: string): Promise<void>
+  listPhoneNumbersOptedOut(region?: string): Promise<any[]>
+  listOriginationNumbers(region?: string): Promise<any[]>
+  getSMSSandboxAccountStatus(region?: string): Promise<boolean>
+  createSMSSandboxPhoneNumber(phoneNumber: string, languageCode: string, region?: string): Promise<void>
+  verifySMSSandboxPhoneNumber(phoneNumber: string, oneTimePassword: string, region?: string): Promise<void>
+  deleteSMSSandboxPhoneNumber(phoneNumber: string, region?: string): Promise<void>
+  listSMSSandboxPhoneNumbers(region?: string): Promise<any[]>
+}
+
 interface InstanceApi {
   setSelected(port: number): Promise<void>
 }
@@ -113,14 +194,14 @@ interface MildStackInstancesResponse {
 
 interface MildStackApi {
   instances(): Promise<MildStackInstancesResponse>
-  serve(port: number): Promise<{ success: boolean; error?: string }>
+  start(port: number): Promise<{ success: boolean; error?: string }>
   stop(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
   delete(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
   validateInstance(): Promise<{ valid: boolean; error?: string }>
 }
 
 // Custom APIs for renderer
-const api: { s3: S3BrowserApi; dynamodb: DynamoDBBrowserApi; sqs: SQSBrowserApi; instance: InstanceApi; mildstack: MildStackApi } = {
+const api: { s3: S3BrowserApi; dynamodb: DynamoDBBrowserApi; sqs: SQSBrowserApi; sns: SNSBrowserApi; instance: InstanceApi; mildstack: MildStackApi } = {
   s3: {
     listBuckets: (region) => ipcRenderer.invoke('s3:listBuckets', { region }),
     createBucket: (name, region) => ipcRenderer.invoke('s3:createBucket', { name, region }),
@@ -163,12 +244,67 @@ const api: { s3: S3BrowserApi; dynamodb: DynamoDBBrowserApi; sqs: SQSBrowserApi;
       ipcRenderer.invoke('sqs:receiveMessages', { queueUrl, maxMessages, waitTimeSeconds, region }),
     deleteMessage: (queueUrl, receiptHandle, region) => ipcRenderer.invoke('sqs:deleteMessage', { queueUrl, receiptHandle, region })
   },
+  sns: {
+    listTopics: (region) => ipcRenderer.invoke('sns:listTopics', { region }),
+    createTopic: (name, attributes, region) => ipcRenderer.invoke('sns:createTopic', { name, attributes, region }),
+    deleteTopic: (topicArn, region) => ipcRenderer.invoke('sns:deleteTopic', { topicArn, region }),
+    getTopicAttributes: (topicArn, region) => ipcRenderer.invoke('sns:getTopicAttributes', { topicArn, region }),
+    setTopicAttribute: (topicArn, attributeName, attributeValue, region) =>
+      ipcRenderer.invoke('sns:setTopicAttribute', { topicArn, attributeName, attributeValue, region }),
+    listSubscriptions: (region) => ipcRenderer.invoke('sns:listSubscriptions', { region }),
+    listSubscriptionsByTopic: (topicArn, region) => ipcRenderer.invoke('sns:listSubscriptionsByTopic', { topicArn, region }),
+    subscribe: (topicArn, protocol, endpoint, attributes, returnSubscriptionArn, region) =>
+      ipcRenderer.invoke('sns:subscribe', { topicArn, protocol, endpoint, attributes, returnSubscriptionArn, region }),
+    confirmSubscription: (topicArn, token, region) => ipcRenderer.invoke('sns:confirmSubscription', { topicArn, token, region }),
+    unsubscribe: (subscriptionArn, region) => ipcRenderer.invoke('sns:unsubscribe', { subscriptionArn, region }),
+    getSubscriptionAttributes: (subscriptionArn, region) => ipcRenderer.invoke('sns:getSubscriptionAttributes', { subscriptionArn, region }),
+    setSubscriptionAttribute: (subscriptionArn, attributeName, attributeValue, region) =>
+      ipcRenderer.invoke('sns:setSubscriptionAttribute', { subscriptionArn, attributeName, attributeValue, region }),
+    publish: (topicArn, targetArn, phoneNumber, message, subject, messageStructure, messageAttributes, messageGroupId, messageDeduplicationId, region) =>
+      ipcRenderer.invoke('sns:publish', { topicArn, targetArn, phoneNumber, message, subject, messageStructure, messageAttributes, messageGroupId, messageDeduplicationId, region }),
+    publishBatch: (topicArn, entries, region) => ipcRenderer.invoke('sns:publishBatch', { topicArn, entries, region }),
+    addPermission: (topicArn, label, awsAccountIDs, actionNames, region) =>
+      ipcRenderer.invoke('sns:addPermission', { topicArn, label, awsAccountIDs, actionNames, region }),
+    removePermission: (topicArn, label, region) => ipcRenderer.invoke('sns:removePermission', { topicArn, label, region }),
+    tagResource: (resourceArn, tags, region) => ipcRenderer.invoke('sns:tagResource', { resourceArn, tags, region }),
+    untagResource: (resourceArn, tagKeys, region) => ipcRenderer.invoke('sns:untagResource', { resourceArn, tagKeys, region }),
+    listTagsForResource: (resourceArn, region) => ipcRenderer.invoke('sns:listTagsForResource', { resourceArn, region }),
+    getDataProtectionPolicy: (resourceArn, region) => ipcRenderer.invoke('sns:getDataProtectionPolicy', { resourceArn, region }),
+    putDataProtectionPolicy: (resourceArn, policyDocument, region) => ipcRenderer.invoke('sns:putDataProtectionPolicy', { resourceArn, policyDocument, region }),
+    listPlatformApplications: (region) => ipcRenderer.invoke('sns:listPlatformApplications', { region }),
+    createPlatformApplication: (name, platform, attributes, region) =>
+      ipcRenderer.invoke('sns:createPlatformApplication', { name, platform, attributes, region }),
+    deletePlatformApplication: (platformApplicationArn, region) => ipcRenderer.invoke('sns:deletePlatformApplication', { platformApplicationArn, region }),
+    getPlatformApplicationAttributes: (platformApplicationArn, region) => ipcRenderer.invoke('sns:getPlatformApplicationAttributes', { platformApplicationArn, region }),
+    setPlatformApplicationAttributes: (platformApplicationArn, attributes, region) =>
+      ipcRenderer.invoke('sns:setPlatformApplicationAttributes', { platformApplicationArn, attributes, region }),
+    createPlatformEndpoint: (platformApplicationArn, token, customUserData, attributes, region) =>
+      ipcRenderer.invoke('sns:createPlatformEndpoint', { platformApplicationArn, token, customUserData, attributes, region }),
+    deleteEndpoint: (endpointArn, region) => ipcRenderer.invoke('sns:deleteEndpoint', { endpointArn, region }),
+    getEndpointAttributes: (endpointArn, region) => ipcRenderer.invoke('sns:getEndpointAttributes', { endpointArn, region }),
+    setEndpointAttributes: (endpointArn, attributes, region) => ipcRenderer.invoke('sns:setEndpointAttributes', { endpointArn, attributes, region }),
+    listEndpointsByPlatformApplication: (platformApplicationArn, region) =>
+      ipcRenderer.invoke('sns:listEndpointsByPlatformApplication', { platformApplicationArn, region }),
+    setSMSAttributes: (attributes, region) => ipcRenderer.invoke('sns:setSMSAttributes', { attributes, region }),
+    getSMSAttributes: (attributeNames, region) => ipcRenderer.invoke('sns:getSMSAttributes', { attributeNames, region }),
+    checkIfPhoneNumberIsOptedOut: (phoneNumber, region) => ipcRenderer.invoke('sns:checkIfPhoneNumberIsOptedOut', { phoneNumber, region }),
+    optInPhoneNumber: (phoneNumber, region) => ipcRenderer.invoke('sns:optInPhoneNumber', { phoneNumber, region }),
+    listPhoneNumbersOptedOut: (region) => ipcRenderer.invoke('sns:listPhoneNumbersOptedOut', { region }),
+    listOriginationNumbers: (region) => ipcRenderer.invoke('sns:listOriginationNumbers', { region }),
+    getSMSSandboxAccountStatus: (region) => ipcRenderer.invoke('sns:getSMSSandboxAccountStatus', { region }),
+    createSMSSandboxPhoneNumber: (phoneNumber, languageCode, region) =>
+      ipcRenderer.invoke('sns:createSMSSandboxPhoneNumber', { phoneNumber, languageCode, region }),
+    verifySMSSandboxPhoneNumber: (phoneNumber, oneTimePassword, region) =>
+      ipcRenderer.invoke('sns:verifySMSSandboxPhoneNumber', { phoneNumber, oneTimePassword, region }),
+    deleteSMSSandboxPhoneNumber: (phoneNumber, region) => ipcRenderer.invoke('sns:deleteSMSSandboxPhoneNumber', { phoneNumber, region }),
+    listSMSSandboxPhoneNumbers: (region) => ipcRenderer.invoke('sns:listSMSSandboxPhoneNumbers', { region })
+  },
   instance: {
     setSelected: (port) => ipcRenderer.invoke('instance:setSelected', port)
   },
   mildstack: {
     instances: () => ipcRenderer.invoke('mildstack:instances'),
-    serve: (port) => ipcRenderer.invoke('mildstack:serve', port),
+    start: (port) => ipcRenderer.invoke('mildstack:start', port),
     stop: (port?, all?) => ipcRenderer.invoke('mildstack:stop', { port, all }),
     delete: (port?, all?) => ipcRenderer.invoke('mildstack:delete', { port, all }),
     validateInstance: () => ipcRenderer.invoke('mildstack:validateInstance')

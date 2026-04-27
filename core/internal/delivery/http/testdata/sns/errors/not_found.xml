@@ -1,0 +1,1 @@
+<ErrorResponse xmlns="https://sns.amazonaws.com/doc/2010-03-31/"><Error><Type>Sender</Type><Code>NotFound</Code><Message>The requested resource does not exist.</Message></Error><RequestId>mildstack-sns-request</RequestId></ErrorResponse>

@@ -1,10 +1,23 @@
+# generated AWS API reference docs (regenerate with docs/fetch-aws-api-docs.sh)
+docs/aws/
+
 node_modules
 dist
+build
 out
+*.out
+*.test
+*.exe
+vendor/
 .DS_Store
+Thumbs.db
 .eslintcache
 *.log*
+*.tmp
+*.swp
 tmp
+.vscode/
+.idea/
 pnpm-lock.yaml
 .planning/
 .planning/*
@@ -20,9 +33,8 @@ _bmad-output
 .claude/skills/bmad-*
 .AGENTS
 docs/project-scan-report.json
-
+.specify/
 AGENTS.md
-mildstack
 *.env*
 !.env.example
 **/resources/bin
@@ -30,3 +42,4 @@ mildstack
 .react-router
 .source
 apps/web/www/build
+specs/

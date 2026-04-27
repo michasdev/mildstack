@@ -83,14 +83,14 @@ export function registerMildStackIpcHandlers(): void {
         }
     })
 
-    ipcMain.handle('mildstack:serve', async (_event, port: number): Promise<{ success: boolean; error?: string }> => {
+    ipcMain.handle('mildstack:start', async (_event, port: number): Promise<{ success: boolean; error?: string }> => {
         try {
             // --d flag to detach (run in background)
-            await execAsync(`${mildStackExecutable} serve ${port} --d`)
+            await execAsync(`${mildStackExecutable} start ${port} --d`)
             return { success: true }
         } catch (err) {
             const error = parseCliError(err)
-            console.error('[MildStack IPC] serve error:', error)
+            console.error('[MildStack IPC] start error:', error)
             return { success: false, error }
         }
     })

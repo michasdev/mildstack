@@ -174,12 +174,29 @@ func TestS3NativeGetObjectReturnsStoredMetadataHeaders(t *testing.T) {
 	if got, want := getRecorder.Code, http.StatusOK; got != want {
 		t.Fatalf("unexpected get status: got %d want %d", got, want)
 	}
-	if got, want := getRecorder.Header().Get("x-amz-meta-custom-author"), "bot"; got != want {
+	if got, want := headerValueCaseInsensitive(getRecorder.Header(), "x-amz-meta-custom-author"), "bot"; got != want {
 		t.Fatalf("unexpected metadata header: got %q want %q", got, want)
 	}
 	if got, want := getRecorder.Body.String(), "hello"; got != want {
 		t.Fatalf("unexpected body: got %q want %q", got, want)
 	}
+}
+
+func headerValueCaseInsensitive(headers http.Header, key string) string {
+	if headers == nil {
+		return ""
+	}
+	lowerKey := strings.ToLower(strings.TrimSpace(key))
+	for headerKey, values := range headers {
+		if strings.ToLower(strings.TrimSpace(headerKey)) != lowerKey {
+			continue
+		}
+		if len(values) == 0 {
+			return ""
+		}
+		return values[0]
+	}
+	return ""
 }
 
 func TestS3NativeListObjectsV2AndDeleteObjectsReturnAWSXML(t *testing.T) {

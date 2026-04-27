@@ -221,3 +221,17 @@ func TestSQSNativeContractRejectsMissingActionAndBadVersion(t *testing.T) {
 		t.Fatalf("unexpected bad version result: got %v want %v", err, ErrSQSInvalidVersion)
 	}
 }
+
+func TestSQSNativeContractDoesNotOwnSNSRequests(t *testing.T) {
+	t.Helper()
+
+	snsRequest := httptest.NewRequest(http.MethodGet, "/?Action=CreateTopic&Version=2010-03-31", nil)
+	if _, err := ParseSQSRequest(snsRequest); err != ErrSQSNotOwned {
+		t.Fatalf("unexpected sns routing result: got %v want %v", err, ErrSQSNotOwned)
+	}
+
+	snsOverlappingActionRequest := httptest.NewRequest(http.MethodGet, "/?Action=AddPermission&Version=2010-03-31", nil)
+	if _, err := ParseSQSRequest(snsOverlappingActionRequest); err != ErrSQSNotOwned {
+		t.Fatalf("unexpected sns overlapping action result: got %v want %v", err, ErrSQSNotOwned)
+	}
+}

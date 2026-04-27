@@ -55,10 +55,10 @@ func TestManagerCopiesMetadataAndTracksMultiplePorts(t *testing.T) {
 	first.metadata.Tags[0] = "changed"
 
 	if err := manager.Serve(context.Background(), 8080); err != nil {
-		t.Fatalf("serve 8080: %v", err)
+		t.Fatalf("start 8080: %v", err)
 	}
 	if err := manager.Serve(context.Background(), 9090); err != nil {
-		t.Fatalf("serve 9090: %v", err)
+		t.Fatalf("start 9090: %v", err)
 	}
 
 	snapshot := manager.Snapshot(context.Background())
@@ -111,7 +111,7 @@ func TestManagerRejectsDuplicatePorts(t *testing.T) {
 	manager := New(nil)
 
 	if err := manager.Serve(context.Background(), 8080); err != nil {
-		t.Fatalf("serve 8080: %v", err)
+		t.Fatalf("start 8080: %v", err)
 	}
 	if err := manager.Serve(context.Background(), 8080); err == nil {
 		t.Fatal("expected duplicate port error")
@@ -141,7 +141,7 @@ func TestManagerInstanceCarriesInstanceID(t *testing.T) {
 	manager := New(nil)
 	manager.SetInstanceID("test-instance-abc")
 	if err := manager.Serve(context.Background(), 8080); err != nil {
-		t.Fatalf("serve 8080: %v", err)
+		t.Fatalf("start 8080: %v", err)
 	}
 
 	snapshot := manager.Snapshot(context.Background())

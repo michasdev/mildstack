@@ -19,6 +19,7 @@ import {
     Database, 
     Inbox, 
     Box,
+    Bell,
     SquircleDashed,
     Settings
 } from "lucide-react"
@@ -206,6 +207,16 @@ export function AppSidebar() {
                                 hoveredItem={hoveredItem}
                                 setHoveredItem={setHoveredItem}
                             />
+                            <NavItem 
+                                id="sns"
+                                icon={Bell}
+                                label="SNS"
+                                to="/resources/sns"
+                                isActive={location.pathname.startsWith('/resources/sns')}
+                                disabled={!isInstanceRunning}
+                                hoveredItem={hoveredItem}
+                                setHoveredItem={setHoveredItem}
+                            />
                         </SidebarMenu>
                     </SidebarGroupContent>
                 </SidebarGroup>
@@ -218,14 +229,6 @@ export function AppSidebar() {
                                 id="lambda"
                                 icon={SquircleDashed}
                                 label="Lambda"
-                                disabled={true}
-                                hoveredItem={hoveredItem}
-                                setHoveredItem={setHoveredItem}
-                            />
-                            <NavItem 
-                                id="sns"
-                                icon={SquircleDashed}
-                                label="SNS"
                                 disabled={true}
                                 hoveredItem={hoveredItem}
                                 setHoveredItem={setHoveredItem}

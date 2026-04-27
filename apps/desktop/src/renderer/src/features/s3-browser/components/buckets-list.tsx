@@ -213,8 +213,10 @@ export function BucketsList() {
                 </DialogClose>
                 <Button
                   onClick={handleCreateBucket}
-                  disabled={!newBucketName.trim()}
+                  disabled={isCreating}
                 >
+                  {isCreating && <Spinner className="h-4 w-4" />}
+                  {!isCreating && <Plus className="h-4 w-4" />}
                   Create
                 </Button>
               </DialogFooter>

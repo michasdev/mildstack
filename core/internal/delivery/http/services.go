@@ -8,7 +8,57 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/michasdev/mildstack/core/internal/application/orchestrator"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
+	"github.com/michasdev/mildstack/core/internal/resources/sns/domain"
 )
+
+// SNSNativeService describes the minimum SNS service contract required by
+// the native AWS Query/XML adapter lifecycle.
+type SNSNativeService interface {
+	Policy() orchestrator.EmulationPolicy
+	Metadata() orchestrator.Metadata
+	CreateTopic(name string, attributes map[string]string) (domain.Topic, error)
+	DeleteTopic(topicARN string) error
+	GetTopicAttributes(topicARN string) (map[string]string, error)
+	SetTopicAttributes(topicARN, attributeName, attributeValue string) (map[string]string, error)
+	ListTopics(nextToken string) ([]domain.Topic, string, error)
+	Subscribe(topicARN, protocol, endpoint string, attributes map[string]string, returnSubscriptionARN bool) (domain.SubscribeOutput, error)
+	ConfirmSubscription(topicARN, token string) (domain.Subscription, error)
+	Unsubscribe(subscriptionARN string) error
+	GetSubscriptionAttributes(subscriptionARN string) (map[string]string, error)
+	SetSubscriptionAttributes(subscriptionARN, attributeName, attributeValue string) (map[string]string, error)
+	ListSubscriptions(nextToken string) ([]domain.Subscription, string, error)
+	ListSubscriptionsByTopic(topicARN, nextToken string) ([]domain.Subscription, string, error)
+	Publish(request domain.PublishRequest) (domain.PublishResult, error)
+	PublishBatch(request domain.PublishBatchRequest) (domain.PublishBatchResult, error)
+	AddPermission(topicARN, label string, awsAccountIDs, actionNames []string) error
+	RemovePermission(topicARN, label string) error
+	TagResource(resourceARN string, tags map[string]string) error
+	UntagResource(resourceARN string, tagKeys []string) error
+	ListTagsForResource(resourceARN string) (map[string]string, error)
+	PutDataProtectionPolicy(resourceARN, policyDocument string) error
+	GetDataProtectionPolicy(resourceARN string) (string, error)
+	CreatePlatformApplication(name, platform string, attributes map[string]string) (domain.PlatformApplication, error)
+	DeletePlatformApplication(platformApplicationARN string) error
+	GetPlatformApplicationAttributes(platformApplicationARN string) (map[string]string, error)
+	SetPlatformApplicationAttributes(platformApplicationARN string, attributes map[string]string) (map[string]string, error)
+	ListPlatformApplications(nextToken string) ([]domain.PlatformApplication, string, error)
+	CreatePlatformEndpoint(platformApplicationARN, token, customUserData string, attributes map[string]string) (domain.PlatformEndpoint, error)
+	DeleteEndpoint(endpointARN string) error
+	GetEndpointAttributes(endpointARN string) (map[string]string, error)
+	SetEndpointAttributes(endpointARN string, attributes map[string]string) (map[string]string, error)
+	ListEndpointsByPlatformApplication(platformApplicationARN, nextToken string) ([]domain.PlatformEndpoint, string, error)
+	SetSMSAttributes(attributes map[string]string) error
+	GetSMSAttributes(attributeNames []string) (map[string]string, error)
+	CheckIfPhoneNumberIsOptedOut(phoneNumber string) (bool, error)
+	OptInPhoneNumber(phoneNumber string) error
+	ListPhoneNumbersOptedOut(nextToken string) ([]string, string, error)
+	ListOriginationNumbers(nextToken string) ([]string, string, error)
+	GetSMSSandboxAccountStatus() (bool, error)
+	CreateSMSSandboxPhoneNumber(phoneNumber, languageCode string) error
+	VerifySMSSandboxPhoneNumber(phoneNumber, oneTimePassword string) error
+	DeleteSMSSandboxPhoneNumber(phoneNumber string) error
+	ListSMSSandboxPhoneNumbers(nextToken string) ([]domain.SMSSandboxPhoneNumber, string, error)
+}
 
 type servicesHandler struct {
 	snapshotter Snapshotter

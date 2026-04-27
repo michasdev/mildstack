@@ -4,7 +4,6 @@ import {
     FrameDescription,
     FrameFooter,
     FrameHeader,
-    FramePanel,
     FrameTitle,
 } from "@/components/ui/frame";
 import { Badge } from "@renderer/components/ui/badge";
@@ -60,12 +59,6 @@ import {
     AlertDialogFooter,
     AlertDialogCancel,
 } from "@renderer/components/ui/alert-dialog";
-
-const statusBadgeVariant = {
-    running: "success",
-    not_started: "secondary",
-    errored: "error",
-} as const;
 
 const statusLabel = {
     running: "Running",

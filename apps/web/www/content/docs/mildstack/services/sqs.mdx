@@ -1,0 +1,180 @@
+---
+title: Amazon SQS
+description: |
+  MildStack provides SQS emulation with standard and FIFO queues,
+  dead-letter queues, message move tasks, and full message lifecycle support.
+---
+
+## Overview
+
+MildStack's SQS emulation lets you create queues, send and receive messages, and configure dead-letter queues locally. It supports both standard and FIFO queues, and is fully compatible with the AWS SQS API.
+
+## Supported Operations
+
+### Queue Lifecycle
+
+| Operation | Description |
+| --- | --- |
+| `CreateQueue` | Create a new standard or FIFO queue |
+| `DeleteQueue` | Delete a queue and all its messages |
+| `GetQueueUrl` | Get the URL of a queue by name |
+| `ListQueues` | List all queues |
+| `PurgeQueue` | Delete all messages in a queue |
+| `GetQueueAttributes` | Get queue configuration (visibility timeout, DLQ, etc.) |
+| `SetQueueAttributes` | Update queue configuration |
+
+### Message Operations
+
+| Operation | Description |
+| --- | --- |
+| `SendMessage` | Send a single message to a queue |
+| `SendMessageBatch` | Send up to 10 messages in a single request |
+| `ReceiveMessage` | Receive one or more messages from a queue |
+| `DeleteMessage` | Delete a processed message |
+| `DeleteMessageBatch` | Delete multiple messages at once |
+| `ChangeMessageVisibility` | Extend or shorten the visibility timeout of a message |
+| `ChangeMessageVisibilityBatch` | Update visibility for multiple messages |
+
+### Queue Tags & Permissions
+
+| Operation | Description |
+| --- | --- |
+| `TagQueue` | Add tags to a queue |
+| `UntagQueue` | Remove tags from a queue |
+| `ListQueueTags` | List all tags on a queue |
+| `AddPermission` | Add a permission to a queue policy |
+| `RemovePermission` | Remove a permission from a queue policy |
+
+### Dead-Letter Queue (DLQ) & Redrive
+
+| Operation | Description |
+| --- | --- |
+| `ListDeadLetterSourceQueues` | List queues that use a specific DLQ |
+| `StartMessageMoveTask` | Start moving messages from a DLQ back to the source queue |
+| `CancelMessageMoveTask` | Cancel a running message move task |
+| `ListMessageMoveTasks` | List active and completed move tasks |
+
+## Quick Example
+
+```ts
+import {
+  SQSClient,
+  CreateQueueCommand,
+  SendMessageCommand,
+  ReceiveMessageCommand,
+  DeleteMessageCommand,
+} from "@aws-sdk/client-sqs";
+
+const sqs = new SQSClient({
+  region: "us-east-1",
+  endpoint: "http://localhost:4566",
+  credentials: { accessKeyId: "test", secretAccessKey: "test" },
+});
+
+// Create a queue
+const { QueueUrl } = await sqs.send(
+  new CreateQueueCommand({ QueueName: "tasks" })
+);
+
+// Send a message
+await sqs.send(
+  new SendMessageCommand({
+    QueueUrl,
+    MessageBody: JSON.stringify({
+      action: "process-image",
+      imageId: "img-456",
+    }),
+  })
+);
+
+// Receive messages
+const { Messages } = await sqs.send(
+  new ReceiveMessageCommand({
+    QueueUrl,
+    MaxNumberOfMessages: 10,
+    WaitTimeSeconds: 5,
+  })
+);
+
+// Process and delete
+if (Messages) {
+  for (const message of Messages) {
+    console.log("Received:", message.Body);
+    await sqs.send(
+      new DeleteMessageCommand({
+        QueueUrl,
+        ReceiptHandle: message.ReceiptHandle,
+      })
+    );
+  }
+}
+```
+
+## Dead-Letter Queue Example
+
+Configure a DLQ to capture messages that fail processing:
+
+```ts
+// Create the DLQ
+const { QueueUrl: dlqUrl } = await sqs.send(
+  new CreateQueueCommand({ QueueName: "tasks-dlq" })
+);
+
+// Get the DLQ ARN
+const { Attributes } = await sqs.send(
+  new GetQueueAttributesCommand({
+    QueueUrl: dlqUrl,
+    AttributeNames: ["QueueArn"],
+  })
+);
+
+// Create the main queue with redrive policy
+await sqs.send(
+  new CreateQueueCommand({
+    QueueName: "tasks",
+    Attributes: {
+      RedrivePolicy: JSON.stringify({
+        deadLetterTargetArn: Attributes.QueueArn,
+        maxReceiveCount: "3",
+      }),
+    },
+  })
+);
+```
+
+After a message has been received 3 times without being deleted, it's automatically moved to the DLQ.
+
+## FIFO Queue Example
+
+FIFO queues guarantee ordered, exactly-once delivery:
+
+```bash
+# Create a FIFO queue
+awslocal sqs create-queue \
+  --queue-name orders.fifo \
+  --attributes FifoQueue=true,ContentBasedDeduplication=true
+
+# Send a message with a group ID
+awslocal sqs send-message \
+  --queue-url http://localhost:4566/000000000000/orders.fifo \
+  --message-body '{"orderId": "order-789"}' \
+  --message-group-id "customer-123"
+```
+
+<Callout type="info">
+  FIFO queue names must end with `.fifo`. Messages within the same message group are delivered in order.
+</Callout>
+
+## Queue URL Format
+
+MildStack uses the following URL format for queues:
+
+```
+http://localhost:4566/000000000000/<queue-name>
+```
+
+The account ID `000000000000` is a default placeholder used for local development.
+
+## Persistence
+
+All SQS data (queues, messages, DLQ configuration) is stored locally and persists across instance restarts. Deleting an instance removes all its SQS data.

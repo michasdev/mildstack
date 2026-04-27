@@ -41,8 +41,8 @@ func TestDynamoDBTargetRegistryDistinguishesSupportedAndUnsupportedOperations(t 
 
 	if spec, ok := handler.registry["UpdateTable"]; !ok {
 		t.Fatal("expected target UpdateTable to be registered")
-	} else if spec.supported {
-		t.Fatal("expected target UpdateTable to remain unsupported")
+	} else if !spec.supported {
+		t.Fatal("expected target UpdateTable to be supported")
 	}
 }
 
@@ -89,7 +89,7 @@ func TestDynamoDBNativeRoutesHandleSupportedLocalSubset(t *testing.T) {
 	if got, want := createTableResponse.TableDescription.TableName, "mildstack-archive"; got != want {
 		t.Fatalf("unexpected created table name: got %q want %q", got, want)
 	}
-	if got, want := createTableResponse.TableDescription.TableStatus, "CREATING"; got != want {
+	if got, want := createTableResponse.TableDescription.TableStatus, "ACTIVE"; got != want {
 		t.Fatalf("unexpected table status: got %q want %q", got, want)
 	}
 	if got, want := createTableResponse.TableDescription.TableArn, awscontext.Default().DynamoDBTableARN("mildstack-archive"); got != want {
@@ -110,7 +110,7 @@ func TestDynamoDBNativeRoutesHandleSupportedLocalSubset(t *testing.T) {
 	}
 	var describeTableResponse describeTableResponse
 	decodeResponse(t, describeTable.body, &describeTableResponse)
-	if got, want := describeTableResponse.Table.TableStatus, "CREATING"; got != want {
+	if got, want := describeTableResponse.Table.TableStatus, "ACTIVE"; got != want {
 		t.Fatalf("unexpected creating table status: got %q want %q", got, want)
 	}
 	if got, want := describeTableResponse.Table.TableArn, awscontext.Default().DynamoDBTableARN("mildstack-archive"); got != want {
@@ -649,7 +649,7 @@ func TestDynamoDBSQSRoutingIsolation(t *testing.T) {
 	request.Header.Set("Content-Type", dynamoDBJSONContentType)
 	engine.ServeHTTP(recorder, request)
 
-	if got, want := recorder.Code, http.StatusBadRequest; got != want {
+	if got, want := recorder.Code, http.StatusNoContent; got != want {
 		t.Fatalf("unexpected missing-target status: got %d want %d\nbody: %s", got, want, recorder.Body.String())
 	}
 	if strings.Contains(recorder.Body.String(), "ValidationException") {

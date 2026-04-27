@@ -9,13 +9,17 @@ import (
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	"github.com/michasdev/mildstack/core/internal/resources/dynamodb"
 	"github.com/michasdev/mildstack/core/internal/resources/s3"
+	"github.com/michasdev/mildstack/core/internal/resources/sns"
+	snsapplication "github.com/michasdev/mildstack/core/internal/resources/sns/application"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs"
+	sqsapplication "github.com/michasdev/mildstack/core/internal/resources/sqs/application"
 )
 
 type DefaultRootConfig struct {
 	InstanceID             string
 	S3StorageBaseDir       string
 	DynamoDBStorageBaseDir string
+	SNSStorageBaseDir      string
 	SQSStorageBaseDir      string
 }
 
@@ -27,7 +31,7 @@ func defaultRootWithHook(hook orchestrator.StateHook, config DefaultRootConfig) 
 	instanceID := strings.TrimSpace(config.InstanceID)
 	// When no instance ID is provided, return a root with no services.
 	// This allows read-only CLI commands (instances, status, stop, delete)
-	// to run without a MILDSTACK_INSTANCE_ID env var. The serve command
+	// to run without a MILDSTACK_INSTANCE_ID env var. The start command
 	// validates the ID before starting a server.
 	if instanceID == "" {
 		return Assemble(nil)
@@ -60,7 +64,23 @@ func defaultRootWithHook(hook orchestrator.StateHook, config DefaultRootConfig) 
 		panic(fmt.Sprintf("composition: init sqs service: %v", err))
 	}
 
-	services := []orchestrator.Service{s3Service, dynamoService, sqsService}
+	snsService, err := sns.NewWithStorage(sns.StorageConfig{
+		BaseDir:    config.SNSStorageBaseDir,
+		InstanceID: instanceID,
+	})
+	if err != nil {
+		_ = s3Service.Stop(context.Background())
+		_ = dynamoService.Stop(context.Background())
+		_ = sqsService.Stop(context.Background())
+		panic(fmt.Sprintf("composition: init sns service: %v", err))
+	}
+	if snsConcrete, ok := snsService.(*snsapplication.Service); ok {
+		if sqsConcrete, ok := sqsService.(*sqsapplication.Service); ok {
+			snsConcrete.SetSQSBridge(sqsConcrete)
+		}
+	}
+
+	services := []orchestrator.Service{s3Service, dynamoService, sqsService, snsService}
 	for _, service := range services {
 		if err := service.AttachState(hook); err != nil {
 			for _, candidate := range services {

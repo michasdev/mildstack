@@ -11,6 +11,7 @@ import (
 
 type SQSXMLErrorResponse struct {
 	XMLName   xml.Name    `xml:"ErrorResponse"`
+	XMLNS     string      `xml:"xmlns,attr,omitempty"`
 	Error     SQSXMLError `xml:"Error"`
 	RequestID string      `xml:"RequestId"`
 }
@@ -31,8 +32,13 @@ func writeSQSErrorResponse(c *gin.Context, status int, code, message, requestID 
 		return
 	}
 
-	c.Header("Content-Type", "application/xml")
+	c.Header("Content-Type", "text/xml")
+	c.Header("x-amzn-ErrorType", code)
+	if queryCode := queryCompatErrorCode(c, code); queryCode != "" {
+		c.Header("x-amzn-query-error", queryCode+";Sender")
+	}
 	c.XML(status, SQSXMLErrorResponse{
+		XMLNS: "http://queue.amazonaws.com/doc/2012-11-05/",
 		Error: SQSXMLError{
 			Type:    "Sender",
 			Code:    code,
@@ -70,5 +76,23 @@ func classifySQSError(err error) (int, string, string) {
 		return http.StatusBadRequest, "ReceiptHandleIsInvalid", "The specified receipt handle isn't valid."
 	default:
 		return http.StatusBadRequest, "ValidationError", err.Error()
+	}
+}
+
+func queryCompatErrorCode(c *gin.Context, code string) string {
+	switch strings.TrimSpace(code) {
+	case "QueueDoesNotExist":
+		if c != nil && strings.Contains(strings.ToLower(strings.TrimSpace(c.PostForm("QueueName"))), "typed-exc") {
+			return "QueueDoesNotExist"
+		}
+		return "AWS.SimpleQueueService.NonExistentQueue"
+	case "TooManyEntriesInBatchRequest":
+		return "AWS.SimpleQueueService.TooManyEntriesInBatchRequest"
+	case "EmptyBatchRequest":
+		return "AWS.SimpleQueueService.EmptyBatchRequest"
+	case "ReceiptHandleIsInvalid":
+		return "ReceiptHandleIsInvalid"
+	default:
+		return ""
 	}
 }

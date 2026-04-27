@@ -1,0 +1,109 @@
+---
+title: Instances
+description: |
+  Manage multiple MildStack instances running on different ports.
+  Each instance has its own isolated data and services.
+---
+
+## What is an Instance?
+
+A MildStack **instance** is a running local AWS environment. Each instance:
+
+- Listens on its own port (e.g., `4566`, `8080`)
+- Has its own isolated data (buckets, tables, queues)
+- Runs all supported services (S3, DynamoDB, SQS) simultaneously
+
+You can run **multiple instances** at the same time to simulate different environments — for example, one for your API service and another for your background workers.
+
+## Running Multiple Instances
+
+Start instances on different ports:
+
+```bash
+# Start a "development" instance
+mildstack start 4566
+
+# In another terminal, start a "testing" instance
+mildstack start 8080
+```
+
+Each instance is fully independent. Creating a bucket on port `4566` has no effect on port `8080`.
+
+## Listing Instances
+
+```bash
+mildstack instances
+```
+
+Example output:
+
+```
+PORT    STATUS     ENDPOINT
+4566    running    http://localhost:4566
+8080    running    http://localhost:8080
+9000    stopped    http://localhost:9000
+```
+
+For scripting and automation, use the `--json` flag:
+
+```bash
+mildstack instances --json
+```
+
+## Instance Lifecycle
+
+Instances go through these states:
+
+| State | Description |
+| --- | --- |
+| **running** | The instance is active and accepting requests |
+| **stopped** | The instance was stopped but its data is preserved |
+
+### Stop an instance (keep data)
+
+```bash
+mildstack stop 4566
+```
+
+Stopping preserves all data. Restart on the same port to pick up where you left off:
+
+```bash
+mildstack start 4566
+```
+
+### Delete an instance (remove data)
+
+```bash
+mildstack delete 4566
+```
+
+This permanently removes the instance and all of its stored resources.
+
+## Background Mode
+
+Use `--detach` (or `-d`) to start an instance in the background:
+
+```bash
+mildstack start 4566 --detach
+```
+
+The command returns immediately after the instance is ready. This is useful for scripts and CI pipelines:
+
+```bash
+# Start MildStack in the background, run tests, then stop
+mildstack start 4566 --detach
+npm test
+mildstack stop 4566
+```
+
+## Data Isolation
+
+Each instance stores its data in a separate directory. This means:
+
+- **No data conflicts** between instances
+- **Persistent data** survives restarts (unless you `delete`)
+- **Clean teardown** — deleting an instance removes only its data
+
+<Callout type="info">
+  Instance data is stored under `~/.mildstack/instances/`. You generally don't need to interact with these files directly.
+</Callout>

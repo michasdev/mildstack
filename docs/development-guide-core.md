@@ -29,7 +29,7 @@ go test ./...
 ## Run CLI Locally
 
 ```bash
-go run ./core/cmd/mildstack serve
+go run ./core/cmd/mildstack start
 ```
 
 Optional:

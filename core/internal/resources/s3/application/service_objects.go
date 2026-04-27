@@ -183,6 +183,10 @@ func (s *Service) PutObjectWithMetadata(bucket, key string, body io.Reader, cont
 }
 
 func (s *Service) CopyObject(bucket, key, sourceBucket, sourceKey string) (domain.Object, error) {
+	return s.CopyObjectWithOptions(bucket, key, sourceBucket, sourceKey, "", nil)
+}
+
+func (s *Service) CopyObjectWithOptions(bucket, key, sourceBucket, sourceKey, metadataDirective string, metadata map[string]string) (domain.Object, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -239,7 +243,7 @@ func (s *Service) CopyObject(bucket, key, sourceBucket, sourceKey string) (domai
 		Size:             size,
 		ContentType:      source.ContentType,
 		ETag:             etag,
-		Metadata:         source.Metadata,
+		Metadata:         resolvedCopyMetadata(source.Metadata, metadataDirective, metadata),
 		PreservedHeaders: source.PreservedHeaders,
 		PayloadRef:       newRef,
 	})
@@ -253,6 +257,17 @@ func (s *Service) CopyObject(bucket, key, sourceBucket, sourceKey string) (domai
 		return domain.Object{}, err
 	}
 	return s.hydrateObject(object)
+}
+
+func resolvedCopyMetadata(source map[string]string, metadataDirective string, metadata map[string]string) map[string]string {
+	directive := strings.ToUpper(strings.TrimSpace(metadataDirective))
+	if directive == "" || directive == "COPY" {
+		return cloneObjectStringMap(source)
+	}
+	if directive == "REPLACE" {
+		return cloneObjectStringMap(metadata)
+	}
+	return cloneObjectStringMap(source)
 }
 
 func (s *Service) DeleteObject(bucket, key string) error {

@@ -384,6 +384,8 @@ func (h sqsNativeHandler) handleReceiveMessage(c *gin.Context, ctx SQSRequestCon
 	maxMessages := request.MaxNumberOfMessages
 	if maxMessages <= 0 {
 		maxMessages = 1
+	} else if maxMessages > 10 {
+		maxMessages = 10
 	}
 	waitTime := time.Duration(request.WaitTimeSeconds) * time.Second
 	messages, err := h.service.ReceiveMessage(ctx.QueueName, maxMessages, waitTime)

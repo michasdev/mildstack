@@ -6,6 +6,7 @@ import icon from '../../build/icon.png?asset'
 import { registerS3IpcHandlers } from './s3-ipc'
 import { registerDynamoDBIpcHandlers } from './dynamodb-ipc'
 import { registerSQSIpcHandlers } from './sqs-ipc'
+import { registerSNSIpcHandlers } from './sns-ipc'
 import { registerMildStackIpcHandlers } from './mildstack-ipc'
 import { setupCliInstaller } from './setup-cli'
 
@@ -85,6 +86,7 @@ app.whenReady().then(() => {
   registerS3IpcHandlers()
   registerDynamoDBIpcHandlers()
   registerSQSIpcHandlers()
+  registerSNSIpcHandlers()
   registerMildStackIpcHandlers()
 
   createWindow()

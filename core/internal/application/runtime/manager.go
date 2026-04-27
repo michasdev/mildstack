@@ -122,7 +122,7 @@ func (m *Manager) SetInstanceID(id string) {
 
 // SetServices replaces the manager's service metadata with metadata derived
 // from the provided services. Called when services are wired after the manager
-// is constructed (e.g., when instanceId is resolved from the serve port).
+// is constructed (e.g., when instanceId is resolved from the start port).
 func (m *Manager) SetServices(services []orchestrator.Service) {
 	metadata := make([]orchestrator.Metadata, 0, len(services))
 	for _, service := range services {
