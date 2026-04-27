@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -43,6 +44,8 @@ func (s *Service) dispatchDelivery(message domain.PublishedMessage, hasTopic boo
 }
 
 func (s *Service) dispatchToSubscription(message domain.PublishedMessage, subscription domain.Subscription) error {
+	startedAt := time.Now().UTC()
+
 	attempt, err := domain.NewDeliveryAttempt(
 		message.MessageID,
 		message.TenantKey,
@@ -63,7 +66,7 @@ func (s *Service) dispatchToSubscription(message domain.PublishedMessage, subscr
 			"filterPolicy":      subscription.FilterPolicy(),
 			"filterPolicyScope": subscription.FilterPolicyScope(),
 		})
-		return s.publishRepository().SaveDeliveryAttempt(attempt)
+		return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
 	}
 	if !matched {
 		attempt, _ = attempt.MarkFilteredOut(time.Now().UTC())
@@ -73,21 +76,21 @@ func (s *Service) dispatchToSubscription(message domain.PublishedMessage, subscr
 			"filterPolicyScope": subscription.FilterPolicyScope(),
 		})
 		attempt.ResponseSnapshotJSON = mustMarshalJSON(map[string]any{"status": domain.DeliveryAttemptStatusFilteredOut})
-		return s.publishRepository().SaveDeliveryAttempt(attempt)
+		return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
 	}
 
 	if !strings.EqualFold(subscription.Protocol, "http") && !strings.EqualFold(subscription.Protocol, "https") {
 		attempt, _ = attempt.MarkSkipped("ProtocolDeferred", "Protocol delivery is simulated in local runtime.", time.Now().UTC())
 		attempt.RequestSnapshotJSON = mustMarshalJSON(map[string]any{"endpoint": subscription.Endpoint})
 		attempt.ResponseSnapshotJSON = mustMarshalJSON(map[string]any{"status": domain.DeliveryAttemptStatusSkipped})
-		return s.publishRepository().SaveDeliveryAttempt(attempt)
+		return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
 	}
 
 	if !isLocalEndpoint(subscription.Endpoint) {
 		attempt, _ = attempt.MarkSkipped("EndpointDeferred", "Non-local endpoints are simulated in local runtime.", time.Now().UTC())
 		attempt.RequestSnapshotJSON = mustMarshalJSON(map[string]any{"endpoint": subscription.Endpoint})
 		attempt.ResponseSnapshotJSON = mustMarshalJSON(map[string]any{"status": domain.DeliveryAttemptStatusSkipped})
-		return s.publishRepository().SaveDeliveryAttempt(attempt)
+		return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
 	}
 
 	payload, contentType, err := snsDeliveryPayload(subscription, message)
@@ -95,7 +98,7 @@ func (s *Service) dispatchToSubscription(message domain.PublishedMessage, subscr
 		attempt, _ = attempt.MarkFailed("InvalidParameter", err.Error(), time.Now().UTC())
 		attempt.RequestSnapshotJSON = mustMarshalJSON(map[string]any{"endpoint": subscription.Endpoint})
 		attempt.ResponseSnapshotJSON = mustMarshalJSON(map[string]any{"status": domain.DeliveryAttemptStatusFailed})
-		return s.publishRepository().SaveDeliveryAttempt(attempt)
+		return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
 	}
 
 	statusCode, responseBody, err := dispatchLocalHTTPSDelivery(subscription.Endpoint, payload, contentType)
@@ -113,7 +116,7 @@ func (s *Service) dispatchToSubscription(message domain.PublishedMessage, subscr
 			"statusCode": 0,
 			"error":      err.Error(),
 		})
-		return s.publishRepository().SaveDeliveryAttempt(attempt)
+		return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
 	}
 
 	attempt.ResponseSnapshotJSON = mustMarshalJSON(map[string]any{
@@ -125,7 +128,27 @@ func (s *Service) dispatchToSubscription(message domain.PublishedMessage, subscr
 	} else {
 		attempt, _ = attempt.MarkFailed("EndpointResponse", fmt.Sprintf("endpoint returned status %d", statusCode), time.Now().UTC())
 	}
-	return s.publishRepository().SaveDeliveryAttempt(attempt)
+	return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
+}
+
+func (s *Service) persistDeliveryAttempt(messageID, endpoint string, attempt domain.DeliveryAttempt, startedAt time.Time) error {
+	err := s.publishRepository().SaveDeliveryAttempt(attempt)
+	if s != nil && s.observability != nil {
+		s.observability.recordDelivery(attempt.Status, attempt.Protocol, attempt.FailureCode, time.Since(startedAt), err)
+		s.syncObservabilitySnapshot()
+	}
+
+	log.Printf(
+		"sns delivery attempt message_id=%s subscription_arn=%s endpoint=%s status=%s failure_code=%s persisted=%t",
+		strings.TrimSpace(messageID),
+		strings.TrimSpace(attempt.SubscriptionARN),
+		strings.TrimSpace(endpoint),
+		strings.TrimSpace(attempt.Status),
+		strings.TrimSpace(attempt.FailureCode),
+		err == nil,
+	)
+
+	return err
 }
 
 func snsDeliveryPayload(subscription domain.Subscription, message domain.PublishedMessage) ([]byte, string, error) {

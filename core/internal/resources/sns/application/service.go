@@ -19,9 +19,10 @@ type StorageConfig struct {
 }
 
 type Service struct {
-	policy    orchestrator.EmulationPolicy
-	store     *infrastructure.SQLiteStore
-	stateHook orchestrator.StateHook
+	policy        orchestrator.EmulationPolicy
+	store         *infrastructure.SQLiteStore
+	stateHook     orchestrator.StateHook
+	observability *snsObservability
 }
 
 func New() *Service {
@@ -32,6 +33,7 @@ func New() *Service {
 			contracts.ActionNames(),
 			"sns",
 		),
+		observability: newSNSObservability(),
 	}
 }
 
@@ -98,8 +100,9 @@ func (s *Service) AttachState(hook orchestrator.StateHook) error {
 	}
 	s.stateHook = hook
 	hook.Set(domain.StateKey, map[string]any{
-		"service": "sns",
-		"topics":  []any{},
+		"service":       "sns",
+		"topics":        []any{},
+		"observability": s.observability.snapshot(),
 	})
 	return nil
 }

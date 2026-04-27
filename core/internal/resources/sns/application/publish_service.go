@@ -14,8 +14,19 @@ import (
 
 const snsDeduplicationWindow = 5 * time.Minute
 
-func (s *Service) Publish(request domain.PublishRequest) (domain.PublishResult, error) {
-	if err := s.ensureStore(); err != nil {
+func (s *Service) Publish(request domain.PublishRequest) (result domain.PublishResult, err error) {
+	startedAt := time.Now().UTC()
+	targetKind := ""
+	deduplicated := false
+	defer func() {
+		if s == nil || s.observability == nil {
+			return
+		}
+		s.observability.recordPublish(targetKind, deduplicated, time.Since(startedAt), err)
+		s.syncObservabilitySnapshot()
+	}()
+
+	if err = s.ensureStore(); err != nil {
 		return domain.PublishResult{}, err
 	}
 
@@ -24,6 +35,7 @@ func (s *Service) Publish(request domain.PublishRequest) (domain.PublishResult, 
 	if err != nil {
 		return domain.PublishResult{}, err
 	}
+	targetKind = message.TargetKind
 
 	var topic domain.Topic
 	hasTopic := strings.TrimSpace(message.TopicARN) != ""
@@ -35,7 +47,6 @@ func (s *Service) Publish(request domain.PublishRequest) (domain.PublishResult, 
 	}
 
 	dedupScopeKey := ""
-	deduplicated := false
 	if hasTopic && topic.IsFIFO {
 		message, dedupScopeKey, deduplicated, err = s.applyFIFORules(topic, message)
 		if err != nil {
@@ -43,12 +54,12 @@ func (s *Service) Publish(request domain.PublishRequest) (domain.PublishResult, 
 		}
 	}
 
-	if err := s.publishRepository().SavePublishedMessage(message, dedupScopeKey, deduplicated); err != nil {
+	if err = s.publishRepository().SavePublishedMessage(message, dedupScopeKey, deduplicated); err != nil {
 		return domain.PublishResult{}, err
 	}
 
 	if !deduplicated {
-		if err := s.dispatchDelivery(message, hasTopic, topic); err != nil {
+		if err = s.dispatchDelivery(message, hasTopic, topic); err != nil {
 			return domain.PublishResult{}, err
 		}
 	}
@@ -59,8 +70,19 @@ func (s *Service) Publish(request domain.PublishRequest) (domain.PublishResult, 
 	}, nil
 }
 
-func (s *Service) PublishBatch(request domain.PublishBatchRequest) (domain.PublishBatchResult, error) {
-	if err := s.ensureStore(); err != nil {
+func (s *Service) PublishBatch(request domain.PublishBatchRequest) (result domain.PublishBatchResult, err error) {
+	startedAt := time.Now().UTC()
+	entryCount := len(request.Entries)
+	result = domain.PublishBatchResult{}
+	defer func() {
+		if s == nil || s.observability == nil {
+			return
+		}
+		s.observability.recordPublishBatch(entryCount, len(result.Successful), len(result.Failed), time.Since(startedAt), err)
+		s.syncObservabilitySnapshot()
+	}()
+
+	if err = s.ensureStore(); err != nil {
 		return domain.PublishBatchResult{}, err
 	}
 
@@ -75,11 +97,11 @@ func (s *Service) PublishBatch(request domain.PublishBatchRequest) (domain.Publi
 		return domain.PublishBatchResult{}, fmt.Errorf("%w: too many entries in batch request", domain.ErrValidation)
 	}
 
-	if _, err := s.topicRepository().GetByARN(s.defaultTenant().Key(), request.TopicARN); err != nil {
+	if _, err = s.topicRepository().GetByARN(s.defaultTenant().Key(), request.TopicARN); err != nil {
 		return domain.PublishBatchResult{}, err
 	}
 
-	result := domain.PublishBatchResult{
+	result = domain.PublishBatchResult{
 		Successful: make([]domain.PublishBatchResultEntry, 0, len(request.Entries)),
 		Failed:     make([]domain.PublishBatchErrorEntry, 0),
 	}
@@ -107,7 +129,8 @@ func (s *Service) PublishBatch(request domain.PublishBatchRequest) (domain.Publi
 		}
 		seenIDs[entryID] = struct{}{}
 
-		publishResult, err := s.Publish(domain.PublishRequest{
+		var publishResult domain.PublishResult
+		publishResult, err = s.Publish(domain.PublishRequest{
 			TopicARN:               request.TopicARN,
 			Message:                entry.Message,
 			Subject:                entry.Subject,

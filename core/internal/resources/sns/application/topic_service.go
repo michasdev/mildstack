@@ -122,8 +122,9 @@ func (s *Service) syncStateSnapshot(tenant domain.Tenant) {
 	}
 
 	s.stateHook.Set(domain.StateKey, map[string]any{
-		"service": "sns",
-		"tenant":  strings.TrimSpace(tenant.Key()),
-		"topics":  topicARNs,
+		"service":       "sns",
+		"tenant":        strings.TrimSpace(tenant.Key()),
+		"topics":        topicARNs,
+		"observability": s.observability.snapshot(),
 	})
 }

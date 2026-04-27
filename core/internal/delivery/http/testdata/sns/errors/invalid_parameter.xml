@@ -1,0 +1,1 @@
+<ErrorResponse xmlns="https://sns.amazonaws.com/doc/2010-03-31/"><Error><Type>Sender</Type><Code>InvalidParameter</Code><Message>sns: validation failed: topic name contains unsupported characters</Message></Error><RequestId>mildstack-sns-request</RequestId></ErrorResponse>
