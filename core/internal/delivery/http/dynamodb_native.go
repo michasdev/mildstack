@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,6 +62,7 @@ type dynamoDBNativeHandler struct {
 	registry map[string]dynamoTargetSpec
 	indexes  map[string]map[string]nativeDynamoIndex
 	ttl      map[string]nativeTTLDescription
+	meta     map[string]*nativeTableMeta
 }
 
 type serviceWithIndexes interface {
@@ -78,6 +80,18 @@ type nativeTTLDescription struct {
 	Status        string
 }
 
+type nativeTableMeta struct {
+	DeletionProtectionEnabled bool
+	StreamSpecification       *streamSpecification
+	LatestStreamArn           string
+	LatestStreamLabel         string
+	PointInTimeRecovery       bool
+	Tags                      map[string]string
+	ProvisionedThroughput     provisionedThroughputDescription
+	GSIProvisionedThroughput  map[string]provisionedThroughputDescription
+	SSEDescription            *sseDescription
+}
+
 type dynamoTargetSpec struct {
 	supported bool
 	execute   func(*dynamoDBNativeHandler, *gin.Context, []byte) error
@@ -89,6 +103,7 @@ func newDynamoDBNativeHandler(service DynamoDBNativeService) dynamoDBNativeHandl
 		registry: newDynamoDBTargetRegistry(),
 		indexes:  make(map[string]map[string]nativeDynamoIndex),
 		ttl:      make(map[string]nativeTTLDescription),
+		meta:     make(map[string]*nativeTableMeta),
 	}
 }
 
@@ -158,7 +173,38 @@ func newDynamoDBTargetRegistry() map[string]dynamoTargetSpec {
 			supported: true,
 			execute:   (*dynamoDBNativeHandler).handleDescribeTimeToLive,
 		},
-		"UpdateTable": {supported: false},
+		"DescribeContinuousBackups": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleDescribeContinuousBackups,
+		},
+		"UpdateContinuousBackups": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleUpdateContinuousBackups,
+		},
+		"DescribeEndpoints": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleDescribeEndpoints,
+		},
+		"TagResource": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleTagResource,
+		},
+		"UntagResource": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleUntagResource,
+		},
+		"ListTagsOfResource": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleListTagsOfResource,
+		},
+		"UpdateTable": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleUpdateTable,
+		},
+		"ExecuteStatement": {
+			supported: true,
+			execute:   (*dynamoDBNativeHandler).handleExecuteStatement,
+		},
 	}
 }
 
@@ -261,8 +307,20 @@ func (h *dynamoDBNativeHandler) handleCreateTable(c *gin.Context, body []byte) e
 		return err
 	}
 
+	meta := h.ensureTableMeta(tableName)
+	meta.DeletionProtectionEnabled = request.DeletionProtectionEnabled
+	meta.StreamSpecification = cloneStreamSpecification(request.StreamSpecification)
+	if meta.StreamSpecification != nil && meta.StreamSpecification.StreamEnabled {
+		meta.LatestStreamArn = awscontext.Default().DynamoDBTableARN(tableName) + "/stream/" + strconv.FormatInt(time.Now().UTC().Unix(), 10)
+		meta.LatestStreamLabel = strconv.FormatInt(time.Now().UTC().Unix(), 10)
+	}
+	meta.ProvisionedThroughput = throughputFromCreateRequest(request.BillingMode, request.ProvisionedThroughput)
+	meta.GSIProvisionedThroughput = gsiThroughputFromCreateRequest(request.BillingMode, request.GlobalSecondaryIndexes)
+	meta.SSEDescription = sseDescriptionFromCreateRequest(request.SSESpecification)
+	h.storeIndexDefinitions(tableName, request.GlobalSecondaryIndexes, request.LocalSecondaryIndexes)
+
 	writeDynamoDBJSON(c, http.StatusOK, createTableResponse{
-		TableDescription: tableDescriptionFromDomain(table),
+		TableDescription: h.tableDescriptionFor(table),
 	})
 	return nil
 }
@@ -284,7 +342,7 @@ func (h *dynamoDBNativeHandler) handleDescribeTable(c *gin.Context, body []byte)
 	}
 
 	writeDynamoDBJSON(c, http.StatusOK, describeTableResponse{
-		Table: tableDescriptionFromDomain(table),
+		Table: h.tableDescriptionFor(table),
 	})
 	return nil
 }
@@ -300,13 +358,21 @@ func (h *dynamoDBNativeHandler) handleDeleteTable(c *gin.Context, body []byte) e
 		return fmt.Errorf("dynamodb: table name is required")
 	}
 
+	if meta := h.meta[tableName]; meta != nil && meta.DeletionProtectionEnabled {
+		return fmt.Errorf("dynamodb: deletion protection is enabled for table %q", tableName)
+	}
+
 	table, err := h.service.DeleteTable(tableName)
 	if err != nil {
 		return err
 	}
 
+	delete(h.meta, tableName)
+	delete(h.ttl, tableName)
+	delete(h.indexes, tableName)
+
 	writeDynamoDBJSON(c, http.StatusOK, deleteTableResponse{
-		TableDescription: tableDescriptionFromDomain(table),
+		TableDescription: h.tableDescriptionFor(table),
 	})
 	return nil
 }
@@ -390,9 +456,13 @@ func (h *dynamoDBNativeHandler) handlePutItem(c *gin.Context, body []byte) error
 		return err
 	}
 
-	writeDynamoDBJSON(c, http.StatusOK, putItemResponse{
+	response := putItemResponse{
 		Attributes: attributeValueMapFromDomain(item.Attributes),
-	})
+	}
+	if cc := consumedCapacityForSingleWrite(tableName, strings.TrimSpace(request.ReturnConsumedCapacity), h); cc != nil {
+		response.ConsumedCapacity = cc
+	}
+	writeDynamoDBJSON(c, http.StatusOK, response)
 	return nil
 }
 
@@ -417,11 +487,20 @@ func (h *dynamoDBNativeHandler) handleDeleteItem(c *gin.Context, body []byte) er
 		return err
 	}
 
+	previous, previousErr := h.service.GetItem(tableName, key)
+	if previousErr != nil && !strings.Contains(previousErr.Error(), "not found") {
+		return previousErr
+	}
+
 	if err := h.service.DeleteItem(tableName, key); err != nil {
 		return err
 	}
 
-	writeDynamoDBJSON(c, http.StatusOK, deleteItemResponse{})
+	response := deleteItemResponse{}
+	if strings.EqualFold(strings.TrimSpace(request.ReturnValues), "ALL_OLD") && previousErr == nil {
+		response.Attributes = attributeValueMapFromDomain(previous.Attributes)
+	}
+	writeDynamoDBJSON(c, http.StatusOK, response)
 	return nil
 }
 
@@ -446,7 +525,7 @@ func (h *dynamoDBNativeHandler) handleUpdateItem(c *gin.Context, body []byte) er
 		return err
 	}
 
-	if rv := strings.ToUpper(strings.TrimSpace(request.ReturnValues)); rv != "" && rv != "NONE" && rv != "ALL_NEW" {
+	if rv := strings.ToUpper(strings.TrimSpace(request.ReturnValues)); rv != "" && rv != "NONE" && rv != "ALL_NEW" && rv != "ALL_OLD" && rv != "UPDATED_NEW" && rv != "UPDATED_OLD" {
 		return fmt.Errorf("dynamodb: unsupported return values %q", request.ReturnValues)
 	}
 
@@ -459,6 +538,7 @@ func (h *dynamoDBNativeHandler) handleUpdateItem(c *gin.Context, body []byte) er
 		expressionAttributeValues[name] = converted
 	}
 
+	before, _ := h.service.GetItem(tableName, key)
 	item, err := h.service.UpdateItem(
 		tableName,
 		key,
@@ -472,8 +552,15 @@ func (h *dynamoDBNativeHandler) handleUpdateItem(c *gin.Context, body []byte) er
 	}
 
 	response := updateItemResponse{}
-	if strings.EqualFold(strings.TrimSpace(request.ReturnValues), "ALL_NEW") {
+	switch strings.ToUpper(strings.TrimSpace(request.ReturnValues)) {
+	case "ALL_NEW":
 		response.Attributes = attributeValueMapFromDomain(item.Attributes)
+	case "ALL_OLD":
+		response.Attributes = attributeValueMapFromDomain(before.Attributes)
+	case "UPDATED_NEW":
+		response.Attributes = changedAttributes(before.Attributes, item.Attributes)
+	case "UPDATED_OLD":
+		response.Attributes = changedAttributes(item.Attributes, before.Attributes)
 	}
 	writeDynamoDBJSON(c, http.StatusOK, response)
 	return nil
@@ -541,6 +628,10 @@ func (h *dynamoDBNativeHandler) handleQuery(c *gin.Context, body []byte) error {
 	if err != nil {
 		return err
 	}
+	if len(request.QueryFilter) > 0 {
+		result.Items = applyLegacyFilterToItems(result.Items, request.QueryFilter)
+		result.Count = len(result.Items)
+	}
 
 	writeDynamoDBJSON(c, http.StatusOK, queryResponse{
 		Items:            attributeValueListFromDomain(result.Items),
@@ -599,6 +690,10 @@ func (h *dynamoDBNativeHandler) handleScan(c *gin.Context, body []byte) error {
 	if err != nil {
 		return err
 	}
+	if len(request.ScanFilter) > 0 {
+		result.Items = applyLegacyFilterToItems(result.Items, request.ScanFilter)
+		result.Count = len(result.Items)
+	}
 
 	writeDynamoDBJSON(c, http.StatusOK, scanResponse{
 		Items:            attributeValueListFromDomain(result.Items),
@@ -613,9 +708,6 @@ func (h *dynamoDBNativeHandler) handleBatchWriteItem(c *gin.Context, body []byte
 	request := batchWriteItemRequest{}
 	if err := json.Unmarshal(body, &request); err != nil {
 		return fmt.Errorf("dynamodb: invalid BatchWriteItem request: %w", err)
-	}
-	if strings.TrimSpace(request.ReturnConsumedCapacity) != "" {
-		return fmt.Errorf("dynamodb: return consumed capacity is not supported")
 	}
 	if strings.TrimSpace(request.ReturnItemCollectionMetrics) != "" {
 		return fmt.Errorf("dynamodb: return item collection metrics is not supported")
@@ -673,6 +765,7 @@ func (h *dynamoDBNativeHandler) handleBatchWriteItem(c *gin.Context, body []byte
 
 	writeDynamoDBJSON(c, http.StatusOK, batchWriteItemResponse{
 		UnprocessedItems: batchWriteUnprocessedItemsFromDomain(result.Unprocessed),
+		ConsumedCapacity: consumedCapacityForBatchWrite(appRequest, strings.TrimSpace(request.ReturnConsumedCapacity), h),
 	})
 	return nil
 }
@@ -681,9 +774,6 @@ func (h *dynamoDBNativeHandler) handleBatchGetItem(c *gin.Context, body []byte) 
 	request := batchGetItemRequest{}
 	if err := json.Unmarshal(body, &request); err != nil {
 		return fmt.Errorf("dynamodb: invalid BatchGetItem request: %w", err)
-	}
-	if strings.TrimSpace(request.ReturnConsumedCapacity) != "" {
-		return fmt.Errorf("dynamodb: return consumed capacity is not supported")
 	}
 	if len(request.RequestItems) == 0 {
 		return fmt.Errorf("dynamodb: request items are required")
@@ -696,6 +786,7 @@ func (h *dynamoDBNativeHandler) handleBatchGetItem(c *gin.Context, body []byte) 
 	sort.Strings(tableNames)
 
 	appRequest := ddbcontracts.BatchGetItemRequest{Tables: make([]ddbcontracts.BatchGetTableRequest, 0, len(tableNames))}
+	missingTables := make([]ddbcontracts.BatchGetTableRequest, 0)
 	for _, tableName := range tableNames {
 		tableRequest := request.RequestItems[tableName]
 		if strings.TrimSpace(tableRequest.ProjectionExpression) != "" {
@@ -703,6 +794,14 @@ func (h *dynamoDBNativeHandler) handleBatchGetItem(c *gin.Context, body []byte) 
 		}
 		if len(tableRequest.ExpressionAttributeNames) > 0 {
 			return fmt.Errorf("dynamodb: expression attribute names are not supported")
+		}
+		if _, err := h.service.DescribeTable(tableName); err != nil {
+			missingTables = append(missingTables, ddbcontracts.BatchGetTableRequest{
+				Table:          tableName,
+				Keys:           nil,
+				ConsistentRead: tableRequest.ConsistentRead,
+			})
+			continue
 		}
 		keys := make([]map[string]dynamodbdomain.AttributeValue, 0, len(tableRequest.Keys))
 		for _, keyDocument := range tableRequest.Keys {
@@ -719,14 +818,20 @@ func (h *dynamoDBNativeHandler) handleBatchGetItem(c *gin.Context, body []byte) 
 		})
 	}
 
-	result, err := h.service.BatchGetItem(appRequest)
-	if err != nil {
-		return err
+	result := ddbcontracts.BatchGetItemResult{}
+	if len(appRequest.Tables) > 0 {
+		var err error
+		result, err = h.service.BatchGetItem(appRequest)
+		if err != nil && !strings.Contains(err.Error(), "not found") {
+			return err
+		}
 	}
+	result.Unprocessed = append(result.Unprocessed, missingTables...)
 
 	writeDynamoDBJSON(c, http.StatusOK, batchGetItemResponse{
 		Responses:       batchGetResponsesFromDomain(result.Responses),
 		UnprocessedKeys: batchGetUnprocessedKeysFromDomain(result.Unprocessed),
+		ConsumedCapacity: consumedCapacityForBatchGet(appRequest, strings.TrimSpace(request.ReturnConsumedCapacity)),
 	})
 	return nil
 }
@@ -747,17 +852,40 @@ func (h *dynamoDBNativeHandler) handleTransactWriteItems(c *gin.Context, body []
 	}
 
 	appRequest := ddbcontracts.TransactWriteItemsRequest{Items: make([]ddbcontracts.TransactWriteItem, 0, len(request.TransactItems))}
-	for _, item := range request.TransactItems {
+	for i, item := range request.TransactItems {
 		switch {
 		case item.Put != nil:
 			if item.Delete != nil || item.Update != nil || item.ConditionCheck != nil {
 				return fmt.Errorf("dynamodb: each transaction item must contain exactly one operation")
 			}
-			if strings.TrimSpace(item.Put.ConditionExpression) != "" || len(item.Put.ExpressionAttributeNames) > 0 || len(item.Put.ExpressionAttributeValues) > 0 || strings.TrimSpace(item.Put.ReturnValuesOnConditionCheckFailure) != "" {
+			if len(item.Put.ExpressionAttributeNames) > 0 || len(item.Put.ExpressionAttributeValues) > 0 || strings.TrimSpace(item.Put.ReturnValuesOnConditionCheckFailure) != "" {
 				return fmt.Errorf("dynamodb: condition expressions and return values on check failure are not supported")
 			}
 			if strings.TrimSpace(item.Put.TableName) == "" {
 				return fmt.Errorf("dynamodb: table name is required")
+			}
+			if strings.TrimSpace(item.Put.ConditionExpression) != "" {
+				table, err := h.service.DescribeTable(item.Put.TableName)
+				if err != nil {
+					return err
+				}
+				key, _, err := itemFromAttributeValueMap(table, item.Put.Item)
+				if err != nil {
+					return err
+				}
+				current, err := h.service.GetItem(item.Put.TableName, key)
+				if err != nil && !strings.Contains(err.Error(), "not found") {
+					return err
+				}
+				if err == nil {
+					values := map[string]dynamodbdomain.AttributeValue{}
+					if evalErr := evaluateNativeCondition(current.Attributes, item.Put.ConditionExpression, nil, values); evalErr != nil {
+						writeDynamoDBTransactionCanceledError(c, &ddbcontracts.TransactionCanceledError{
+							Reasons: transactionCancellationReasons(i, len(request.TransactItems), "ConditionalCheckFailed", "The conditional request failed"),
+						})
+						return nil
+					}
+				}
 			}
 			putItem, err := attributeValueMapToDomain(item.Put.Item)
 			if err != nil {
@@ -964,6 +1092,221 @@ func (h *dynamoDBNativeHandler) handleDescribeTimeToLive(c *gin.Context, body []
 	return nil
 }
 
+func (h *dynamoDBNativeHandler) handleDescribeContinuousBackups(c *gin.Context, body []byte) error {
+	request := describeTableRequest{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid DescribeContinuousBackups request: %w", err)
+	}
+	tableName := strings.TrimSpace(request.TableName)
+	if tableName == "" {
+		return fmt.Errorf("dynamodb: table name is required")
+	}
+	if _, err := h.service.DescribeTable(tableName); err != nil {
+		return err
+	}
+	meta := h.ensureTableMeta(tableName)
+	status := "DISABLED"
+	if meta.PointInTimeRecovery {
+		status = "ENABLED"
+	}
+	writeDynamoDBJSON(c, http.StatusOK, map[string]any{
+		"ContinuousBackupsDescription": map[string]any{
+			"ContinuousBackupsStatus": "ENABLED",
+			"PointInTimeRecoveryDescription": map[string]any{
+				"PointInTimeRecoveryStatus": status,
+			},
+		},
+	})
+	return nil
+}
+
+func (h *dynamoDBNativeHandler) handleUpdateContinuousBackups(c *gin.Context, body []byte) error {
+	request := struct {
+		TableName                        string `json:"TableName"`
+		PointInTimeRecoverySpecification struct {
+			PointInTimeRecoveryEnabled bool `json:"PointInTimeRecoveryEnabled"`
+		} `json:"PointInTimeRecoverySpecification"`
+	}{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid UpdateContinuousBackups request: %w", err)
+	}
+	tableName := strings.TrimSpace(request.TableName)
+	if tableName == "" {
+		return fmt.Errorf("dynamodb: table name is required")
+	}
+	if _, err := h.service.DescribeTable(tableName); err != nil {
+		return err
+	}
+	meta := h.ensureTableMeta(tableName)
+	meta.PointInTimeRecovery = request.PointInTimeRecoverySpecification.PointInTimeRecoveryEnabled
+	return h.handleDescribeContinuousBackups(c, []byte(fmt.Sprintf(`{"TableName":%q}`, tableName)))
+}
+
+func (h *dynamoDBNativeHandler) handleDescribeEndpoints(c *gin.Context, _ []byte) error {
+	writeDynamoDBJSON(c, http.StatusOK, map[string]any{
+		"Endpoints": []map[string]any{
+			{
+				"Address":     "localhost:4566",
+				"CachePeriodInMinutes": int64(60),
+			},
+		},
+	})
+	return nil
+}
+
+func (h *dynamoDBNativeHandler) handleTagResource(c *gin.Context, body []byte) error {
+	request := struct {
+		ResourceArn string `json:"ResourceArn"`
+		Tags        []struct {
+			Key   string `json:"Key"`
+			Value string `json:"Value"`
+		} `json:"Tags"`
+	}{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid TagResource request: %w", err)
+	}
+	tableName := tableNameFromTableARN(request.ResourceArn)
+	if tableName == "" {
+		return fmt.Errorf("dynamodb: resource arn is required")
+	}
+	if _, err := h.service.DescribeTable(tableName); err != nil {
+		return err
+	}
+	meta := h.ensureTableMeta(tableName)
+	if meta.Tags == nil {
+		meta.Tags = map[string]string{}
+	}
+	for _, tag := range request.Tags {
+		key := strings.TrimSpace(tag.Key)
+		if key == "" {
+			continue
+		}
+		meta.Tags[key] = tag.Value
+	}
+	writeDynamoDBJSON(c, http.StatusOK, map[string]any{})
+	return nil
+}
+
+func (h *dynamoDBNativeHandler) handleUntagResource(c *gin.Context, body []byte) error {
+	request := struct {
+		ResourceArn string   `json:"ResourceArn"`
+		TagKeys     []string `json:"TagKeys"`
+	}{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid UntagResource request: %w", err)
+	}
+	tableName := tableNameFromTableARN(request.ResourceArn)
+	if tableName == "" {
+		return fmt.Errorf("dynamodb: resource arn is required")
+	}
+	meta := h.ensureTableMeta(tableName)
+	for _, key := range request.TagKeys {
+		delete(meta.Tags, strings.TrimSpace(key))
+	}
+	writeDynamoDBJSON(c, http.StatusOK, map[string]any{})
+	return nil
+}
+
+func (h *dynamoDBNativeHandler) handleListTagsOfResource(c *gin.Context, body []byte) error {
+	request := struct {
+		ResourceArn string `json:"ResourceArn"`
+	}{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid ListTagsOfResource request: %w", err)
+	}
+	tableName := tableNameFromTableARN(request.ResourceArn)
+	if tableName == "" {
+		return fmt.Errorf("dynamodb: resource arn is required")
+	}
+	meta := h.ensureTableMeta(tableName)
+	tags := make([]map[string]string, 0, len(meta.Tags))
+	keys := make([]string, 0, len(meta.Tags))
+	for key := range meta.Tags {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		tags = append(tags, map[string]string{"Key": key, "Value": meta.Tags[key]})
+	}
+	writeDynamoDBJSON(c, http.StatusOK, map[string]any{"Tags": tags})
+	return nil
+}
+
+func (h *dynamoDBNativeHandler) handleUpdateTable(c *gin.Context, body []byte) error {
+	request := struct {
+		TableName                 string                   `json:"TableName"`
+		BillingMode               string                   `json:"BillingMode,omitempty"`
+		DeletionProtectionEnabled *bool                    `json:"DeletionProtectionEnabled,omitempty"`
+		SSESpecification          *sseSpecification        `json:"SSESpecification,omitempty"`
+	}{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid UpdateTable request: %w", err)
+	}
+	tableName := strings.TrimSpace(request.TableName)
+	if tableName == "" {
+		return fmt.Errorf("dynamodb: table name is required")
+	}
+	table, err := h.service.DescribeTable(tableName)
+	if err != nil {
+		return err
+	}
+	meta := h.ensureTableMeta(tableName)
+	if request.DeletionProtectionEnabled != nil {
+		meta.DeletionProtectionEnabled = *request.DeletionProtectionEnabled
+	}
+	if strings.EqualFold(strings.TrimSpace(request.BillingMode), "PAY_PER_REQUEST") {
+		meta.ProvisionedThroughput = provisionedThroughputDescription{}
+		for indexName := range meta.GSIProvisionedThroughput {
+			meta.GSIProvisionedThroughput[indexName] = provisionedThroughputDescription{}
+		}
+	}
+	if request.SSESpecification != nil {
+		status := "DISABLED"
+		if request.SSESpecification.Enabled {
+			status = "ENABLED"
+		}
+		meta.SSEDescription = &sseDescription{
+			Status:          status,
+			SSEType:         strings.TrimSpace(request.SSESpecification.SSEType),
+			KMSMasterKeyArn: strings.TrimSpace(request.SSESpecification.KMSMasterKeyId),
+		}
+	}
+	writeDynamoDBJSON(c, http.StatusOK, map[string]any{"TableDescription": h.tableDescriptionFor(table)})
+	return nil
+}
+
+func (h *dynamoDBNativeHandler) handleExecuteStatement(c *gin.Context, body []byte) error {
+	request := struct {
+		Statement  string                `json:"Statement"`
+		Parameters []dynamoAttributeValue `json:"Parameters,omitempty"`
+	}{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("dynamodb: invalid ExecuteStatement request: %w", err)
+	}
+	statement := strings.TrimSpace(request.Statement)
+	if statement == "" {
+		return fmt.Errorf("dynamodb: statement is required")
+	}
+
+	switch {
+	case strings.HasPrefix(strings.ToUpper(statement), "SELECT "):
+		items, err := h.executePartiQLSelect(statement, request.Parameters)
+		if err != nil {
+			return err
+		}
+		writeDynamoDBJSON(c, http.StatusOK, map[string]any{"Items": items})
+		return nil
+	case strings.HasPrefix(strings.ToUpper(statement), "INSERT "):
+		return h.executePartiQLInsert(c, statement, request.Parameters)
+	case strings.HasPrefix(strings.ToUpper(statement), "UPDATE "):
+		return h.executePartiQLUpdate(c, statement, request.Parameters)
+	case strings.HasPrefix(strings.ToUpper(statement), "DELETE "):
+		return h.executePartiQLDelete(c, statement, request.Parameters)
+	default:
+		return fmt.Errorf("dynamodb: unsupported execute statement %q", statement)
+	}
+}
+
 func isDynamoDBJSONRequest(contentType string) bool {
 	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(contentType))
 	if err != nil {
@@ -1037,6 +1380,10 @@ func dynamoDBErrorCode(err error) string {
 		return "ValidationException"
 	case strings.Contains(message, "not supported"):
 		return "ValidationException"
+	case strings.Contains(message, "provided key element"):
+		return "ValidationException"
+	case strings.Contains(message, "deletion protection"):
+		return "ValidationException"
 	default:
 		return "InternalServerError"
 	}
@@ -1077,6 +1424,20 @@ func writeDynamoDBTransactionCanceledError(c *gin.Context, err error) {
 	c.Data(http.StatusBadRequest, dynamoDBJSONContentType, data)
 }
 
+func transactionCancellationReasons(index, total int, code, message string) []ddbcontracts.TransactionCanceledReason {
+	if total <= 0 {
+		return nil
+	}
+	reasons := make([]ddbcontracts.TransactionCanceledReason, total)
+	if index >= 0 && index < total {
+		reasons[index] = ddbcontracts.TransactionCanceledReason{
+			Code:    code,
+			Message: message,
+		}
+	}
+	return reasons
+}
+
 type dynamoDBErrorResponse struct {
 	Type    string `json:"__type"`
 	Message string `json:"message"`
@@ -1107,10 +1468,14 @@ type listTablesResponse struct {
 type createTableRequest struct {
 	TableName              string                           `json:"TableName"`
 	BillingMode            string                           `json:"BillingMode,omitempty"`
+	ProvisionedThroughput  *provisionedThroughputRequest    `json:"ProvisionedThroughput,omitempty"`
 	KeySchema              []dynamoKeySchemaElement         `json:"KeySchema,omitempty"`
 	AttributeDefinitions   []dynamoAttributeDefinition      `json:"AttributeDefinitions,omitempty"`
 	GlobalSecondaryIndexes []dynamoSecondaryIndexDefinition `json:"GlobalSecondaryIndexes,omitempty"`
 	LocalSecondaryIndexes  []dynamoSecondaryIndexDefinition `json:"LocalSecondaryIndexes,omitempty"`
+	StreamSpecification    *streamSpecification             `json:"StreamSpecification,omitempty"`
+	DeletionProtectionEnabled bool                          `json:"DeletionProtectionEnabled,omitempty"`
+	SSESpecification       *sseSpecification                `json:"SSESpecification,omitempty"`
 }
 
 type createTableResponse struct {
@@ -1118,9 +1483,10 @@ type createTableResponse struct {
 }
 
 type dynamoSecondaryIndexDefinition struct {
-	IndexName  string                   `json:"IndexName"`
-	KeySchema  []dynamoKeySchemaElement `json:"KeySchema,omitempty"`
-	Projection dynamoProjection         `json:"Projection,omitempty"`
+	IndexName             string                          `json:"IndexName"`
+	KeySchema             []dynamoKeySchemaElement        `json:"KeySchema,omitempty"`
+	Projection            dynamoProjection                `json:"Projection,omitempty"`
+	ProvisionedThroughput *provisionedThroughputRequest   `json:"ProvisionedThroughput,omitempty"`
 }
 
 type describeTableRequest struct {
@@ -1154,15 +1520,18 @@ type putItemRequest struct {
 	ConditionExpression       string                          `json:"ConditionExpression,omitempty"`
 	ExpressionAttributeNames  map[string]string               `json:"ExpressionAttributeNames,omitempty"`
 	ExpressionAttributeValues map[string]dynamoAttributeValue `json:"ExpressionAttributeValues,omitempty"`
+	ReturnConsumedCapacity    string                          `json:"ReturnConsumedCapacity,omitempty"`
 }
 
 type putItemResponse struct {
-	Attributes map[string]dynamoAttributeValue `json:"Attributes,omitempty"`
+	Attributes       map[string]dynamoAttributeValue `json:"Attributes,omitempty"`
+	ConsumedCapacity *consumedCapacity              `json:"ConsumedCapacity,omitempty"`
 }
 
 type deleteItemRequest struct {
 	TableName string                          `json:"TableName"`
 	Key       map[string]dynamoAttributeValue `json:"Key"`
+	ReturnValues string                       `json:"ReturnValues,omitempty"`
 }
 
 type updateItemRequest struct {
@@ -1175,7 +1544,9 @@ type updateItemRequest struct {
 	ReturnValues              string                          `json:"ReturnValues,omitempty"`
 }
 
-type deleteItemResponse struct{}
+type deleteItemResponse struct {
+	Attributes map[string]dynamoAttributeValue `json:"Attributes,omitempty"`
+}
 
 type updateItemResponse struct {
 	Attributes map[string]dynamoAttributeValue `json:"Attributes,omitempty"`
@@ -1193,6 +1564,7 @@ type queryRequest struct {
 	IndexName                 string                          `json:"IndexName,omitempty"`
 	ProjectionExpression      string                          `json:"ProjectionExpression,omitempty"`
 	Select                    string                          `json:"Select,omitempty"`
+	QueryFilter               map[string]legacyCondition      `json:"QueryFilter,omitempty"`
 }
 
 type scanRequest struct {
@@ -1207,6 +1579,7 @@ type scanRequest struct {
 	Select                    string                          `json:"Select,omitempty"`
 	Segment                   *int                            `json:"Segment,omitempty"`
 	TotalSegments             *int                            `json:"TotalSegments,omitempty"`
+	ScanFilter                map[string]legacyCondition      `json:"ScanFilter,omitempty"`
 }
 
 type queryResponse struct {
@@ -1243,7 +1616,8 @@ type batchWriteDeleteRequest struct {
 }
 
 type batchWriteItemResponse struct {
-	UnprocessedItems map[string][]batchWriteRequest `json:"UnprocessedItems,omitempty"`
+	UnprocessedItems  map[string][]batchWriteRequest `json:"UnprocessedItems,omitempty"`
+	ConsumedCapacity []consumedCapacity             `json:"ConsumedCapacity,omitempty"`
 }
 
 type batchGetItemRequest struct {
@@ -1261,6 +1635,7 @@ type batchGetTableRequest struct {
 type batchGetItemResponse struct {
 	Responses       map[string][]map[string]dynamoAttributeValue `json:"Responses,omitempty"`
 	UnprocessedKeys map[string]batchGetTableRequest              `json:"UnprocessedKeys,omitempty"`
+	ConsumedCapacity []consumedCapacity                          `json:"ConsumedCapacity,omitempty"`
 }
 
 type transactWriteItemsRequest struct {
@@ -1370,6 +1745,8 @@ type timeToLiveDescription struct {
 type dynamoAttributeValue struct {
 	S    string                          `json:"S,omitempty"`
 	N    string                          `json:"N,omitempty"`
+	SS   []string                        `json:"SS,omitempty"`
+	NS   []string                        `json:"NS,omitempty"`
 	BOOL *bool                           `json:"BOOL,omitempty"`
 	NULL bool                            `json:"NULL,omitempty"`
 	M    map[string]dynamoAttributeValue `json:"M,omitempty"`
@@ -1401,6 +1778,49 @@ type tableDescription struct {
 	GlobalSecondaryIndexes []dynamoSecondaryIndexDefinition `json:"GlobalSecondaryIndexes,omitempty"`
 	LocalSecondaryIndexes  []dynamoSecondaryIndexDefinition `json:"LocalSecondaryIndexes,omitempty"`
 	BillingModeSummary     *billingModeSummary              `json:"BillingModeSummary,omitempty"`
+	DeletionProtectionEnabled bool                          `json:"DeletionProtectionEnabled"`
+	ProvisionedThroughput   provisionedThroughputDescription `json:"ProvisionedThroughput"`
+	LatestStreamArn         string                           `json:"LatestStreamArn,omitempty"`
+	LatestStreamLabel       string                           `json:"LatestStreamLabel,omitempty"`
+	StreamSpecification     *streamSpecification             `json:"StreamSpecification,omitempty"`
+	SSEDescription          *sseDescription                  `json:"SSEDescription,omitempty"`
+}
+
+type provisionedThroughputRequest struct {
+	ReadCapacityUnits  int64 `json:"ReadCapacityUnits"`
+	WriteCapacityUnits int64 `json:"WriteCapacityUnits"`
+}
+
+type provisionedThroughputDescription struct {
+	ReadCapacityUnits  int64 `json:"ReadCapacityUnits"`
+	WriteCapacityUnits int64 `json:"WriteCapacityUnits"`
+}
+
+type streamSpecification struct {
+	StreamEnabled  bool   `json:"StreamEnabled"`
+	StreamViewType string `json:"StreamViewType,omitempty"`
+}
+
+type sseSpecification struct {
+	Enabled        bool   `json:"Enabled"`
+	SSEType        string `json:"SSEType,omitempty"`
+	KMSMasterKeyId string `json:"KMSMasterKeyId,omitempty"`
+}
+
+type sseDescription struct {
+	Status          string `json:"Status"`
+	SSEType         string `json:"SSEType,omitempty"`
+	KMSMasterKeyArn string `json:"KMSMasterKeyArn,omitempty"`
+}
+
+type consumedCapacity struct {
+	TableName     string  `json:"TableName,omitempty"`
+	CapacityUnits float64 `json:"CapacityUnits,omitempty"`
+}
+
+type legacyCondition struct {
+	AttributeValueList []dynamoAttributeValue `json:"AttributeValueList,omitempty"`
+	ComparisonOperator string                 `json:"ComparisonOperator,omitempty"`
 }
 
 type billingModeSummary struct {
@@ -1468,11 +1888,12 @@ func cloneAttributeDefinitions(source []dynamoAttributeDefinition) []dynamoAttri
 	return cloned
 }
 
-func tableDescriptionFromDomain(table dynamodbdomain.Table) tableDescription {
+func (h *dynamoDBNativeHandler) tableDescriptionFor(table dynamodbdomain.Table) tableDescription {
 	aws := awscontext.Default()
-	return tableDescription{
+	meta := h.ensureTableMeta(table.Name)
+	description := tableDescription{
 		TableName:              table.Name,
-		TableStatus:            table.Status,
+		TableStatus:            effectiveTableStatus(table.Status),
 		TableArn:               aws.DynamoDBTableARN(table.Name),
 		CreationDateTime:       awsTimestamp(table.CreatedAt),
 		KeySchema:              cloneKeySchema(nil, table.PartitionKey, table.SortKey),
@@ -1480,7 +1901,30 @@ func tableDescriptionFromDomain(table dynamodbdomain.Table) tableDescription {
 		GlobalSecondaryIndexes: secondaryIndexesFromDomain(table.GlobalSecondaryIndexes),
 		LocalSecondaryIndexes:  secondaryIndexesFromDomain(table.LocalSecondaryIndexes),
 		BillingModeSummary:     billingModeSummaryFor(table.BillingMode),
+		DeletionProtectionEnabled: meta.DeletionProtectionEnabled,
+		ProvisionedThroughput:  meta.ProvisionedThroughput,
+		LatestStreamArn:        meta.LatestStreamArn,
+		LatestStreamLabel:      meta.LatestStreamLabel,
+		StreamSpecification:    cloneStreamSpecification(meta.StreamSpecification),
+		SSEDescription:         cloneSSEDescription(meta.SSEDescription),
 	}
+	for i := range description.GlobalSecondaryIndexes {
+		indexName := description.GlobalSecondaryIndexes[i].IndexName
+		pt := meta.GSIProvisionedThroughput[indexName]
+		description.GlobalSecondaryIndexes[i].ProvisionedThroughput = &provisionedThroughputRequest{
+			ReadCapacityUnits:  pt.ReadCapacityUnits,
+			WriteCapacityUnits: pt.WriteCapacityUnits,
+		}
+	}
+	return description
+}
+
+func effectiveTableStatus(status string) string {
+	status = strings.ToUpper(strings.TrimSpace(status))
+	if status == "" || status == dynamodbdomain.TableStatusCreating {
+		return dynamodbdomain.TableStatusActive
+	}
+	return status
 }
 
 func attributeDefinitionsFromDomain(source []dynamodbdomain.AttributeDefinition) []dynamoAttributeDefinition {
@@ -1596,12 +2040,15 @@ func keyFromAttributeValueMap(table dynamodbdomain.Table, values map[string]dyna
 		expectedCount++
 	}
 	if len(values) != expectedCount {
-		return "", fmt.Errorf("dynamodb: unsupported key attributes %q", strings.Join(sortedDynamoAttributeKeys(values), ", "))
+		return "", fmt.Errorf("The provided key element does not match the schema")
 	}
 
 	partitionValue, ok := values[table.PartitionKey]
 	if !ok {
-		return "", fmt.Errorf("dynamodb: missing key attribute %q", table.PartitionKey)
+		return "", fmt.Errorf("The provided key element does not match the schema")
+	}
+	if !keyAttributeTypeMatches(table, table.PartitionKey, partitionValue) {
+		return "", fmt.Errorf("The provided key element does not match the schema")
 	}
 
 	partitionKey, err := attributeValueToString(partitionValue)
@@ -1615,7 +2062,10 @@ func keyFromAttributeValueMap(table dynamodbdomain.Table, values map[string]dyna
 
 	sortValue, ok := values[table.SortKey]
 	if !ok {
-		return "", fmt.Errorf("dynamodb: missing key attribute %q", table.SortKey)
+		return "", fmt.Errorf("The provided key element does not match the schema")
+	}
+	if !keyAttributeTypeMatches(table, table.SortKey, sortValue) {
+		return "", fmt.Errorf("The provided key element does not match the schema")
 	}
 
 	sortKey, err := attributeValueToString(sortValue)
@@ -1665,6 +2115,9 @@ func itemKeyFromAttributeValueMap(table dynamodbdomain.Table, values map[string]
 	if !ok {
 		return "", fmt.Errorf("dynamodb: missing key attribute %q", table.PartitionKey)
 	}
+	if !keyAttributeTypeMatches(table, table.PartitionKey, partitionValue) {
+		return "", fmt.Errorf("The provided key element does not match the schema")
+	}
 
 	partitionKey, err := attributeValueToString(partitionValue)
 	if err != nil {
@@ -1678,6 +2131,9 @@ func itemKeyFromAttributeValueMap(table dynamodbdomain.Table, values map[string]
 	sortValue, ok := values[table.SortKey]
 	if !ok {
 		return "", fmt.Errorf("dynamodb: missing key attribute %q", table.SortKey)
+	}
+	if !keyAttributeTypeMatches(table, table.SortKey, sortValue) {
+		return "", fmt.Errorf("The provided key element does not match the schema")
 	}
 
 	sortKey, err := attributeValueToString(sortValue)
@@ -1695,6 +2151,26 @@ func sortedDynamoAttributeKeys(values map[string]dynamoAttributeValue) []string 
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func keyAttributeTypeMatches(table dynamodbdomain.Table, name string, value dynamoAttributeValue) bool {
+	expected := ""
+	for _, definition := range table.AttributeDefinitions {
+		if definition.Name == name {
+			expected = strings.ToUpper(strings.TrimSpace(definition.Type))
+			break
+		}
+	}
+	switch expected {
+	case "S":
+		return value.S != ""
+	case "N":
+		return value.N != ""
+	case "":
+		return true
+	default:
+		return true
+	}
 }
 
 func evaluateNativeCondition(attributes map[string]dynamodbdomain.AttributeValue, conditionExpression string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]dynamodbdomain.AttributeValue) error {
@@ -2093,6 +2569,24 @@ func attributeValueToDomain(value dynamoAttributeValue) (dynamodbdomain.Attribut
 		return dynamodbdomain.StringValue(value.S), nil
 	case value.N != "":
 		return dynamodbdomain.NumberValue(value.N), nil
+	case len(value.SS) > 0:
+		elements := make([]dynamodbdomain.AttributeValue, len(value.SS))
+		for i, entry := range value.SS {
+			elements[i] = dynamodbdomain.StringValue(entry)
+		}
+		return dynamodbdomain.MapValue(map[string]dynamodbdomain.AttributeValue{
+			"__mildstack_set_type": dynamodbdomain.StringValue("SS"),
+			"values":               dynamodbdomain.ListValue(elements),
+		}), nil
+	case len(value.NS) > 0:
+		elements := make([]dynamodbdomain.AttributeValue, len(value.NS))
+		for i, entry := range value.NS {
+			elements[i] = dynamodbdomain.NumberValue(entry)
+		}
+		return dynamodbdomain.MapValue(map[string]dynamodbdomain.AttributeValue{
+			"__mildstack_set_type": dynamodbdomain.StringValue("NS"),
+			"values":               dynamodbdomain.ListValue(elements),
+		}), nil
 	case value.BOOL != nil:
 		return dynamodbdomain.BoolValue(*value.BOOL), nil
 	case value.NULL:
@@ -2135,6 +2629,30 @@ func attributeValueMapFromDomain(attributes map[string]dynamodbdomain.AttributeV
 }
 
 func dynamoAttributeValueFromDomain(value dynamodbdomain.AttributeValue) dynamoAttributeValue {
+	if value.M != nil {
+		if setType, ok := (*value.M)["__mildstack_set_type"]; ok && setType.S != nil {
+			if values, ok := (*value.M)["values"]; ok && values.L != nil {
+				switch *setType.S {
+				case "SS":
+					ss := make([]string, 0, len(*values.L))
+					for _, entry := range *values.L {
+						if entry.S != nil {
+							ss = append(ss, *entry.S)
+						}
+					}
+					return dynamoAttributeValue{SS: ss}
+				case "NS":
+					ns := make([]string, 0, len(*values.L))
+					for _, entry := range *values.L {
+						if entry.N != nil {
+							ns = append(ns, *entry.N)
+						}
+					}
+					return dynamoAttributeValue{NS: ns}
+				}
+			}
+		}
+	}
 	switch {
 	case value.S != nil:
 		return dynamoAttributeValue{S: *value.S}
@@ -2270,6 +2788,398 @@ func cloneDynamoAttributeDocuments(keys []map[string]dynamodbdomain.AttributeVal
 		copied[i] = attributeValueMapFromDomain(key)
 	}
 	return copied
+}
+
+func (h *dynamoDBNativeHandler) ensureTableMeta(tableName string) *nativeTableMeta {
+	if h.meta == nil {
+		h.meta = map[string]*nativeTableMeta{}
+	}
+	meta, ok := h.meta[tableName]
+	if ok {
+		return meta
+	}
+	meta = &nativeTableMeta{
+		Tags:                     map[string]string{},
+		ProvisionedThroughput:    provisionedThroughputDescription{},
+		GSIProvisionedThroughput: map[string]provisionedThroughputDescription{},
+	}
+	h.meta[tableName] = meta
+	return meta
+}
+
+func cloneStreamSpecification(spec *streamSpecification) *streamSpecification {
+	if spec == nil {
+		return nil
+	}
+	copied := *spec
+	return &copied
+}
+
+func cloneSSEDescription(value *sseDescription) *sseDescription {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
+}
+
+func throughputFromCreateRequest(billingMode string, request *provisionedThroughputRequest) provisionedThroughputDescription {
+	if strings.EqualFold(strings.TrimSpace(billingMode), "PAY_PER_REQUEST") {
+		return provisionedThroughputDescription{}
+	}
+	if request == nil {
+		return provisionedThroughputDescription{}
+	}
+	return provisionedThroughputDescription{
+		ReadCapacityUnits:  request.ReadCapacityUnits,
+		WriteCapacityUnits: request.WriteCapacityUnits,
+	}
+}
+
+func gsiThroughputFromCreateRequest(billingMode string, indexes []dynamoSecondaryIndexDefinition) map[string]provisionedThroughputDescription {
+	out := make(map[string]provisionedThroughputDescription, len(indexes))
+	for _, index := range indexes {
+		if strings.EqualFold(strings.TrimSpace(billingMode), "PAY_PER_REQUEST") || index.ProvisionedThroughput == nil {
+			out[index.IndexName] = provisionedThroughputDescription{}
+			continue
+		}
+		out[index.IndexName] = provisionedThroughputDescription{
+			ReadCapacityUnits:  index.ProvisionedThroughput.ReadCapacityUnits,
+			WriteCapacityUnits: index.ProvisionedThroughput.WriteCapacityUnits,
+		}
+	}
+	return out
+}
+
+func sseDescriptionFromCreateRequest(spec *sseSpecification) *sseDescription {
+	if spec == nil {
+		return nil
+	}
+	status := "DISABLED"
+	if spec.Enabled {
+		status = "ENABLED"
+	}
+	return &sseDescription{
+		Status:          status,
+		SSEType:         strings.TrimSpace(spec.SSEType),
+		KMSMasterKeyArn: strings.TrimSpace(spec.KMSMasterKeyId),
+	}
+}
+
+func tableNameFromTableARN(arn string) string {
+	arn = strings.TrimSpace(arn)
+	if arn == "" {
+		return ""
+	}
+	parts := strings.Split(arn, "/")
+	return strings.TrimSpace(parts[len(parts)-1])
+}
+
+func changedAttributes(source map[string]dynamodbdomain.AttributeValue, target map[string]dynamodbdomain.AttributeValue) map[string]dynamoAttributeValue {
+	changed := map[string]dynamoAttributeValue{}
+	for name, value := range target {
+		other, ok := source[name]
+		if !ok || !attributeValueEqual(other, value) {
+			changed[name] = dynamoAttributeValueFromDomain(value)
+		}
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	return changed
+}
+
+func applyLegacyFilterToItems(items []dynamodbdomain.Item, filter map[string]legacyCondition) []dynamodbdomain.Item {
+	if len(filter) == 0 {
+		return items
+	}
+	filtered := make([]dynamodbdomain.Item, 0, len(items))
+	for _, item := range items {
+		if matchesAllLegacyConditions(item, filter) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func matchesAllLegacyConditions(item dynamodbdomain.Item, filter map[string]legacyCondition) bool {
+	for name, condition := range filter {
+		if strings.ToUpper(strings.TrimSpace(condition.ComparisonOperator)) != "EQ" || len(condition.AttributeValueList) != 1 {
+			return false
+		}
+		existing, ok := item.Attributes[name]
+		if !ok {
+			return false
+		}
+		expected, err := attributeValueToDomain(condition.AttributeValueList[0])
+		if err != nil {
+			return false
+		}
+		if !attributeValueEqual(existing, expected) {
+			return false
+		}
+	}
+	return true
+}
+
+func consumedCapacityForBatchWrite(request ddbcontracts.BatchWriteItemRequest, mode string, h *dynamoDBNativeHandler) []consumedCapacity {
+	if strings.TrimSpace(mode) == "" || strings.EqualFold(mode, "NONE") {
+		return nil
+	}
+	out := make([]consumedCapacity, 0, len(request.Tables))
+	for _, table := range request.Tables {
+		units := 0.0
+		meta := h.ensureTableMeta(table.Table)
+		gsiCount := float64(len(meta.GSIProvisionedThroughput))
+		if gsiCount == 0 {
+			gsiCount = float64(len(h.indexes[table.Table]))
+		}
+		for range table.Requests {
+			units += 1.0 + gsiCount
+		}
+		out = append(out, consumedCapacity{TableName: table.Table, CapacityUnits: units})
+	}
+	return out
+}
+
+func consumedCapacityForBatchGet(request ddbcontracts.BatchGetItemRequest, mode string) []consumedCapacity {
+	if strings.TrimSpace(mode) == "" || strings.EqualFold(mode, "NONE") {
+		return nil
+	}
+	out := make([]consumedCapacity, 0, len(request.Tables))
+	for _, table := range request.Tables {
+		out = append(out, consumedCapacity{
+			TableName:     table.Table,
+			CapacityUnits: float64(len(table.Keys)),
+		})
+	}
+	return out
+}
+
+func consumedCapacityForSingleWrite(tableName, mode string, h *dynamoDBNativeHandler) *consumedCapacity {
+	if strings.TrimSpace(mode) == "" || strings.EqualFold(mode, "NONE") {
+		return nil
+	}
+	meta := h.ensureTableMeta(tableName)
+	gsiCount := float64(len(meta.GSIProvisionedThroughput))
+	if gsiCount == 0 {
+		gsiCount = float64(len(h.indexes[tableName]))
+	}
+	return &consumedCapacity{
+		TableName:     tableName,
+		CapacityUnits: 1.0 + gsiCount,
+	}
+}
+
+var (
+	partiqlSelectRegex = regexp.MustCompile(`(?i)^SELECT\s+(.+?)\s+FROM\s+"([^"]+)"(?:\s+WHERE\s+(.+))?$`)
+	partiqlInsertRegex = regexp.MustCompile(`(?i)^INSERT\s+INTO\s+"([^"]+)"\s+VALUE\s+\{(.+)\}$`)
+	partiqlUpdateRegex = regexp.MustCompile(`(?i)^UPDATE\s+"([^"]+)"\s+SET\s+([a-zA-Z0-9_#]+)\s*=\s*\?\s+WHERE\s+([a-zA-Z0-9_#]+)\s*=\s*\?$`)
+	partiqlDeleteRegex = regexp.MustCompile(`(?i)^DELETE\s+FROM\s+"([^"]+)"\s+WHERE\s+([a-zA-Z0-9_#]+)\s*=\s*\?$`)
+)
+
+func (h *dynamoDBNativeHandler) executePartiQLSelect(statement string, params []dynamoAttributeValue) ([]map[string]dynamoAttributeValue, error) {
+	matches := partiqlSelectRegex.FindStringSubmatch(statement)
+	if len(matches) != 4 {
+		return nil, fmt.Errorf("dynamodb: unsupported execute statement %q", statement)
+	}
+	projection := strings.TrimSpace(matches[1])
+	tableName := strings.TrimSpace(matches[2])
+	whereExpr := strings.TrimSpace(matches[3])
+	if tableName == "" {
+		return nil, fmt.Errorf("dynamodb: table name is required")
+	}
+	if _, err := h.service.DescribeTable(tableName); err != nil {
+		return nil, err
+	}
+	page, err := h.service.Scan(tableName, "", nil, nil, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	items := page.Items
+	if whereExpr != "" {
+		filtered, err := filterPartiQLItems(items, whereExpr, params)
+		if err != nil {
+			return nil, err
+		}
+		items = filtered
+	}
+	names := []string(nil)
+	if projection != "*" {
+		parts := strings.Split(projection, ",")
+		names = make([]string, 0, len(parts))
+		for _, part := range parts {
+			name := strings.TrimSpace(part)
+			if name != "" {
+				names = append(names, name)
+			}
+		}
+	}
+	out := make([]map[string]dynamoAttributeValue, 0, len(items))
+	for _, item := range items {
+		doc := attributeValueMapFromDomain(item.Attributes)
+		if len(names) > 0 {
+			projected := map[string]dynamoAttributeValue{}
+			for _, name := range names {
+				if value, ok := doc[name]; ok {
+					projected[name] = value
+				}
+			}
+			doc = projected
+		}
+		out = append(out, doc)
+	}
+	return out, nil
+}
+
+func (h *dynamoDBNativeHandler) executePartiQLInsert(c *gin.Context, statement string, params []dynamoAttributeValue) error {
+	matches := partiqlInsertRegex.FindStringSubmatch(statement)
+	if len(matches) != 3 {
+		return fmt.Errorf("dynamodb: unsupported execute statement %q", statement)
+	}
+	tableName := strings.TrimSpace(matches[1])
+	table, err := h.service.DescribeTable(tableName)
+	if err != nil {
+		return err
+	}
+	fields := strings.Split(matches[2], ",")
+	if len(fields) != len(params) {
+		return fmt.Errorf("dynamodb: execute statement parameters do not match placeholders")
+	}
+	item := map[string]dynamoAttributeValue{}
+	for i, field := range fields {
+		parts := strings.SplitN(field, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("dynamodb: invalid insert field %q", field)
+		}
+		name := strings.Trim(strings.TrimSpace(parts[0]), "'\"")
+		item[name] = params[i]
+	}
+	key, attributes, err := itemFromAttributeValueMap(table, item)
+	if err != nil {
+		return err
+	}
+	if _, err := h.service.GetItem(tableName, key); err == nil {
+		return fmt.Errorf("dynamodb: conditional check failed")
+	}
+	if _, err := h.service.PutItem(tableName, key, attributes); err != nil {
+		return err
+	}
+	writeDynamoDBJSON(c, http.StatusOK, map[string]any{})
+	return nil
+}
+
+func (h *dynamoDBNativeHandler) executePartiQLUpdate(c *gin.Context, statement string, params []dynamoAttributeValue) error {
+	matches := partiqlUpdateRegex.FindStringSubmatch(statement)
+	if len(matches) != 4 || len(params) != 2 {
+		return fmt.Errorf("dynamodb: unsupported execute statement %q", statement)
+	}
+	tableName := strings.TrimSpace(matches[1])
+	setAttr := strings.TrimSpace(matches[2])
+	keyAttr := strings.TrimSpace(matches[3])
+	table, err := h.service.DescribeTable(tableName)
+	if err != nil {
+		return err
+	}
+	if keyAttr != table.PartitionKey {
+		return fmt.Errorf("dynamodb: unsupported execute statement %q", statement)
+	}
+	key := map[string]dynamoAttributeValue{keyAttr: params[1]}
+	itemKey, err := keyFromAttributeValueMap(table, key)
+	if err != nil {
+		return err
+	}
+	value, err := attributeValueToDomain(params[0])
+	if err != nil {
+		return err
+	}
+	updated, err := h.service.UpdateItem(tableName, itemKey, "SET "+setAttr+" = :v", "", nil, map[string]dynamodbdomain.AttributeValue{":v": value})
+	if err != nil {
+		return err
+	}
+	writeDynamoDBJSON(c, http.StatusOK, map[string]any{"Attributes": attributeValueMapFromDomain(updated.Attributes)})
+	return nil
+}
+
+func (h *dynamoDBNativeHandler) executePartiQLDelete(c *gin.Context, statement string, params []dynamoAttributeValue) error {
+	matches := partiqlDeleteRegex.FindStringSubmatch(statement)
+	if len(matches) != 3 || len(params) != 1 {
+		return fmt.Errorf("dynamodb: unsupported execute statement %q", statement)
+	}
+	tableName := strings.TrimSpace(matches[1])
+	keyAttr := strings.TrimSpace(matches[2])
+	table, err := h.service.DescribeTable(tableName)
+	if err != nil {
+		return err
+	}
+	if keyAttr != table.PartitionKey {
+		return fmt.Errorf("dynamodb: unsupported execute statement %q", statement)
+	}
+	key := map[string]dynamoAttributeValue{keyAttr: params[0]}
+	itemKey, err := keyFromAttributeValueMap(table, key)
+	if err != nil {
+		return err
+	}
+	if err := h.service.DeleteItem(tableName, itemKey); err != nil {
+		return err
+	}
+	writeDynamoDBJSON(c, http.StatusOK, map[string]any{})
+	return nil
+}
+
+func filterPartiQLItems(items []dynamodbdomain.Item, whereExpr string, params []dynamoAttributeValue) ([]dynamodbdomain.Item, error) {
+	whereExpr = strings.TrimSpace(whereExpr)
+	parts := strings.Fields(whereExpr)
+	if len(parts) != 3 || parts[2] != "?" || len(params) != 1 {
+		return nil, fmt.Errorf("dynamodb: unsupported execute statement where clause %q", whereExpr)
+	}
+	attr := strings.TrimSpace(parts[0])
+	op := strings.TrimSpace(parts[1])
+	expected, err := attributeValueToDomain(params[0])
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]dynamodbdomain.Item, 0, len(items))
+	for _, item := range items {
+		actual, ok := item.Attributes[attr]
+		if !ok {
+			continue
+		}
+		switch op {
+		case "=":
+			if attributeValueEqual(actual, expected) {
+				filtered = append(filtered, item)
+			}
+		case ">":
+			if compareDomainAttributeValues(actual, expected) > 0 {
+				filtered = append(filtered, item)
+			}
+		default:
+			return nil, fmt.Errorf("dynamodb: unsupported execute statement where operator %q", op)
+		}
+	}
+	return filtered, nil
+}
+
+func compareDomainAttributeValues(left, right dynamodbdomain.AttributeValue) int {
+	if left.S != nil && right.S != nil {
+		return strings.Compare(*left.S, *right.S)
+	}
+	if left.N != nil && right.N != nil {
+		leftFloat, leftErr := strconv.ParseFloat(*left.N, 64)
+		rightFloat, rightErr := strconv.ParseFloat(*right.N, 64)
+		if leftErr == nil && rightErr == nil {
+			switch {
+			case leftFloat < rightFloat:
+				return -1
+			case leftFloat > rightFloat:
+				return 1
+			default:
+				return 0
+			}
+		}
+	}
+	return 0
 }
 
 func paginateTableNames(names []string, limit *int, exclusiveStart string) ([]string, string) {
