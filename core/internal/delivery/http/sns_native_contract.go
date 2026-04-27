@@ -72,6 +72,9 @@ func ParseSNSRequest(req *http.Request, registry SNSRegistry) (SNSRequestContext
 	if values == nil {
 		values = url.Values{}
 	}
+	if strings.TrimSpace(values.Get("Version")) == "" && strings.EqualFold(strings.TrimSpace(values.Get("Action")), "PublishBatch") {
+		values.Set("Version", snsAPIVersion)
+	}
 	action := strings.TrimSpace(values.Get("Action"))
 	version := strings.TrimSpace(values.Get("Version"))
 	if !shouldOwnSNSRequest(action, version, registry) {

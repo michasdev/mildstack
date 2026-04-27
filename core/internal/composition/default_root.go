@@ -10,7 +10,9 @@ import (
 	"github.com/michasdev/mildstack/core/internal/resources/dynamodb"
 	"github.com/michasdev/mildstack/core/internal/resources/s3"
 	"github.com/michasdev/mildstack/core/internal/resources/sns"
+	snsapplication "github.com/michasdev/mildstack/core/internal/resources/sns/application"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs"
+	sqsapplication "github.com/michasdev/mildstack/core/internal/resources/sqs/application"
 )
 
 type DefaultRootConfig struct {
@@ -71,6 +73,11 @@ func defaultRootWithHook(hook orchestrator.StateHook, config DefaultRootConfig) 
 		_ = dynamoService.Stop(context.Background())
 		_ = sqsService.Stop(context.Background())
 		panic(fmt.Sprintf("composition: init sns service: %v", err))
+	}
+	if snsConcrete, ok := snsService.(*snsapplication.Service); ok {
+		if sqsConcrete, ok := sqsService.(*sqsapplication.Service); ok {
+			snsConcrete.SetSQSBridge(sqsConcrete)
+		}
 	}
 
 	services := []orchestrator.Service{s3Service, dynamoService, sqsService, snsService}

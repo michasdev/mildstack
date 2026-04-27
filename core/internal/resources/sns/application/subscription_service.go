@@ -1,6 +1,8 @@
 package application
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/michasdev/mildstack/core/internal/resources/sns/domain"
@@ -12,7 +14,8 @@ func (s *Service) Subscribe(topicARN, protocol, endpoint string, attributes map[
 	}
 
 	tenant := s.defaultTenant()
-	if _, err := s.topicRepository().GetByARN(tenant.Key(), topicARN); err != nil {
+	topic, err := s.topicRepository().GetByARN(tenant.Key(), topicARN)
+	if err != nil {
 		return domain.SubscribeOutput{}, err
 	}
 
@@ -20,16 +23,54 @@ func (s *Service) Subscribe(topicARN, protocol, endpoint string, attributes map[
 	if err != nil {
 		return domain.SubscribeOutput{}, err
 	}
+	if err := validateSQSSubscriptionForTopic(topic, subscription); err != nil {
+		return domain.SubscribeOutput{}, err
+	}
 
 	persisted, err := s.subscriptionRepository().Create(subscription)
 	if err != nil {
 		return domain.SubscribeOutput{}, err
+	}
+	if shouldAutoConfirmSubscription(persisted.Protocol) {
+		confirmed, confirmErr := persisted.Confirm(persisted.Token, time.Now().UTC())
+		if confirmErr != nil {
+			return domain.SubscribeOutput{}, confirmErr
+		}
+		if err := s.subscriptionRepository().Update(confirmed); err != nil {
+			return domain.SubscribeOutput{}, err
+		}
+		persisted = confirmed
+	} else if !returnSubscriptionARN {
+		_ = s.deliverSubscriptionConfirmation(persisted)
 	}
 
 	return domain.SubscribeOutput{
 		Subscription:         persisted,
 		ResponseSubscription: persisted.SubscribeResponseARN(returnSubscriptionARN),
 	}, nil
+}
+
+func shouldAutoConfirmSubscription(protocol string) bool {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "http", "https":
+		return false
+	default:
+		return true
+	}
+}
+
+func validateSQSSubscriptionForTopic(topic domain.Topic, subscription domain.Subscription) error {
+	if !topic.IsFIFO || !strings.EqualFold(strings.TrimSpace(subscription.Protocol), "sqs") {
+		return nil
+	}
+	queueName := queueNameFromARN(subscription.Endpoint)
+	if queueName == "" {
+		return fmt.Errorf("%w: invalid SQS endpoint ARN for FIFO topic subscription", domain.ErrValidation)
+	}
+	if !strings.HasSuffix(strings.ToLower(queueName), ".fifo") {
+		return fmt.Errorf("%w: FIFO topic subscriptions require FIFO SQS queues", domain.ErrValidation)
+	}
+	return nil
 }
 
 func (s *Service) ConfirmSubscription(topicARN, token string) (domain.Subscription, error) {

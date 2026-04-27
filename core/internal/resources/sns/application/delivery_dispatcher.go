@@ -2,6 +2,7 @@ package application
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/michasdev/mildstack/core/internal/resources/sns/domain"
+	sqscontracts "github.com/michasdev/mildstack/core/internal/resources/sqs/contracts"
 )
 
 func (s *Service) dispatchDelivery(message domain.PublishedMessage, hasTopic bool, topic domain.Topic) error {
@@ -79,6 +81,10 @@ func (s *Service) dispatchToSubscription(message domain.PublishedMessage, subscr
 		return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
 	}
 
+	if strings.EqualFold(subscription.Protocol, "sqs") {
+		return s.dispatchToSQSSubscription(message, subscription, attempt, startedAt)
+	}
+
 	if !strings.EqualFold(subscription.Protocol, "http") && !strings.EqualFold(subscription.Protocol, "https") {
 		attempt, _ = attempt.MarkSkipped("ProtocolDeferred", "Protocol delivery is simulated in local runtime.", time.Now().UTC())
 		attempt.RequestSnapshotJSON = mustMarshalJSON(map[string]any{"endpoint": subscription.Endpoint})
@@ -101,7 +107,7 @@ func (s *Service) dispatchToSubscription(message domain.PublishedMessage, subscr
 		return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
 	}
 
-	statusCode, responseBody, err := dispatchLocalHTTPSDelivery(subscription.Endpoint, payload, contentType)
+	statusCode, responseBody, err := dispatchLocalHTTPSDelivery(subscription.Endpoint, payload, contentType, nil)
 	attempt.RequestSnapshotJSON = mustMarshalJSON(map[string]any{
 		"endpoint":           subscription.Endpoint,
 		"protocol":           subscription.Protocol,
@@ -128,6 +134,58 @@ func (s *Service) dispatchToSubscription(message domain.PublishedMessage, subscr
 	} else {
 		attempt, _ = attempt.MarkFailed("EndpointResponse", fmt.Sprintf("endpoint returned status %d", statusCode), time.Now().UTC())
 	}
+	return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
+}
+
+func (s *Service) dispatchToSQSSubscription(message domain.PublishedMessage, subscription domain.Subscription, attempt domain.DeliveryAttempt, startedAt time.Time) error {
+	queueName := queueNameFromARN(subscription.Endpoint)
+	if queueName == "" {
+		attempt, _ = attempt.MarkFailed("InvalidParameterException", "Invalid SQS endpoint ARN.", time.Now().UTC())
+		attempt.RequestSnapshotJSON = mustMarshalJSON(map[string]any{"endpoint": subscription.Endpoint})
+		attempt.ResponseSnapshotJSON = mustMarshalJSON(map[string]any{"status": domain.DeliveryAttemptStatusFailed})
+		return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
+	}
+
+	if s.sqsBridge == nil {
+		attempt, _ = attempt.MarkSkipped("ProtocolDeferred", "SQS bridge is not available in this runtime.", time.Now().UTC())
+		attempt.RequestSnapshotJSON = mustMarshalJSON(map[string]any{"endpoint": subscription.Endpoint, "queue": queueName})
+		attempt.ResponseSnapshotJSON = mustMarshalJSON(map[string]any{"status": domain.DeliveryAttemptStatusSkipped})
+		return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
+	}
+
+	payload, _, err := snsDeliveryPayload(subscription, message)
+	if err != nil {
+		attempt, _ = attempt.MarkFailed("InvalidParameterException", err.Error(), time.Now().UTC())
+		attempt.RequestSnapshotJSON = mustMarshalJSON(map[string]any{"endpoint": subscription.Endpoint, "queue": queueName})
+		attempt.ResponseSnapshotJSON = mustMarshalJSON(map[string]any{"status": domain.DeliveryAttemptStatusFailed})
+		return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
+	}
+
+	request := sqscontracts.SendMessageRequest{
+		MessageBody:            string(payload),
+		MessageGroupId:         strings.TrimSpace(message.MessageGroupID),
+		MessageDeduplicationId: strings.TrimSpace(message.MessageDeduplicationID),
+	}
+	result, err := s.sqsBridge.SendMessage(queueName, request)
+	attempt.RequestSnapshotJSON = mustMarshalJSON(map[string]any{
+		"endpoint":           subscription.Endpoint,
+		"queue":              queueName,
+		"rawMessageDelivery": subscription.RawMessageDeliveryEnabled(),
+		"payload":            string(payload),
+	})
+	if err != nil {
+		attempt, _ = attempt.MarkFailed("EndpointConnectionError", err.Error(), time.Now().UTC())
+		attempt.ResponseSnapshotJSON = mustMarshalJSON(map[string]any{
+			"statusCode": 0,
+			"error":      err.Error(),
+		})
+		return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
+	}
+	attempt.ResponseSnapshotJSON = mustMarshalJSON(map[string]any{
+		"status":    domain.DeliveryAttemptStatusDelivered,
+		"messageId": result.MessageId,
+	})
+	attempt, _ = attempt.MarkDelivered(time.Now().UTC())
 	return s.persistDeliveryAttempt(message.MessageID, subscription.Endpoint, attempt, startedAt)
 }
 
@@ -189,12 +247,22 @@ func snsDeliveryPayload(subscription domain.Subscription, message domain.Publish
 	return encoded, "application/json", nil
 }
 
-func dispatchLocalHTTPSDelivery(endpoint string, payload []byte, contentType string) (int, string, error) {
-	request, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(payload))
+func dispatchLocalHTTPSDelivery(endpoint string, payload []byte, contentType string, headers map[string]string) (int, string, error) {
+	requestURL, authHeader := sanitizeEndpointForRequest(endpoint)
+	request, err := http.NewRequest(http.MethodPost, requestURL, bytes.NewReader(payload))
 	if err != nil {
 		return 0, "", err
 	}
 	request.Header.Set("Content-Type", contentType)
+	if strings.TrimSpace(authHeader) != "" {
+		request.Header.Set("Authorization", authHeader)
+	}
+	for key, value := range headers {
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+			continue
+		}
+		request.Header.Set(key, value)
+	}
 
 	client := &http.Client{Timeout: 3 * time.Second}
 	response, err := client.Do(request)
@@ -224,6 +292,61 @@ func isLocalEndpoint(rawURL string) bool {
 		return false
 	}
 	return ip.IsLoopback()
+}
+
+func queueNameFromARN(rawARN string) string {
+	parts := strings.Split(strings.TrimSpace(rawARN), ":")
+	if len(parts) < 6 || parts[0] != "arn" {
+		return ""
+	}
+	return strings.TrimSpace(parts[len(parts)-1])
+}
+
+func sanitizeEndpointForRequest(endpoint string) (string, string) {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || parsed == nil {
+		return endpoint, ""
+	}
+
+	authHeader := ""
+	if parsed.User != nil {
+		username := parsed.User.Username()
+		password, _ := parsed.User.Password()
+		parsed.User = nil
+		token := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+		authHeader = "Basic " + token
+	}
+	return parsed.String(), authHeader
+}
+
+func (s *Service) deliverSubscriptionConfirmation(subscription domain.Subscription) error {
+	if !strings.EqualFold(subscription.Protocol, "http") && !strings.EqualFold(subscription.Protocol, "https") {
+		return nil
+	}
+	if !isLocalEndpoint(subscription.Endpoint) {
+		return nil
+	}
+
+	confirmURL := fmt.Sprintf("https://sns.localhost/?Action=ConfirmSubscription&TopicArn=%s&Token=%s", url.QueryEscape(subscription.TopicARN), url.QueryEscape(subscription.Token))
+	payload, err := json.Marshal(map[string]any{
+		"Type":         "SubscriptionConfirmation",
+		"MessageId":    subscription.ARN,
+		"Token":        subscription.Token,
+		"TopicArn":     subscription.TopicARN,
+		"Message":      "You have chosen to subscribe to the topic.",
+		"SubscribeURL": confirmURL,
+		"Timestamp":    time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		"x-amz-sns-message-type": "SubscriptionConfirmation",
+		"x-amz-sns-topic-arn":    subscription.TopicARN,
+	}
+	_, _, err = dispatchLocalHTTPSDelivery(subscription.Endpoint, payload, "text/plain; charset=UTF-8", headers)
+	return err
 }
 
 func mustMarshalJSON(value any) string {

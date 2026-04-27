@@ -60,8 +60,20 @@ func classifySNSError(err error) (int, string, string) {
 		return http.StatusBadRequest, "InvalidAction", "The action or operation requested is invalid."
 	case errors.Is(err, ErrSNSUnsupported):
 		return http.StatusBadRequest, "InvalidAction", "The action is valid for SNS but not implemented in the local runtime yet."
+	case errors.Is(err, domain.ErrBatchEntryIDsNotDistinct):
+		return http.StatusBadRequest, "BatchEntryIdsNotDistinct", "Two or more batch entries in the request have the same Id."
 	case errors.Is(err, domain.ErrValidation), errors.Is(err, domain.ErrInvalidToken):
-		return http.StatusBadRequest, "InvalidParameter", err.Error()
+		code := "InvalidParameter"
+		lower := strings.ToLower(err.Error())
+		if strings.Contains(lower, "fifo") ||
+			strings.Contains(lower, "messagegroupid") ||
+			strings.Contains(lower, "messagededuplicationid") ||
+			strings.Contains(lower, "contentbaseddeduplication") ||
+			strings.Contains(lower, "topic name suffix") ||
+			strings.Contains(lower, "sqs endpoint arn") {
+			code = "InvalidParameterException"
+		}
+		return http.StatusBadRequest, code, err.Error()
 	case errors.Is(err, domain.ErrNotFound):
 		return http.StatusNotFound, "NotFound", "The requested resource does not exist."
 	case strings.Contains(strings.ToLower(err.Error()), "not initialized"), strings.Contains(strings.ToLower(err.Error()), "not configured"):

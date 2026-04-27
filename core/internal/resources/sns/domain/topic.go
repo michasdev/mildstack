@@ -80,8 +80,13 @@ func (t Topic) AttributesView(ownerAccountID string, subscriptionsConfirmed, sub
 	}
 	view["TopicArn"] = t.ARN
 	view["Owner"] = strings.TrimSpace(ownerAccountID)
-	if policy := strings.TrimSpace(t.PolicyJSON); policy != "" && policy != "{}" {
-		view["Policy"] = policy
+	policy := strings.TrimSpace(t.PolicyJSON)
+	if policy == "" {
+		policy = "{}"
+	}
+	view["Policy"] = policy
+	if _, ok := view["DisplayName"]; !ok {
+		view["DisplayName"] = ""
 	}
 	if t.IsFIFO {
 		view["FifoTopic"] = "true"
@@ -148,6 +153,8 @@ func normalizeTopicAttributes(attributes map[string]string, isFIFO bool) (map[st
 		} else {
 			normalized["ContentBasedDeduplication"] = "false"
 		}
+	} else {
+		normalized["ContentBasedDeduplication"] = "false"
 	}
 	return normalized, nil
 }

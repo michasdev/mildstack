@@ -9,6 +9,7 @@ import (
 	"github.com/michasdev/mildstack/core/internal/resources/sns/contracts"
 	"github.com/michasdev/mildstack/core/internal/resources/sns/domain"
 	"github.com/michasdev/mildstack/core/internal/resources/sns/infrastructure"
+	sqscontracts "github.com/michasdev/mildstack/core/internal/resources/sqs/contracts"
 )
 
 var _ orchestrator.Service = (*Service)(nil)
@@ -23,6 +24,11 @@ type Service struct {
 	store         *infrastructure.SQLiteStore
 	stateHook     orchestrator.StateHook
 	observability *snsObservability
+	sqsBridge     snsSQSBridge
+}
+
+type snsSQSBridge interface {
+	SendMessage(queueName string, request sqscontracts.SendMessageRequest) (sqscontracts.SendMessageResult, error)
 }
 
 func New() *Service {
@@ -109,4 +115,11 @@ func (s *Service) AttachState(hook orchestrator.StateHook) error {
 
 func ResolveStoragePath(config StorageConfig) (string, error) {
 	return infrastructure.ResolveStatePath(strings.TrimSpace(config.BaseDir), config.InstanceID)
+}
+
+func (s *Service) SetSQSBridge(bridge snsSQSBridge) {
+	if s == nil {
+		return
+	}
+	s.sqsBridge = bridge
 }

@@ -54,11 +54,10 @@ func (s *Service) Publish(request domain.PublishRequest) (result domain.PublishR
 		}
 	}
 
-	if err = s.publishRepository().SavePublishedMessage(message, dedupScopeKey, deduplicated); err != nil {
-		return domain.PublishResult{}, err
-	}
-
 	if !deduplicated {
+		if err = s.publishRepository().SavePublishedMessage(message, dedupScopeKey, deduplicated); err != nil {
+			return domain.PublishResult{}, err
+		}
 		if err = s.dispatchDelivery(message, hasTopic, topic); err != nil {
 			return domain.PublishResult{}, err
 		}
@@ -96,6 +95,9 @@ func (s *Service) PublishBatch(request domain.PublishBatchRequest) (result domai
 	if len(request.Entries) > 10 {
 		return domain.PublishBatchResult{}, fmt.Errorf("%w: too many entries in batch request", domain.ErrValidation)
 	}
+	if hasDuplicateBatchEntryIDs(request.Entries) {
+		return domain.PublishBatchResult{}, domain.ErrBatchEntryIDsNotDistinct
+	}
 
 	if _, err = s.topicRepository().GetByARN(s.defaultTenant().Key(), request.TopicARN); err != nil {
 		return domain.PublishBatchResult{}, err
@@ -121,7 +123,7 @@ func (s *Service) PublishBatch(request domain.PublishBatchRequest) (result domai
 		if _, exists := seenIDs[entryID]; exists {
 			result.Failed = append(result.Failed, domain.PublishBatchErrorEntry{
 				ID:          entryID,
-				Code:        "BatchEntryIdsNotDistinct",
+				Code:        "InvalidParameterException",
 				Message:     "Two or more batch entries in the request have the same Id.",
 				SenderFault: true,
 			})
@@ -200,6 +202,7 @@ func (s *Service) applyFIFORules(topic domain.Topic, message domain.PublishedMes
 
 	message.MessageDeduplicationID = deduplicationID
 	if found {
+		message.MessageID = existing.MessageID
 		message.SequenceNumber = existing.SequenceNumber
 		return message, dedupScopeKey, true, nil
 	}
@@ -219,12 +222,27 @@ func (s *Service) publishRepository() infrastructure.PublishRepository {
 func classifyPublishBatchEntryError(err error) (string, string, bool) {
 	switch {
 	case errors.Is(err, domain.ErrValidation):
-		return "InvalidParameter", err.Error(), true
+		return "InvalidParameterException", err.Error(), true
 	case errors.Is(err, domain.ErrNotFound):
 		return "NotFound", "The requested resource does not exist.", true
 	default:
 		return "InternalError", "Internal service error.", false
 	}
+}
+
+func hasDuplicateBatchEntryIDs(entries []domain.PublishBatchRequestEntry) bool {
+	seenIDs := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		id := strings.TrimSpace(entry.ID)
+		if id == "" {
+			continue
+		}
+		if _, exists := seenIDs[id]; exists {
+			return true
+		}
+		seenIDs[id] = struct{}{}
+	}
+	return false
 }
 
 func isTruthy(value string) bool {

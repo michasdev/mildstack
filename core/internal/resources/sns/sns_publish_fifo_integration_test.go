@@ -94,8 +94,8 @@ func TestSNSPublishFIFOAppliesDedupAndSequenceNumbering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list duplicate attempts: %v", err)
 	}
-	if got, want := len(duplicateAttempts), 0; got != want {
-		t.Fatalf("expected no delivery attempts for deduped message: got %d", got)
+	if got, want := len(duplicateAttempts), 1; got != want {
+		t.Fatalf("expected deduped publish to return first message id with a single delivery attempt: got %d", got)
 	}
 
 	thirdAttempts, err := service.ListDeliveryAttemptsByMessageID(third.MessageID)

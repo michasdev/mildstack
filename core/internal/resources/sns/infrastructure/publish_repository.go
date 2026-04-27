@@ -128,7 +128,7 @@ LIMIT 1
 	return message, true, nil
 }
 
-func (r PublishRepository) NextSequenceNumber(tenantKey, topicARN, messageGroupID string) (string, error) {
+func (r PublishRepository) NextSequenceNumber(tenantKey, topicARN, _ string) (string, error) {
 	db, err := r.ensureDB()
 	if err != nil {
 		return "", err
@@ -140,9 +140,8 @@ SELECT COALESCE(MAX(CAST(sequence_number AS INTEGER)), 0)
 FROM published_messages
 WHERE tenant_key = ?
   AND topic_arn = ?
-  AND message_group_id = ?
   AND sequence_number != ''
-`, strings.TrimSpace(tenantKey), strings.TrimSpace(topicARN), strings.TrimSpace(messageGroupID)).Scan(&maxValue)
+`, strings.TrimSpace(tenantKey), strings.TrimSpace(topicARN)).Scan(&maxValue)
 	if err != nil {
 		return "", fmt.Errorf("sns: query next sequence number: %w", err)
 	}
@@ -155,7 +154,7 @@ WHERE tenant_key = ?
 		}
 		base = parsed
 	}
-	return strconv.FormatInt(base+1, 10), nil
+	return fmt.Sprintf("%020d", base+1), nil
 }
 
 func (r PublishRepository) SaveDeliveryAttempt(attempt domain.DeliveryAttempt) error {
