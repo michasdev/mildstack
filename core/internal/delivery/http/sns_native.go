@@ -507,7 +507,7 @@ func (h SNSNativeHandler) handleGetSMSAttributes(c *gin.Context, ctx SNSRequestC
 		writeSNSError(c, err, snsRequestIDFromContext(c))
 		return
 	}
-	writeSNSAttributesActionResponse(c, "GetSMSAttributes", "GetSMSAttributesResult", attributes)
+	writeSNSGetSMSAttributesResponse(c, attributes)
 }
 
 func (h SNSNativeHandler) handleCheckIfPhoneNumberIsOptedOut(c *gin.Context, ctx SNSRequestContext) {
@@ -542,7 +542,7 @@ func (h SNSNativeHandler) handleListOriginationNumbers(c *gin.Context, ctx SNSRe
 		writeSNSError(c, err, snsRequestIDFromContext(c))
 		return
 	}
-	writeSNSPhoneNumberListResponse(c, "ListOriginationNumbers", phoneNumbers, nextToken)
+	writeSNSListOriginationNumbersResponse(c, phoneNumbers, nextToken)
 }
 
 func (h SNSNativeHandler) handleGetSMSSandboxAccountStatus(c *gin.Context, _ SNSRequestContext) {
@@ -612,7 +612,12 @@ type snsResponseMetadata struct {
 type snsNoResultActionResponse struct {
 	XMLName          xml.Name            `xml:""`
 	XMLNS            string              `xml:"xmlns,attr"`
+	Result           snsActionNoResult   `xml:""`
 	ResponseMetadata snsResponseMetadata `xml:"ResponseMetadata"`
+}
+
+type snsActionNoResult struct {
+	XMLName xml.Name `xml:""`
 }
 
 type snsCreateTopicResponse struct {
@@ -745,13 +750,14 @@ type snsConfirmSubscriptionResult struct {
 }
 
 type snsListSubscriptionsResponse struct {
-	XMLName                 xml.Name                   `xml:""`
-	XMLNS                   string                     `xml:"xmlns,attr"`
-	ListSubscriptionsResult snsListSubscriptionsResult `xml:"ListSubscriptionsResult"`
-	ResponseMetadata        snsResponseMetadata        `xml:"ResponseMetadata"`
+	XMLName          xml.Name                   `xml:""`
+	XMLNS            string                     `xml:"xmlns,attr"`
+	Result           snsListSubscriptionsResult `xml:""`
+	ResponseMetadata snsResponseMetadata        `xml:"ResponseMetadata"`
 }
 
 type snsListSubscriptionsResult struct {
+	XMLName       xml.Name               `xml:""`
 	Subscriptions snsSubscriptionMembers `xml:"Subscriptions"`
 	NextToken     string                 `xml:"NextToken,omitempty"`
 }
@@ -873,6 +879,17 @@ type snsAttributesResult struct {
 	Attributes snsAttributeEntries `xml:"Attributes"`
 }
 
+type snsGetSMSAttributesResponse struct {
+	XMLName          xml.Name                    `xml:"GetSMSAttributesResponse"`
+	XMLNS            string                      `xml:"xmlns,attr"`
+	Result           snsGetSMSAttributesResult   `xml:"GetSMSAttributesResult"`
+	ResponseMetadata snsResponseMetadata         `xml:"ResponseMetadata"`
+}
+
+type snsGetSMSAttributesResult struct {
+	Attributes snsAttributeEntries `xml:"attributes"`
+}
+
 type snsCheckIfPhoneNumberIsOptedOutResponse struct {
 	XMLName                            xml.Name                              `xml:"CheckIfPhoneNumberIsOptedOutResponse"`
 	XMLNS                              string                                `xml:"xmlns,attr"`
@@ -903,6 +920,26 @@ type snsPhoneNumberMembers struct {
 
 type snsPhoneNumberMember struct {
 	PhoneNumber string `xml:",chardata"`
+}
+
+type snsListOriginationNumbersResponse struct {
+	XMLName                      xml.Name                         `xml:"ListOriginationNumbersResponse"`
+	XMLNS                        string                           `xml:"xmlns,attr"`
+	ListOriginationNumbersResult snsListOriginationNumbersResult `xml:"ListOriginationNumbersResult"`
+	ResponseMetadata             snsResponseMetadata              `xml:"ResponseMetadata"`
+}
+
+type snsListOriginationNumbersResult struct {
+	NextToken    string                           `xml:"NextToken,omitempty"`
+	PhoneNumbers snsOriginationPhoneNumberMembers `xml:"PhoneNumbers"`
+}
+
+type snsOriginationPhoneNumberMembers struct {
+	Members []snsOriginationPhoneNumberMember `xml:"member"`
+}
+
+type snsOriginationPhoneNumberMember struct {
+	PhoneNumber string `xml:"PhoneNumber"`
 }
 
 type snsGetSMSSandboxAccountStatusResponse struct {
@@ -943,8 +980,11 @@ func writeSNSNoResultActionResponse(c *gin.Context, action string) {
 	}
 	c.Header("Content-Type", "application/xml")
 	c.XML(http.StatusOK, snsNoResultActionResponse{
-		XMLName:          xml.Name{Local: action + "Response"},
-		XMLNS:            snsXMLNamespace,
+		XMLName: xml.Name{Local: action + "Response"},
+		XMLNS:   snsXMLNamespace,
+		Result: snsActionNoResult{
+			XMLName: xml.Name{Local: action + "Result"},
+		},
 		ResponseMetadata: snsResponseMetadata{RequestID: snsRequestIDFromContext(c)},
 	})
 }
@@ -1108,7 +1148,8 @@ func writeSNSListSubscriptionsResponse(c *gin.Context, action string, subscripti
 	c.XML(http.StatusOK, snsListSubscriptionsResponse{
 		XMLName: xml.Name{Local: action + "Response"},
 		XMLNS:   snsXMLNamespace,
-		ListSubscriptionsResult: snsListSubscriptionsResult{
+		Result: snsListSubscriptionsResult{
+			XMLName:       xml.Name{Local: action + "Result"},
 			Subscriptions: snsSubscriptionMembers{Members: members},
 			NextToken:     strings.TrimSpace(nextToken),
 		},
@@ -1241,6 +1282,20 @@ func writeSNSAttributesActionResponse(c *gin.Context, action, resultElement stri
 	})
 }
 
+func writeSNSGetSMSAttributesResponse(c *gin.Context, attributes map[string]string) {
+	if c == nil {
+		return
+	}
+	c.Header("Content-Type", "application/xml")
+	c.XML(http.StatusOK, snsGetSMSAttributesResponse{
+		XMLNS: snsXMLNamespace,
+		Result: snsGetSMSAttributesResult{
+			Attributes: snsAttributeEntries{Entries: snsAttributeEntriesFromMap(attributes)},
+		},
+		ResponseMetadata: snsResponseMetadata{RequestID: snsRequestIDFromContext(c)},
+	})
+}
+
 func writeSNSCheckIfPhoneNumberIsOptedOutResponse(c *gin.Context, isOptedOut bool) {
 	if c == nil {
 		return
@@ -1271,6 +1326,25 @@ func writeSNSPhoneNumberListResponse(c *gin.Context, action string, phoneNumbers
 			XMLName:      xml.Name{Local: action + "Result"},
 			PhoneNumbers: snsPhoneNumberMembers{Members: members},
 			NextToken:    strings.TrimSpace(nextToken),
+		},
+		ResponseMetadata: snsResponseMetadata{RequestID: snsRequestIDFromContext(c)},
+	})
+}
+
+func writeSNSListOriginationNumbersResponse(c *gin.Context, phoneNumbers []string, nextToken string) {
+	if c == nil {
+		return
+	}
+	members := make([]snsOriginationPhoneNumberMember, 0, len(phoneNumbers))
+	for _, phoneNumber := range phoneNumbers {
+		members = append(members, snsOriginationPhoneNumberMember{PhoneNumber: phoneNumber})
+	}
+	c.Header("Content-Type", "application/xml")
+	c.XML(http.StatusOK, snsListOriginationNumbersResponse{
+		XMLNS: snsXMLNamespace,
+		ListOriginationNumbersResult: snsListOriginationNumbersResult{
+			NextToken:    strings.TrimSpace(nextToken),
+			PhoneNumbers: snsOriginationPhoneNumberMembers{Members: members},
 		},
 		ResponseMetadata: snsResponseMetadata{RequestID: snsRequestIDFromContext(c)},
 	})

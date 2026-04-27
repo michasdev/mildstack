@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/michasdev/mildstack/core/internal/resources/awscontext"
 	"github.com/michasdev/mildstack/core/internal/resources/sqs/contracts"
 )
 
@@ -28,6 +29,24 @@ var (
 	ErrSQSQueuePathMismatch = errors.New("sqs: queue path mismatch")
 	ErrSQSUnsupported       = errors.New("sqs: unsupported action")
 )
+
+var sqsKnownActions = func() map[string]struct{} {
+	names := contracts.ActionNames()
+	index := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		index[trimmed] = struct{}{}
+	}
+	return index
+}()
+
+var sqsAmbiguousSNSActions = map[string]struct{}{
+	"AddPermission":    {},
+	"RemovePermission": {},
+}
 
 type SQSRequestKind string
 
@@ -72,7 +91,7 @@ func ParseSQSRequest(req *http.Request) (SQSRequestContext, error) {
 			return SQSRequestContext{}, fmt.Errorf("%w: %v", ErrSQSMalformedRequest, err)
 		}
 		if mediaType != "" && mediaType != "application/x-www-form-urlencoded" && mediaType != "application/x-amz-json-1.0" {
-			return SQSRequestContext{}, ErrSQSMalformedRequest
+			return SQSRequestContext{}, ErrSQSNotOwned
 		}
 	}
 
@@ -87,6 +106,9 @@ func ParseSQSRequest(req *http.Request) (SQSRequestContext, error) {
 
 	targetAction, jsonMode, err := parseSQSTarget(req.Header.Get("X-Amz-Target"))
 	if err != nil {
+		if errors.Is(err, ErrSQSNotOwned) {
+			return SQSRequestContext{}, ErrSQSNotOwned
+		}
 		return SQSRequestContext{}, err
 	}
 	if jsonMode {
@@ -120,10 +142,15 @@ func ParseSQSRequest(req *http.Request) (SQSRequestContext, error) {
 	}
 
 	action := strings.TrimSpace(values.Get("Action"))
+	version := strings.TrimSpace(values.Get("Version"))
+
+	if !shouldOwnSQSRequest(action, version) {
+		return SQSRequestContext{}, ErrSQSNotOwned
+	}
+
 	if action == "" {
 		return SQSRequestContext{}, ErrSQSMissingAction
 	}
-	version := strings.TrimSpace(values.Get("Version"))
 	if version == "" {
 		return SQSRequestContext{}, ErrSQSInvalidVersion
 	}
@@ -154,6 +181,33 @@ func ParseSQSRequest(req *http.Request) (SQSRequestContext, error) {
 		TargetStyle:    jsonMode,
 		Values:         values,
 	}, nil
+}
+
+func shouldOwnSQSRequest(action, version string) bool {
+	action = strings.TrimSpace(action)
+	version = strings.TrimSpace(version)
+
+	if action == "" && version == "" {
+		return false
+	}
+	if version == sqsQueryVersion {
+		return true
+	}
+	if version != "" {
+		if action == "" {
+			return true
+		}
+		if _, ambiguous := sqsAmbiguousSNSActions[action]; ambiguous {
+			return false
+		}
+		_, ok := sqsKnownActions[action]
+		return ok
+	}
+	if action != "" {
+		_, ok := sqsKnownActions[action]
+		return ok
+	}
+	return false
 }
 
 type sqsPathContext struct {
@@ -295,7 +349,7 @@ func parseSQSTarget(raw string) (string, bool, error) {
 		return "", false, nil
 	}
 	if !strings.HasPrefix(target, "AmazonSQS.") {
-		return "", false, fmt.Errorf("sqs: X-Amz-Target %q must start with %q", target, "AmazonSQS.")
+		return "", false, ErrSQSNotOwned
 	}
 	action := strings.TrimSpace(strings.TrimPrefix(target, "AmazonSQS."))
 	if action == "" {
@@ -372,6 +426,9 @@ func queueNameFromQueueURL(raw string) (string, string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "", "", fmt.Errorf("sqs: QueueUrl is required")
+	}
+	if !strings.Contains(trimmed, "://") {
+		return trimmed, awscontext.Default().AccountID, nil
 	}
 
 	parsed, err := url.Parse(trimmed)

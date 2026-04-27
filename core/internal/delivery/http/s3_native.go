@@ -1,7 +1,9 @@
 package http
 
 import (
+	"bytes"
 	"encoding/xml"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -34,6 +36,10 @@ type s3NativeListObjectsV2Service interface {
 	ListObjectsV2(request s3domain.ListObjectsV2Request) (s3domain.ListObjectsV2Result, error)
 }
 
+type s3NativeListObjectsV1Service interface {
+	ListObjectsV1(request s3domain.ListObjectsV1Request) (s3domain.ListObjectsV1Result, error)
+}
+
 type s3NativeDeleteObjectsService interface {
 	DeleteObjects(request s3domain.DeleteObjectsRequest) (s3domain.DeleteObjectsResult, error)
 }
@@ -48,7 +54,64 @@ type s3NativeMultipartService interface {
 	CompleteMultipartUpload(uploadID string) (s3domain.Object, error)
 }
 
+type s3NativeCopyObjectWithOptionsService interface {
+	CopyObjectWithOptions(bucket, key, sourceBucket, sourceKey, metadataDirective string, metadata map[string]string) (s3domain.Object, error)
+}
+
+type s3NativeBucketPolicyService interface {
+	GetBucketPolicy(bucket string) ([]byte, error)
+	PutBucketPolicy(bucket string, body []byte) ([]byte, error)
+	DeleteBucketPolicy(bucket string) error
+}
+
+type s3NativeBucketEncryptionService interface {
+	GetBucketEncryption(bucket string) ([]byte, error)
+	PutBucketEncryption(bucket string, body []byte) ([]byte, error)
+	DeleteBucketEncryption(bucket string) error
+}
+
+type s3NativeBucketLifecycleService interface {
+	GetBucketLifecycle(bucket string) ([]byte, error)
+	PutBucketLifecycle(bucket string, body []byte) ([]byte, error)
+	DeleteBucketLifecycle(bucket string) error
+}
+
+type s3NativeBucketCORSService interface {
+	GetBucketCORS(bucket string) ([]byte, error)
+	PutBucketCORS(bucket string, body []byte) ([]byte, error)
+	DeleteBucketCORS(bucket string) error
+}
+
+type s3NativeBucketACLService interface {
+	GetBucketACL(bucket string) ([]byte, error)
+	PutBucketACL(bucket string, body []byte) ([]byte, error)
+}
+
+type s3NativeBucketTaggingService interface {
+	GetBucketTagging(bucket string) ([]byte, error)
+	PutBucketTagging(bucket string, body []byte) ([]byte, error)
+	DeleteBucketTagging(bucket string) error
+}
+
+type s3NativeOwnershipControlsService interface {
+	GetBucketOwnershipControls(bucket string) ([]byte, error)
+	PutBucketOwnershipControls(bucket string, body []byte) ([]byte, error)
+	DeleteBucketOwnershipControls(bucket string) error
+}
+
+type s3NativePublicAccessBlockService interface {
+	GetPublicAccessBlock(bucket string) ([]byte, error)
+	PutPublicAccessBlock(bucket string, body []byte) ([]byte, error)
+	DeletePublicAccessBlock(bucket string) error
+}
+
+type s3NativeVersioningService interface {
+	GetBucketVersioning(bucket string) (s3domain.BucketVersioning, error)
+	PutBucketVersioning(bucket, status string) (s3domain.BucketVersioning, error)
+}
+
 const s3XMLNamespace = "http://s3.amazonaws.com/doc/2006-03-01/"
+const s3ControlXMLNamespace = "http://awss3control.amazonaws.com/doc/2018-08-20/"
 
 func RegisterS3NativeRoutes(engine *gin.Engine, service S3NativeService) {
 	if engine == nil || service == nil {
@@ -78,6 +141,9 @@ func (h s3NativeHandler) dispatch(c *gin.Context) bool {
 	if path == "" || strings.HasPrefix(path, "/api/") {
 		return false
 	}
+	if h.handleS3ControlTags(c, path) {
+		return true
+	}
 	query := c.Request.URL.Query()
 
 	trimmed := strings.Trim(path, "/")
@@ -96,6 +162,9 @@ func (h s3NativeHandler) dispatch(c *gin.Context) bool {
 		bucket := segments[0]
 		switch c.Request.Method {
 		case http.MethodPut:
+			if h.handleBucketSubresource(c, bucket, query) {
+				return true
+			}
 			h.createBucket(c, bucket)
 			return true
 		case http.MethodPost:
@@ -107,9 +176,15 @@ func (h s3NativeHandler) dispatch(c *gin.Context) bool {
 			h.headBucket(c, bucket)
 			return true
 		case http.MethodDelete:
+			if h.handleBucketSubresource(c, bucket, query) {
+				return true
+			}
 			h.deleteBucket(c, bucket)
 			return true
 		case http.MethodGet:
+			if h.handleBucketSubresource(c, bucket, query) {
+				return true
+			}
 			if strings.TrimSpace(query.Get("list-type")) == "2" {
 				h.listObjectsV2(c, bucket)
 				return true
@@ -174,6 +249,46 @@ func (h s3NativeHandler) listBuckets(c *gin.Context) {
 }
 
 func (h s3NativeHandler) listObjects(c *gin.Context, bucketName string) {
+	if service, ok := h.service.(s3NativeListObjectsV1Service); ok {
+		maxKeys := 0
+		if raw := strings.TrimSpace(c.Query("max-keys")); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil {
+				writeS3Error(c, err)
+				return
+			}
+			maxKeys = parsed
+		}
+
+		result, err := service.ListObjectsV1(s3domain.ListObjectsV1Request{
+			Bucket:    bucketName,
+			Prefix:    strings.TrimSpace(c.Query("prefix")),
+			Delimiter: strings.TrimSpace(c.Query("delimiter")),
+			Marker:    strings.TrimSpace(c.Query("marker")),
+			MaxKeys:   maxKeys,
+		})
+		if err != nil {
+			writeS3Error(c, err)
+			return
+		}
+
+		c.Header("Content-Type", "application/xml")
+		c.XML(http.StatusOK, listObjectsResult{
+			XMLName:        xml.Name{Local: "ListBucketResult"},
+			XMLNS:          s3XMLNamespace,
+			Name:           result.Bucket,
+			Prefix:         result.Prefix,
+			Marker:         result.Marker,
+			Delimiter:      result.Delimiter,
+			MaxKeys:        result.MaxKeys,
+			IsTruncated:    result.IsTruncated,
+			NextMarker:     result.NextMarker,
+			Contents:       listObjectEntriesFromDomain(result.Objects),
+			CommonPrefixes: commonPrefixEntries(result.CommonPrefixes),
+		})
+		return
+	}
+
 	objects, err := h.service.ListObjects(bucketName)
 	if err != nil {
 		writeS3Error(c, err)
@@ -182,10 +297,12 @@ func (h s3NativeHandler) listObjects(c *gin.Context, bucketName string) {
 
 	c.Header("Content-Type", "application/xml")
 	c.XML(http.StatusOK, listObjectsResult{
-		XMLName:  xml.Name{Local: "ListBucketResult"},
-		XMLNS:    s3XMLNamespace,
-		Name:     bucketName,
-		Contents: listObjectEntriesFromDomain(objects),
+		XMLName:     xml.Name{Local: "ListBucketResult"},
+		XMLNS:       s3XMLNamespace,
+		Name:        bucketName,
+		MaxKeys:     1000,
+		IsTruncated: false,
+		Contents:    listObjectEntriesFromDomain(objects),
 	})
 }
 
@@ -279,7 +396,21 @@ func (h s3NativeHandler) getObject(c *gin.Context, bucketName, objectKey string)
 		return
 	}
 
-	writeObjectResponse(c, object, true)
+	rangeHeader := strings.TrimSpace(c.GetHeader("Range"))
+	if rangeHeader != "" {
+		sliced, contentRange, rangeErr := applyS3Range(rangeHeader, object.Body)
+		if rangeErr != nil {
+			writeS3Error(c, rangeErr)
+			return
+		}
+		object.Body = sliced
+		object.Size = int64(len(sliced))
+		c.Header("Content-Range", contentRange)
+		writeObjectResponse(c, object, true, http.StatusPartialContent)
+		return
+	}
+
+	writeObjectResponse(c, object, true, http.StatusOK)
 }
 
 func (h s3NativeHandler) headObject(c *gin.Context, bucketName, objectKey string) {
@@ -289,7 +420,7 @@ func (h s3NativeHandler) headObject(c *gin.Context, bucketName, objectKey string
 		return
 	}
 
-	writeObjectResponse(c, object, false)
+	writeObjectResponse(c, object, false, http.StatusOK)
 }
 
 func (h s3NativeHandler) putObject(c *gin.Context, bucketName, objectKey string) {
@@ -304,10 +435,19 @@ func (h s3NativeHandler) putObject(c *gin.Context, bucketName, objectKey string)
 		object s3domain.Object
 		err    error
 	)
+	body := c.Request.Body
+	if strings.EqualFold(strings.TrimSpace(c.GetHeader("x-amz-content-sha256")), "STREAMING-AWS4-HMAC-SHA256-PAYLOAD") {
+		decoded, decodeErr := decodeAWSChunkedBody(c.Request.Body)
+		if decodeErr != nil {
+			writeS3Error(c, decodeErr)
+			return
+		}
+		body = io.NopCloser(bytes.NewReader(decoded))
+	}
 	if writer, ok := h.service.(s3NativeMetadataWriter); ok {
-		object, err = writer.PutObjectWithMetadata(bucketName, objectKey, c.Request.Body, contentType, metadata, preservedHeaders)
+		object, err = writer.PutObjectWithMetadata(bucketName, objectKey, body, contentType, metadata, preservedHeaders)
 	} else {
-		object, err = h.service.PutObject(bucketName, objectKey, c.Request.Body, contentType)
+		object, err = h.service.PutObject(bucketName, objectKey, body, contentType)
 	}
 	if err != nil {
 		writeS3Error(c, err)
@@ -319,19 +459,30 @@ func (h s3NativeHandler) putObject(c *gin.Context, bucketName, objectKey string)
 }
 
 func (h s3NativeHandler) copyObject(c *gin.Context, bucketName, objectKey string) {
-	service, ok := h.service.(s3NativeCopyObjectService)
-	if !ok {
-		writeS3Error(c, io.ErrUnexpectedEOF)
-		return
-	}
-
 	sourceBucket, sourceKey, err := parseCopySource(c.GetHeader("x-amz-copy-source"))
 	if err != nil {
 		writeS3Error(c, err)
 		return
 	}
 
-	object, err := service.CopyObject(bucketName, objectKey, sourceBucket, sourceKey)
+	var object s3domain.Object
+	if service, ok := h.service.(s3NativeCopyObjectWithOptionsService); ok {
+		object, err = service.CopyObjectWithOptions(
+			bucketName,
+			objectKey,
+			sourceBucket,
+			sourceKey,
+			strings.TrimSpace(c.GetHeader("x-amz-metadata-directive")),
+			metadataFromHeaders(c.Request.Header),
+		)
+	} else {
+		service, ok := h.service.(s3NativeCopyObjectService)
+		if !ok {
+			writeS3Error(c, io.ErrUnexpectedEOF)
+			return
+		}
+		object, err = service.CopyObject(bucketName, objectKey, sourceBucket, sourceKey)
+	}
 	if err != nil {
 		writeS3Error(c, err)
 		return
@@ -502,13 +653,22 @@ type listBucketsContainer struct {
 type bucketEntry struct {
 	Name         string `xml:"Name"`
 	CreationDate string `xml:"CreationDate"`
+	BucketRegion string `xml:"BucketRegion,omitempty"`
+	BucketARN    string `xml:"BucketArn,omitempty"`
 }
 
 type listObjectsResult struct {
-	XMLName  xml.Name          `xml:"ListBucketResult"`
-	XMLNS    string            `xml:"xmlns,attr"`
-	Name     string            `xml:"Name"`
-	Contents []listObjectEntry `xml:"Contents"`
+	XMLName        xml.Name            `xml:"ListBucketResult"`
+	XMLNS          string              `xml:"xmlns,attr"`
+	Name           string              `xml:"Name"`
+	Prefix         string              `xml:"Prefix,omitempty"`
+	Marker         string              `xml:"Marker,omitempty"`
+	Delimiter      string              `xml:"Delimiter,omitempty"`
+	MaxKeys        int                 `xml:"MaxKeys"`
+	IsTruncated    bool                `xml:"IsTruncated"`
+	NextMarker     string              `xml:"NextMarker,omitempty"`
+	Contents       []listObjectEntry   `xml:"Contents"`
+	CommonPrefixes []commonPrefixEntry `xml:"CommonPrefixes,omitempty"`
 }
 
 type listObjectsV2Result struct {
@@ -590,12 +750,42 @@ type completeMultipartUploadResult struct {
 	LastModified string   `xml:"LastModified,omitempty"`
 }
 
+type versioningConfiguration struct {
+	XMLName xml.Name `xml:"VersioningConfiguration"`
+	XMLNS   string   `xml:"xmlns,attr,omitempty"`
+	Status  string   `xml:"Status,omitempty"`
+}
+
+type tagEntry struct {
+	Key   string `xml:"Key"`
+	Value string `xml:"Value"`
+}
+
+type s3TaggingDocument struct {
+	XMLName xml.Name   `xml:"Tagging"`
+	XMLNS   string     `xml:"xmlns,attr,omitempty"`
+	TagSet  []tagEntry `xml:"TagSet>Tag"`
+}
+
+type s3ControlTagResourceRequest struct {
+	XMLName xml.Name   `xml:"TagResourceRequest"`
+	Tags    []tagEntry `xml:"Tags>Tag"`
+}
+
+type s3ControlListTagsForResourceResponse struct {
+	XMLName xml.Name   `xml:"ListTagsForResourceResult"`
+	XMLNS   string     `xml:"xmlns,attr"`
+	Tags    []tagEntry `xml:"Tags>Tag,omitempty"`
+}
+
 func bucketEntriesFromDomain(buckets []s3domain.Bucket) []bucketEntry {
 	entries := make([]bucketEntry, len(buckets))
 	for i, bucket := range buckets {
 		entries[i] = bucketEntry{
 			Name:         bucket.Name,
 			CreationDate: bucket.CreatedAt.UTC().Format(time.RFC3339),
+			BucketRegion: strings.TrimSpace(bucket.Region),
+			BucketARN:    "arn:aws:s3:::" + bucket.Name,
 		}
 	}
 	return entries
@@ -668,8 +858,24 @@ func mapS3Error(err error) (int, string, string) {
 	switch {
 	case strings.Contains(message, "NoSuchBucket"):
 		return http.StatusNotFound, "NoSuchBucket", message
+	case strings.Contains(message, "NoSuchBucketPolicy"):
+		return http.StatusNotFound, "NoSuchBucketPolicy", message
 	case strings.Contains(message, "NoSuchKey"):
 		return http.StatusNotFound, "NoSuchKey", message
+	case strings.Contains(message, "NoSuchTagSet"):
+		return http.StatusNotFound, "NoSuchTagSet", message
+	case strings.Contains(message, "NoSuchLifecycleConfiguration"):
+		return http.StatusNotFound, "NoSuchLifecycleConfiguration", message
+	case strings.Contains(message, "NoSuchCORSConfiguration"):
+		return http.StatusNotFound, "NoSuchCORSConfiguration", message
+	case strings.Contains(message, "ServerSideEncryptionConfigurationNotFoundError"):
+		return http.StatusNotFound, "ServerSideEncryptionConfigurationNotFoundError", message
+	case strings.Contains(message, "InvalidRange"):
+		return http.StatusRequestedRangeNotSatisfiable, "InvalidRange", message
+	case strings.Contains(message, "InvalidBucketState"):
+		return http.StatusConflict, "InvalidBucketState", message
+	case strings.Contains(message, "InvalidArn"):
+		return http.StatusBadRequest, "InvalidArn", message
 	case strings.Contains(message, "NoSuchUpload"):
 		return http.StatusNotFound, "NoSuchUpload", message
 	case strings.Contains(message, "BucketNotEmpty"):
@@ -685,7 +891,10 @@ func mapS3Error(err error) (int, string, string) {
 	}
 }
 
-func writeObjectResponse(c *gin.Context, object s3domain.Object, includeBody bool) {
+func writeObjectResponse(c *gin.Context, object s3domain.Object, includeBody bool, status int) {
+	if status == 0 {
+		status = http.StatusOK
+	}
 	c.Header("ETag", object.ETag)
 	c.Header("Last-Modified", object.LastModified.UTC().Format(http.TimeFormat))
 	c.Header("Content-Type", object.ContentType)
@@ -701,15 +910,16 @@ func writeObjectResponse(c *gin.Context, object s3domain.Object, includeBody boo
 		if strings.TrimSpace(key) == "" {
 			continue
 		}
-		c.Header("x-amz-meta-"+strings.ToLower(key), value)
+		headerKey := "x-amz-meta-" + strings.ToLower(strings.TrimSpace(key))
+		c.Writer.Header()[headerKey] = []string{value}
 	}
 
 	if !includeBody {
-		c.Status(http.StatusOK)
+		c.Status(status)
 		return
 	}
 
-	c.Data(http.StatusOK, object.ContentType, append([]byte(nil), object.Body...))
+	c.Data(status, object.ContentType, append([]byte(nil), object.Body...))
 }
 
 func formatContentLength(size int64) string {
@@ -717,6 +927,547 @@ func formatContentLength(size int64) string {
 		size = 0
 	}
 	return strconv.FormatInt(size, 10)
+}
+
+func (h s3NativeHandler) handleBucketSubresource(c *gin.Context, bucket string, query url.Values) bool {
+	switch {
+	case hasS3QueryParam(query, "policy"):
+		return h.handleBucketPolicy(c, bucket)
+	case hasS3QueryParam(query, "tagging"):
+		return h.handleBucketTagging(c, bucket)
+	case hasS3QueryParam(query, "publicAccessBlock"):
+		return h.handlePublicAccessBlock(c, bucket)
+	case hasS3QueryParam(query, "ownershipControls"):
+		return h.handleOwnershipControls(c, bucket)
+	case hasS3QueryParam(query, "versioning"):
+		return h.handleBucketVersioning(c, bucket)
+	case hasS3QueryParam(query, "encryption"):
+		return h.handleBucketEncryption(c, bucket)
+	case hasS3QueryParam(query, "lifecycle"):
+		return h.handleBucketLifecycle(c, bucket)
+	case hasS3QueryParam(query, "cors"):
+		return h.handleBucketCORS(c, bucket)
+	case hasS3QueryParam(query, "acl"):
+		return h.handleBucketACL(c, bucket)
+	}
+	return false
+}
+
+func (h s3NativeHandler) handleBucketPolicy(c *gin.Context, bucket string) bool {
+	service, ok := h.service.(s3NativeBucketPolicyService)
+	if !ok {
+		return false
+	}
+	switch c.Request.Method {
+	case http.MethodGet:
+		body, err := service.GetBucketPolicy(bucket)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Data(http.StatusOK, "application/json", body)
+	case http.MethodPut:
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		if _, err := service.PutBucketPolicy(bucket, body); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	case http.MethodDelete:
+		if err := service.DeleteBucketPolicy(bucket); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h s3NativeHandler) handleBucketTagging(c *gin.Context, bucket string) bool {
+	service, ok := h.service.(s3NativeBucketTaggingService)
+	if !ok {
+		return false
+	}
+	switch c.Request.Method {
+	case http.MethodGet:
+		body, err := service.GetBucketTagging(bucket)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Data(http.StatusOK, "application/xml", body)
+	case http.MethodPut:
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		if _, err := service.PutBucketTagging(bucket, body); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	case http.MethodDelete:
+		if err := service.DeleteBucketTagging(bucket); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h s3NativeHandler) handlePublicAccessBlock(c *gin.Context, bucket string) bool {
+	service, ok := h.service.(s3NativePublicAccessBlockService)
+	if !ok {
+		return false
+	}
+	switch c.Request.Method {
+	case http.MethodGet:
+		body, err := service.GetPublicAccessBlock(bucket)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Data(http.StatusOK, "application/xml", body)
+	case http.MethodPut:
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		if _, err := service.PutPublicAccessBlock(bucket, body); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	case http.MethodDelete:
+		if err := service.DeletePublicAccessBlock(bucket); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h s3NativeHandler) handleOwnershipControls(c *gin.Context, bucket string) bool {
+	service, ok := h.service.(s3NativeOwnershipControlsService)
+	if !ok {
+		return false
+	}
+	switch c.Request.Method {
+	case http.MethodGet:
+		body, err := service.GetBucketOwnershipControls(bucket)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Data(http.StatusOK, "application/xml", body)
+	case http.MethodPut:
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		if _, err := service.PutBucketOwnershipControls(bucket, body); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	case http.MethodDelete:
+		if err := service.DeleteBucketOwnershipControls(bucket); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h s3NativeHandler) handleBucketVersioning(c *gin.Context, bucket string) bool {
+	service, ok := h.service.(s3NativeVersioningService)
+	if !ok {
+		return false
+	}
+	switch c.Request.Method {
+	case http.MethodGet:
+		config, err := service.GetBucketVersioning(bucket)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Header("Content-Type", "application/xml")
+		c.XML(http.StatusOK, versioningConfiguration{
+			XMLName: xml.Name{Local: "VersioningConfiguration"},
+			XMLNS:   s3XMLNamespace,
+			Status:  strings.TrimSpace(config.Status),
+		})
+	case http.MethodPut:
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		var config versioningConfiguration
+		if err := xml.Unmarshal(body, &config); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		if _, err := service.PutBucketVersioning(bucket, strings.TrimSpace(config.Status)); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h s3NativeHandler) handleBucketEncryption(c *gin.Context, bucket string) bool {
+	service, ok := h.service.(s3NativeBucketEncryptionService)
+	if !ok {
+		return false
+	}
+	switch c.Request.Method {
+	case http.MethodGet:
+		body, err := service.GetBucketEncryption(bucket)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Data(http.StatusOK, "application/xml", body)
+	case http.MethodPut:
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		if _, err := service.PutBucketEncryption(bucket, body); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	case http.MethodDelete:
+		if err := service.DeleteBucketEncryption(bucket); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h s3NativeHandler) handleBucketLifecycle(c *gin.Context, bucket string) bool {
+	service, ok := h.service.(s3NativeBucketLifecycleService)
+	if !ok {
+		return false
+	}
+	switch c.Request.Method {
+	case http.MethodGet:
+		body, err := service.GetBucketLifecycle(bucket)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Data(http.StatusOK, "application/xml", body)
+	case http.MethodPut:
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		if _, err := service.PutBucketLifecycle(bucket, body); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	case http.MethodDelete:
+		if err := service.DeleteBucketLifecycle(bucket); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h s3NativeHandler) handleBucketCORS(c *gin.Context, bucket string) bool {
+	service, ok := h.service.(s3NativeBucketCORSService)
+	if !ok {
+		return false
+	}
+	switch c.Request.Method {
+	case http.MethodGet:
+		body, err := service.GetBucketCORS(bucket)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Data(http.StatusOK, "application/xml", body)
+	case http.MethodPut:
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		if _, err := service.PutBucketCORS(bucket, body); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	case http.MethodDelete:
+		if err := service.DeleteBucketCORS(bucket); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h s3NativeHandler) handleBucketACL(c *gin.Context, bucket string) bool {
+	service, ok := h.service.(s3NativeBucketACLService)
+	if !ok {
+		return false
+	}
+	switch c.Request.Method {
+	case http.MethodGet:
+		body, err := service.GetBucketACL(bucket)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Data(http.StatusOK, "application/xml", body)
+	case http.MethodPut:
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		if _, err := service.PutBucketACL(bucket, body); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusOK)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h s3NativeHandler) handleS3ControlTags(c *gin.Context, path string) bool {
+	trimmed := strings.TrimSpace(path)
+	if !strings.HasPrefix(trimmed, "/v20180820/tags/") {
+		return false
+	}
+	service, ok := h.service.(s3NativeBucketTaggingService)
+	if !ok {
+		return false
+	}
+	bucket, err := parseBucketFromS3ResourceARN(strings.TrimPrefix(trimmed, "/v20180820/tags/"))
+	if err != nil {
+		writeS3Error(c, err)
+		return true
+	}
+	switch c.Request.Method {
+	case http.MethodGet:
+		tags, err := listTagsForResource(service, bucket)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Header("Content-Type", "application/xml")
+		c.XML(http.StatusOK, s3ControlListTagsForResourceResponse{
+			XMLName: xml.Name{Local: "ListTagsForResourceResult"},
+			XMLNS:   s3ControlXMLNamespace,
+			Tags:    tags,
+		})
+	case http.MethodPost, http.MethodPut:
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		var request s3ControlTagResourceRequest
+		if err := xml.Unmarshal(body, &request); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		taggingBody, err := buildTaggingBody(request.Tags)
+		if err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		if _, err := service.PutBucketTagging(bucket, taggingBody); err != nil {
+			writeS3Error(c, err)
+			return true
+		}
+		c.Status(http.StatusNoContent)
+	default:
+		return false
+	}
+	return true
+}
+
+func parseBucketFromS3ResourceARN(encodedARN string) (string, error) {
+	decoded, err := url.PathUnescape(strings.TrimSpace(encodedARN))
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(decoded, "arn:aws:s3:::") {
+		return "", fmt.Errorf("s3: InvalidArn: invalid s3 resource arn")
+	}
+	bucket := strings.TrimSpace(strings.TrimPrefix(decoded, "arn:aws:s3:::"))
+	if bucket == "" {
+		return "", fmt.Errorf("s3: InvalidArn: invalid s3 resource arn")
+	}
+	return bucket, nil
+}
+
+func listTagsForResource(service s3NativeBucketTaggingService, bucket string) ([]tagEntry, error) {
+	body, err := service.GetBucketTagging(bucket)
+	if err != nil {
+		if strings.Contains(err.Error(), "NoSuchTagSet") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var tagging s3TaggingDocument
+	if err := xml.Unmarshal(body, &tagging); err != nil {
+		return nil, err
+	}
+	return append([]tagEntry(nil), tagging.TagSet...), nil
+}
+
+func buildTaggingBody(tags []tagEntry) ([]byte, error) {
+	payload := s3TaggingDocument{
+		XMLName: xml.Name{Local: "Tagging"},
+		XMLNS:   s3XMLNamespace,
+		TagSet:  append([]tagEntry(nil), tags...),
+	}
+	body, err := xml.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(xml.Header), body...), nil
+}
+
+func decodeAWSChunkedBody(reader io.Reader) ([]byte, error) {
+	raw, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	decoded := make([]byte, 0, len(raw))
+	rest := raw
+	for {
+		lineEnd := bytes.Index(rest, []byte("\r\n"))
+		if lineEnd < 0 {
+			return nil, fmt.Errorf("s3: InvalidRequest: malformed aws-chunked payload")
+		}
+		line := string(rest[:lineEnd])
+		rest = rest[lineEnd+2:]
+
+		sizeHex := line
+		if semi := strings.Index(sizeHex, ";"); semi >= 0 {
+			sizeHex = sizeHex[:semi]
+		}
+		size, parseErr := strconv.ParseInt(strings.TrimSpace(sizeHex), 16, 64)
+		if parseErr != nil || size < 0 {
+			return nil, fmt.Errorf("s3: InvalidRequest: malformed aws-chunked payload")
+		}
+		if size == 0 {
+			break
+		}
+		if int64(len(rest)) < size+2 {
+			return nil, fmt.Errorf("s3: InvalidRequest: malformed aws-chunked payload")
+		}
+		decoded = append(decoded, rest[:size]...)
+		rest = rest[size:]
+		if len(rest) < 2 || !bytes.Equal(rest[:2], []byte("\r\n")) {
+			return nil, fmt.Errorf("s3: InvalidRequest: malformed aws-chunked payload")
+		}
+		rest = rest[2:]
+	}
+	return decoded, nil
+}
+
+func applyS3Range(raw string, body []byte) ([]byte, string, error) {
+	if !strings.HasPrefix(raw, "bytes=") {
+		return nil, "", fmt.Errorf("s3: InvalidRange: requested range not satisfiable")
+	}
+	spec := strings.TrimSpace(strings.TrimPrefix(raw, "bytes="))
+	if strings.Contains(spec, ",") {
+		return nil, "", fmt.Errorf("s3: InvalidRange: requested range not satisfiable")
+	}
+	dash := strings.Index(spec, "-")
+	if dash < 0 {
+		return nil, "", fmt.Errorf("s3: InvalidRange: requested range not satisfiable")
+	}
+	startRaw := strings.TrimSpace(spec[:dash])
+	endRaw := strings.TrimSpace(spec[dash+1:])
+
+	size := int64(len(body))
+	if size == 0 {
+		return nil, "", fmt.Errorf("s3: InvalidRange: requested range not satisfiable")
+	}
+
+	var (
+		start int64
+		end   int64
+	)
+	switch {
+	case startRaw == "":
+		suffix, err := strconv.ParseInt(endRaw, 10, 64)
+		if err != nil || suffix <= 0 {
+			return nil, "", fmt.Errorf("s3: InvalidRange: requested range not satisfiable")
+		}
+		if suffix > size {
+			suffix = size
+		}
+		start = size - suffix
+		end = size - 1
+	case endRaw == "":
+		parsedStart, err := strconv.ParseInt(startRaw, 10, 64)
+		if err != nil || parsedStart < 0 || parsedStart >= size {
+			return nil, "", fmt.Errorf("s3: InvalidRange: requested range not satisfiable")
+		}
+		start = parsedStart
+		end = size - 1
+	default:
+		parsedStart, errStart := strconv.ParseInt(startRaw, 10, 64)
+		parsedEnd, errEnd := strconv.ParseInt(endRaw, 10, 64)
+		if errStart != nil || errEnd != nil || parsedStart < 0 || parsedEnd < parsedStart || parsedStart >= size {
+			return nil, "", fmt.Errorf("s3: InvalidRange: requested range not satisfiable")
+		}
+		if parsedEnd >= size {
+			parsedEnd = size - 1
+		}
+		start = parsedStart
+		end = parsedEnd
+	}
+
+	sliced := append([]byte(nil), body[start:end+1]...)
+	return sliced, fmt.Sprintf("bytes %d-%d/%d", start, end, size), nil
 }
 
 func hasS3QueryParam(values url.Values, key string) bool {

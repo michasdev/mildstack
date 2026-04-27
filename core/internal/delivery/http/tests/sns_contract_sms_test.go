@@ -35,7 +35,7 @@ func TestSNSContractSMSOptOutAndSandboxXML(t *testing.T) {
 	if got, want := getAttributesRecorder.Code, http.StatusOK; got != want {
 		t.Fatalf("unexpected get sms attributes status: got %d want %d", got, want)
 	}
-	if body := getAttributesRecorder.Body.String(); !strings.Contains(body, "DefaultSenderID") || !strings.Contains(body, "MILD") {
+	if body := getAttributesRecorder.Body.String(); !strings.Contains(body, "<attributes>") || !strings.Contains(body, "DefaultSenderID") || !strings.Contains(body, "MILD") {
 		t.Fatalf("expected sms attributes in response, got %q", body)
 	}
 

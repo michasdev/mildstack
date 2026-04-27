@@ -35,6 +35,23 @@ func TestSNSContractSubscribeConfirmAndUnsubscribeXML(t *testing.T) {
 		t.Fatalf("expected pending confirmation subscription arn, got %q", subscribeBody)
 	}
 
+	listByTopicParams := url.Values{}
+	listByTopicParams.Set("Action", "ListSubscriptionsByTopic")
+	listByTopicParams.Set("Version", "2010-03-31")
+	listByTopicParams.Set("TopicArn", topic.ARN)
+
+	listByTopicRecorder := performSNSQuery(t, router, http.MethodGet, listByTopicParams.Encode())
+	if got, want := listByTopicRecorder.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected list-by-topic status: got %d want %d", got, want)
+	}
+	listByTopicBody := listByTopicRecorder.Body.String()
+	if !strings.Contains(listByTopicBody, "<ListSubscriptionsByTopicResult>") {
+		t.Fatalf("expected list-by-topic result wrapper, got %q", listByTopicBody)
+	}
+	if !strings.Contains(listByTopicBody, "<Endpoint>http://127.0.0.1:7777/sns</Endpoint>") {
+		t.Fatalf("expected subscribed endpoint in list-by-topic response, got %q", listByTopicBody)
+	}
+
 	subscriptions, _, err := service.ListSubscriptionsByTopic(topic.ARN, "")
 	if err != nil {
 		t.Fatalf("list subscriptions by topic: %v", err)
