@@ -20,7 +20,7 @@ func TestSQSNativeErrorsWriteXMLResponse(t *testing.T) {
 
 	writeSQSErrorResponse(ctx, http.StatusBadRequest, "InvalidAction", "The action or operation requested is invalid.", "req-123")
 
-	if got := recorder.Header().Get("Content-Type"); !strings.Contains(got, "application/xml") {
+	if got := recorder.Header().Get("Content-Type"); !strings.Contains(got, "text/xml") {
 		t.Fatalf("unexpected content type: got %q", got)
 	}
 

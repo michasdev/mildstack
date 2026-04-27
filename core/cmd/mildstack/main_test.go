@@ -184,7 +184,7 @@ func TestRegisterNativeDynamoDBRoutesExposesAwsCompatibleSmokeSurface(t *testing
 	if createOut.TableDescription == nil {
 		t.Fatal("expected create table response to include table description")
 	}
-	if got, want := string(createOut.TableDescription.TableStatus), string(types.TableStatusCreating); got != want {
+	if got, want := string(createOut.TableDescription.TableStatus), string(types.TableStatusActive); got != want {
 		t.Fatalf("unexpected create status: got %q want %q", got, want)
 	}
 	if createOut.TableDescription.CreationDateTime == nil || createOut.TableDescription.CreationDateTime.IsZero() {
