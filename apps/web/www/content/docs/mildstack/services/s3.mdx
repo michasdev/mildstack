@@ -1,7 +1,158 @@
 ---
-title: S3
+title: Amazon S3
+description: |
+  MildStack provides full S3 emulation with bucket management, object storage,
+  multipart uploads, versioning, object lock, and more.
 ---
 
-# Quick Start
+## Overview
 
-Teste simples.
+MildStack's S3 emulation lets you work with buckets and objects locally, just like you would with the real AWS S3. It supports a wide range of S3 features including multipart uploads, versioning, tagging, and object lock.
+
+## Supported Operations
+
+### Bucket Operations
+
+| Operation | Description |
+| --- | --- |
+| `ListBuckets` | List all buckets |
+| `CreateBucket` | Create a new bucket |
+| `HeadBucket` | Check if a bucket exists |
+| `DeleteBucket` | Delete an empty bucket |
+| `GetBucketLocation` | Get the region of a bucket |
+
+### Object Operations
+
+| Operation | Description |
+| --- | --- |
+| `GetObject` | Download an object |
+| `PutObject` | Upload an object |
+| `HeadObject` | Get object metadata without downloading |
+| `DeleteObject` | Delete a single object |
+| `DeleteObjects` | Delete multiple objects in a single request |
+| `CopyObject` | Copy an object between buckets or keys |
+| `ListObjectsV2` | List objects in a bucket |
+
+### Multipart Upload
+
+| Operation | Description |
+| --- | --- |
+| `CreateMultipartUpload` | Start a multipart upload |
+| `UploadPart` | Upload a part |
+| `ListParts` | List uploaded parts |
+| `CompleteMultipartUpload` | Complete the upload |
+| `AbortMultipartUpload` | Cancel the upload |
+| `ListMultipartUploads` | List active multipart uploads |
+
+### Versioning
+
+| Operation | Description |
+| --- | --- |
+| `GetBucketVersioning` | Get versioning configuration |
+| `PutBucketVersioning` | Enable or suspend versioning |
+| `ListObjectVersions` | List all versions of objects |
+
+### Bucket Configuration
+
+| Operation | Description |
+| --- | --- |
+| `GetBucketPolicy` / `PutBucketPolicy` / `DeleteBucketPolicy` | Bucket policy |
+| `GetBucketEncryption` / `PutBucketEncryption` / `DeleteBucketEncryption` | Server-side encryption |
+| `GetBucketLifecycleConfiguration` / `PutBucketLifecycleConfiguration` / `DeleteBucketLifecycleConfiguration` | Lifecycle rules |
+| `GetBucketCors` / `PutBucketCors` / `DeleteBucketCors` | CORS configuration |
+| `GetBucketTagging` / `PutBucketTagging` / `DeleteBucketTagging` | Bucket tags |
+| `GetBucketAcl` / `PutBucketAcl` | Access control list |
+| `GetBucketNotificationConfiguration` / `PutBucketNotificationConfiguration` | Event notifications |
+| `GetBucketLogging` / `PutBucketLogging` | Access logging |
+| `GetBucketReplication` / `PutBucketReplication` / `DeleteBucketReplication` | Replication rules |
+| `GetBucketOwnershipControls` / `PutBucketOwnershipControls` / `DeleteBucketOwnershipControls` | Ownership controls |
+| `GetPublicAccessBlock` / `PutPublicAccessBlock` / `DeletePublicAccessBlock` | Public access block |
+
+### Object Lock & Governance
+
+| Operation | Description |
+| --- | --- |
+| `GetObjectLockConfiguration` / `PutObjectLockConfiguration` | Bucket-level object lock |
+| `GetObjectRetention` / `PutObjectRetention` | Object retention period |
+| `GetObjectLegalHold` / `PutObjectLegalHold` | Legal hold on objects |
+| `GetObjectAcl` / `PutObjectAcl` | Object ACL |
+| `GetObjectTagging` / `PutObjectTagging` / `DeleteObjectTagging` | Object tags |
+
+## Quick Example
+
+```ts
+import {
+  S3Client,
+  CreateBucketCommand,
+  PutObjectCommand,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
+
+const s3 = new S3Client({
+  region: "us-east-1",
+  endpoint: "http://localhost:4566",
+  credentials: { accessKeyId: "test", secretAccessKey: "test" },
+  forcePathStyle: true,
+});
+
+// Create a bucket
+await s3.send(new CreateBucketCommand({ Bucket: "my-bucket" }));
+
+// Upload a file
+await s3.send(
+  new PutObjectCommand({
+    Bucket: "my-bucket",
+    Key: "hello.txt",
+    Body: "Hello from MildStack!",
+    ContentType: "text/plain",
+  })
+);
+
+// Download the file
+const response = await s3.send(
+  new GetObjectCommand({
+    Bucket: "my-bucket",
+    Key: "hello.txt",
+  })
+);
+const body = await response.Body.transformToString();
+console.log(body); // "Hello from MildStack!"
+```
+
+## AWS CLI Examples
+
+```bash
+# Create a bucket
+awslocal s3 mb s3://photos
+
+# Upload files
+awslocal s3 cp ./image.jpg s3://photos/image.jpg
+
+# List objects
+awslocal s3 ls s3://photos/
+
+# Enable versioning
+awslocal s3api put-bucket-versioning \
+  --bucket photos \
+  --versioning-configuration Status=Enabled
+
+# Upload a new version
+awslocal s3 cp ./image-v2.jpg s3://photos/image.jpg
+
+# List versions
+awslocal s3api list-object-versions --bucket photos
+```
+
+## Path Style vs Virtual Hosted Style
+
+MildStack uses **path-style** URLs by default:
+
+```
+http://localhost:4566/my-bucket/my-key
+```
+
+Make sure to set `forcePathStyle: true` (JavaScript SDK) or the equivalent option in your SDK of choice.
+
+## Persistence
+
+All S3 data is stored locally on disk. Buckets, objects, and metadata persist across instance restarts. Deleting an instance removes all its S3 data.

@@ -2,71 +2,59 @@
 title: Introduction
 description: |
   MildStack is a lightweight, local-first AWS emulator built for fast feedback loops.
-  No Docker is required, and the API is designed to start in around 200ms.
+  No Docker is required, and the runtime starts in around 200ms.
 ---
 
-## Introduction
+## Welcome to MildStack
 
-MildStack is a lightweight, open-source alternative to LocalStack for day-to-day local development.
+MildStack is a free, open-source alternative to LocalStack for local AWS development. It gives you a local AWS-compatible environment that starts in milliseconds, works offline, and keeps your feedback loop short.
 
-It gives you a local AWS-compatible runtime that is fast to start, easy to inspect, and designed to keep your feedback loop short while you build and test cloud-backed applications.
+> **No Docker. No containers. No waiting.** MildStack runs as a native binary on your machine.
 
-> MildStack is built for speed and simplicity: no Docker required, and the API is designed to start in around `200ms`.
+## What Can You Do?
 
-### What MildStack Is
+- **Create S3 buckets** and upload objects — just like in the real AWS
+- **Build DynamoDB tables** with queries, scans, and secondary indexes
+- **Send and receive SQS messages** with standard and FIFO queues
+- **Browse your resources visually** with the Desktop App
+- **Use the standard AWS CLI and SDKs** — just change the endpoint URL
 
-MildStack is organized into three parts:
+## Get Started in 30 Seconds
 
-| Part | Purpose |
-| --- | --- |
-| `core` | The Go runtime that emulates AWS-compatible APIs and stores instance-scoped state. |
-| `desktop` | The Electron app for browsing and managing local resources visually. |
-| `web` | The public website and documentation surface. |
+```bash
+# 1. Start MildStack
+mildstack serve
 
-### Why MildStack
+# 2. Create an S3 bucket using the AWS CLI
+aws s3 mb s3://my-bucket \
+  --endpoint-url http://localhost:4566
 
-- **No Docker required**: run a local cloud environment without container overhead.
-- **Fast startup**: the API is designed to start in around `200ms`.
-- **Developer-first**: keep your workflow local, fast, and predictable.
-- **Offline-friendly**: build and test even when you are disconnected.
-- **Open source**: easy to inspect, extend, and contribute to.
+# 3. Upload a file
+aws s3 cp ./hello.txt s3://my-bucket/ \
+  --endpoint-url http://localhost:4566
+```
 
-### What You Can Use Today
+That's it. Your local AWS environment is ready.
 
-MildStack currently focuses on the services that matter most in local development:
+## Explore the Docs
 
-- S3
-- DynamoDB
-- SQS
-
-You can interact with MildStack through the CLI, the desktop app, or the underlying API depending on your workflow.
-
-### How It Fits Together
-
-The architecture is intentionally simple:
-
-- The `core` owns emulation and persistence.
-- The `desktop` app provides a visual control plane.
-- The `web` experience communicates product value and documentation.
-
-This separation keeps the runtime focused and makes the user-facing tools easier to evolve.
-
-### Getting Started
-
-If this is your first time here, start with:
-
-1. Installation
-2. Quick Start
-3. Supported Services
-4. Desktop App
-5. API Reference
-
-### Documentation Map
-
-Use the rest of this docs site to go deeper:
-
-- **Installation** for setup instructions.
-- **Quick Start** for your first run.
-- **Supported Services** for the current feature surface.
-- **Architecture** for the system design and boundaries.
-- **Troubleshooting** when something does not work as expected.
+<Cards>
+  <Card title="Overview" href="/docs/getting-started/overview">
+    Learn what MildStack is and how it compares to alternatives.
+  </Card>
+  <Card title="Installation" href="/docs/getting-started/installation">
+    Install the CLI and Desktop App on macOS, Windows, or Linux.
+  </Card>
+  <Card title="Quick Start" href="/docs/getting-started/quick-start">
+    Get your first instance running with step-by-step examples.
+  </Card>
+  <Card title="Services" href="/docs/mildstack/services">
+    See all supported AWS operations for S3, DynamoDB, and SQS.
+  </Card>
+  <Card title="MildStack CLI" href="/docs/mildstack/mildstack-cli">
+    Manage your local instances from the terminal.
+  </Card>
+  <Card title="Desktop App" href="/docs/mildstack/mildstack-desktop">
+    Browse and manage resources with a visual interface.
+  </Card>
+</Cards>

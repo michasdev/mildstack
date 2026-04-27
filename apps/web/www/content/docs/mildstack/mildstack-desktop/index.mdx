@@ -1,7 +1,89 @@
 ---
 title: MildStack Desktop
+description: |
+  The MildStack Desktop App is a visual interface for browsing and managing your local AWS resources.
+  Browse S3 buckets, explore DynamoDB tables, and inspect SQS queues — all from one app.
 ---
 
-# Quick Start
+## Overview
 
-Teste simples.
+The MildStack Desktop App gives you a visual way to interact with your local AWS resources. Instead of typing CLI commands or writing scripts, you can browse, create, edit, and delete resources through an intuitive graphical interface.
+
+It connects to your running MildStack instances and provides dedicated browsers for each supported service.
+
+## Key Features
+
+### Multi-Instance Management
+
+The Desktop App can connect to any running MildStack instance. Use the instance selector in the sidebar to switch between different environments:
+
+- See all running instances at a glance
+- Switch between instances with one click
+- View the port and endpoint URL for each instance
+
+### S3 Resource Browser
+
+Browse and manage your local S3 resources visually:
+
+- **List buckets** and see their properties
+- **Navigate objects** within a bucket using a file-explorer-like interface
+- **Upload and download files** with drag-and-drop support
+- **View object metadata** including size, content type, and last modified date
+- **Delete objects and buckets** with confirmation dialogs
+
+### DynamoDB Explorer
+
+Inspect and manage your local DynamoDB tables:
+
+- **List tables** with their key schema and status
+- **Browse items** in a table with sortable columns
+- **View item details** with formatted attribute values
+- **Create and edit items** directly in the app
+- **Query and scan** tables using the built-in query builder
+
+### SQS Queue Browser
+
+Monitor and manage your local SQS queues:
+
+- **List queues** with message counts and attributes
+- **View queue details** including configuration and dead-letter settings
+- **Send messages** to a queue directly from the UI
+- **Receive and inspect messages** with full body and attribute visibility
+- **Purge queues** to clear all messages
+- **Monitor DLQ** (Dead Letter Queue) redrive status
+
+## Getting Started
+
+### Connect to an Instance
+
+1. **Start a MildStack instance** using the CLI:
+   ```bash
+   mildstack serve
+   ```
+
+2. **Open the Desktop App** — it will automatically detect running instances on your machine.
+
+3. **Select an instance** from the sidebar to start browsing resources.
+
+<Callout type="info">
+  The Desktop App detects instances running on the default port (`4566`) automatically. If you're using a custom port, you can add it manually from the instance selector.
+</Callout>
+
+### Navigate Services
+
+Use the sidebar to switch between services:
+
+- **S3** — Browse buckets and objects
+- **DynamoDB** — Explore tables and items
+- **SQS** — Monitor queues and messages
+
+## Download
+
+The Desktop App is available for macOS, Windows, and Linux. Download the latest version from the [Installation](/docs/getting-started/installation) page.
+
+| Platform | Download |
+| --- | --- |
+| macOS (Apple Silicon) | `.dmg` |
+| macOS (Intel) | `.dmg` |
+| Windows | `.exe` installer |
+| Linux | `.AppImage` |

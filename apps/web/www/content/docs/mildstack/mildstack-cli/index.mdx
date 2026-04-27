@@ -1,7 +1,114 @@
 ---
 title: MildStack CLI
+description: |
+  The MildStack CLI is your command-line interface for managing local AWS instances.
+  Start, stop, inspect, and delete instances with simple commands.
 ---
 
-# Quick Start
+The MildStack CLI lets you control your local AWS environment directly from the terminal. It's a single binary with no dependencies — just download and run.
 
-Teste simples.
+## Commands
+
+| Command | Description |
+| --- | --- |
+| `mildstack serve` | Start a new local instance |
+| `mildstack instances` | List all known instances |
+| `mildstack status` | Show the status of a running instance |
+| `mildstack stop` | Stop a running instance |
+| `mildstack delete` | Delete an instance and its data |
+
+## Starting an Instance
+
+```bash
+# Start on the default port (4566)
+mildstack serve
+
+# Start on a specific port
+mildstack serve 8080
+
+# Start in the background
+mildstack serve --detach
+```
+
+When you run `mildstack serve`, the runtime starts an AWS-compatible API server on the specified port. All three services (S3, DynamoDB, SQS) are available immediately.
+
+<Callout type="info">
+  If port `4566` is already in use, MildStack will automatically try the next available port.
+</Callout>
+
+## Listing Instances
+
+```bash
+# Human-readable output
+mildstack instances
+
+# Machine-readable JSON output
+mildstack instances --json
+```
+
+This shows all instances that MildStack knows about, including their port, status (`running` or `stopped`), and endpoint URL.
+
+## Checking Status
+
+```bash
+mildstack status
+```
+
+Shows detailed information about the currently running instance, including active services and their health.
+
+## Stopping Instances
+
+```bash
+# Stop a specific instance by port
+mildstack stop 4566
+
+# Stop all running instances
+mildstack stop --all
+```
+
+Stopping an instance shuts down the API server but preserves all data. You can restart on the same port to resume where you left off.
+
+## Deleting Instances
+
+```bash
+# Delete a specific instance by port
+mildstack delete 4566
+
+# Delete all instances
+mildstack delete --all
+```
+
+<Callout type="warn" title="Permanent action">
+  Deleting an instance removes all of its stored data — buckets, tables, queues, and messages. This action cannot be undone.
+</Callout>
+
+## Global Flags
+
+| Flag | Description |
+| --- | --- |
+| `--json` | Output results in machine-readable JSON format |
+| `--help` | Show help for any command |
+
+## Data Storage
+
+All instance data is stored locally on your machine under `~/.mildstack/`. Each instance keeps its own isolated data directory, so multiple instances running on different ports never interfere with each other.
+
+```
+~/.mildstack/
+├── instances/
+│   ├── active/        # Currently tracked instances
+│   └── saved/         # Instance metadata
+├── config/            # Configuration files
+└── logs/              # Runtime logs
+```
+
+## Next Steps
+
+<Cards>
+  <Card title="Instances" href="/docs/mildstack/mildstack-cli/instances">
+    Learn more about managing multiple instances.
+  </Card>
+  <Card title="AWS Local" href="/docs/mildstack/mildstack-cli/aws-local">
+    Use the AWS CLI directly with MildStack.
+  </Card>
+</Cards>
