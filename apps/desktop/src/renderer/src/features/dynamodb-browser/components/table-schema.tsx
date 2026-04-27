@@ -66,7 +66,6 @@ export function TableSchema({ tableInfo, loading }: TableSchemaProps) {
           <InfoCard label="Status">
             <Badge
               variant="outline"
-              size="sm"
               className={
                 tableInfo.TableStatus === 'ACTIVE'
                   ? 'bg-green-500/15 text-green-400 border-green-500/30'
@@ -87,7 +86,7 @@ export function TableSchema({ tableInfo, loading }: TableSchemaProps) {
             </span>
           </InfoCard>
           <InfoCard label="Billing Mode">
-            <Badge variant="outline" size="sm">
+            <Badge variant="outline">
               {billingLabel}
             </Badge>
           </InfoCard>
@@ -106,7 +105,7 @@ export function TableSchema({ tableInfo, loading }: TableSchemaProps) {
           Primary Key Schema
         </h3>
         <div className="rounded-xl border border-border overflow-hidden">
-          <Table variant="card">
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Attribute Name</TableHead>
@@ -132,7 +131,7 @@ export function TableSchema({ tableInfo, loading }: TableSchemaProps) {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" size="sm">
+                      <Badge variant="outline">
                         {ks.KeyType === 'HASH' ? 'Partition Key' : 'Sort Key'}
                       </Badge>
                     </TableCell>
@@ -169,7 +168,7 @@ export function TableSchema({ tableInfo, loading }: TableSchemaProps) {
           </Empty>
         ) : (
           <div className="rounded-xl border border-border overflow-hidden">
-            <Table variant="card">
+            <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Attribute Name</TableHead>
@@ -215,7 +214,7 @@ export function TableSchema({ tableInfo, loading }: TableSchemaProps) {
                         <div className="flex flex-wrap gap-1">
                           {usages.length > 0 ? (
                             usages.map((u) => (
-                              <Badge key={u} variant="outline" size="sm">
+                              <Badge key={u} variant="outline">
                                 {u}
                               </Badge>
                             ))

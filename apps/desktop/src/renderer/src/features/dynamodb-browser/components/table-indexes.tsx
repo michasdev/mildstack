@@ -84,7 +84,7 @@ export function TableIndexes({ tableInfo, loading }: TableIndexesProps) {
           <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
             <Database className="h-4 w-4 text-primary" />
             Global Secondary Indexes
-            <Badge variant="outline" size="sm">{gsiList.length}</Badge>
+            <Badge variant="outline">{gsiList.length}</Badge>
           </h3>
           <div className="space-y-4">
             {gsiList.map((gsi) => (
@@ -100,7 +100,7 @@ export function TableIndexes({ tableInfo, loading }: TableIndexesProps) {
           <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
             <Layers className="h-4 w-4 text-primary" />
             Local Secondary Indexes
-            <Badge variant="outline" size="sm">{lsiList.length}</Badge>
+            <Badge variant="outline">{lsiList.length}</Badge>
           </h3>
           <div className="space-y-4">
             {lsiList.map((lsi) => (
@@ -137,11 +137,11 @@ function IndexCard({
           <span className="font-mono text-sm font-semibold text-foreground">
             {index.IndexName}
           </span>
-          <Badge variant="outline" size="sm">
+          <Badge variant="outline">
             {type}
           </Badge>
           {gsi && statusColor && (
-            <Badge variant="outline" size="sm" className={statusColor(gsi.IndexStatus)}>
+            <Badge variant="outline" className={statusColor(gsi.IndexStatus)}>
               {gsi.IndexStatus}
             </Badge>
           )}
@@ -154,7 +154,7 @@ function IndexCard({
 
       {/* Key schema + projection */}
       <div className="p-4 space-y-3">
-        <Table variant="card">
+        <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Attribute</TableHead>
@@ -175,7 +175,7 @@ function IndexCard({
                   </div>
                 </TableCell>
                 <TableCell>
-                  <Badge variant="outline" size="sm">
+                  <Badge variant="outline">
                     {ks.KeyType === 'HASH' ? 'Partition Key' : 'Sort Key'}
                   </Badge>
                 </TableCell>
@@ -186,7 +186,7 @@ function IndexCard({
 
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">Projection:</span>
-          <Badge variant="outline" size="sm">
+          <Badge variant="outline">
             {index.Projection.ProjectionType}
           </Badge>
           {index.Projection.NonKeyAttributes.length > 0 && (
