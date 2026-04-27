@@ -69,7 +69,7 @@ func TestRegisterServiceRoutesRegistersS3BeforeServing(t *testing.T) {
 func TestRegisterNativeS3RoutesExposesAwsCompatibleSmokeSurface(t *testing.T) {
 	t.Helper()
 
-	root := composition.DefaultRoot("test-instance")
+	root := composition.DefaultRoot(fmt.Sprintf("test-instance-smoke-%d", time.Now().UnixNano()))
 	manager := runtime.New(root.Services)
 	router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
 
@@ -692,7 +692,7 @@ func TestInstanceRegistrarServeSkipsDuplicateLoadedPort(t *testing.T) {
 func TestRegisterNativeSQSRoutesExposesAwsCompatibleSmokeSurface(t *testing.T) {
 	t.Helper()
 
-	root := composition.DefaultRoot("test-instance")
+	root := composition.DefaultRoot(fmt.Sprintf("test-instance-smoke-%d", time.Now().UnixNano()))
 	manager := runtime.New(root.Services)
 	router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
 
@@ -747,7 +747,7 @@ func TestRegisterNativeSQSRoutesExposesAwsCompatibleSmokeSurface(t *testing.T) {
 func TestRegisterNativeSNSRoutesExposesQueryValidationSurface(t *testing.T) {
 	t.Helper()
 
-	root := composition.DefaultRoot("test-instance")
+	root := composition.DefaultRoot(fmt.Sprintf("test-instance-smoke-%d", time.Now().UnixNano()))
 	manager := runtime.New(root.Services)
 	router := deliveryhttp.NewRouter(deliveryhttp.DefaultConfig(), manager)
 
