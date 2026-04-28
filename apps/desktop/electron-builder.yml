@@ -24,6 +24,9 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  # Force ad-hoc signing so app binary and bundled frameworks share a consistent signature
+  # when no Apple Developer ID is available.
+  identity: "-"
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
