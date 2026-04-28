@@ -1,11 +1,6 @@
 import { ipcMain } from 'electron'
 import { getActiveInstancePort } from './instance-state'
-import { exec } from 'node:child_process'
-import { promisify } from 'node:util'
-
-const userShell = process.env.SHELL || '/bin/zsh'
-const execAsync = (cmd: string) => promisify(exec)(cmd, { shell: userShell })
-const mildStackExecutable = import.meta.env.MAIN_VITE_MILDSTACK_EXECUTABLE || 'mildstack'
+import { runMildStackCli } from './mildstack-cli'
 
 /**
  * Validates that the currently selected instance is running before
@@ -17,7 +12,7 @@ const mildStackExecutable = import.meta.env.MAIN_VITE_MILDSTACK_EXECUTABLE || 'm
 export async function assertInstanceRunning(): Promise<void> {
     const port = getActiveInstancePort()
     try {
-        const { stdout } = await execAsync(`${mildStackExecutable} instances --json`)
+        const { stdout } = await runMildStackCli(['instances', '--json'])
         const response = JSON.parse(stdout)
         const instance = response.instances?.find((i: { port: number }) => i.port === port)
 

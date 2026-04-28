@@ -1,20 +1,12 @@
 import { ipcMain } from "electron"
 import { getActiveInstancePort, setActiveInstancePort } from "./instance-state"
-import { exec } from 'node:child_process'
-import { promisify } from 'node:util'
-
-import { app } from 'electron'
-import { join } from 'path'
-
-const userShell = process.env.SHELL || '/bin/zsh'
-const execAsync = (cmd: string) => promisify(exec)(cmd, { shell: userShell })
-
-let mildStackExecutable = import.meta.env.MAIN_VITE_MILDSTACK_EXECUTABLE || 'mildstack'
-
-if (app.isPackaged) {
-    const binName = process.platform === 'win32' ? 'mildstack.exe' : 'mildstack'
-    mildStackExecutable = `"${join(process.resourcesPath, 'bin', binName)}"`
-}
+import {
+    getConfiguredMildStackExecutablePath,
+    getDefaultResolvedMildStackExecutablePath,
+    resetConfiguredMildStackExecutablePath,
+    setConfiguredMildStackExecutablePath,
+    runMildStackCli
+} from './mildstack-cli'
 
 export type MildStackInstanceStatus = 'running' | 'not_started' | 'errored'
 
@@ -58,6 +50,33 @@ function parseCliError(err: unknown): string {
 }
 
 export function registerMildStackIpcHandlers(): void {
+    ipcMain.handle('mildstack:cliPath:get', async () => {
+        return {
+            cliPath: getConfiguredMildStackExecutablePath(),
+            defaultCliPath: getDefaultResolvedMildStackExecutablePath()
+        }
+    })
+
+    ipcMain.handle('mildstack:cliPath:set', async (_event, cliPath: string) => {
+        const nextPath = setConfiguredMildStackExecutablePath(cliPath)
+        return { cliPath: nextPath }
+    })
+
+    ipcMain.handle('mildstack:cliPath:reset', async () => {
+        const nextPath = resetConfiguredMildStackExecutablePath()
+        return { cliPath: nextPath }
+    })
+
+    ipcMain.handle('mildstack:cliPath:test', async () => {
+        try {
+            await runMildStackCli(['instances', '--json'])
+            return { valid: true }
+        } catch (err) {
+            const error = parseCliError(err)
+            return { valid: false, error }
+        }
+    })
+
     ipcMain.handle('instance:port', async () => {
         return getActiveInstancePort()
     })
@@ -69,7 +88,7 @@ export function registerMildStackIpcHandlers(): void {
 
     ipcMain.handle('mildstack:instances', async (_event): Promise<MildStackInstancesResponse> => {
         try {
-            const { stdout } = await execAsync(`${mildStackExecutable} instances --json`)
+            const { stdout } = await runMildStackCli(['instances', '--json'])
             return JSON.parse(stdout)
         } catch (err) {
             // If no instances exist or CLI is not available, return empty state
@@ -86,7 +105,7 @@ export function registerMildStackIpcHandlers(): void {
     ipcMain.handle('mildstack:start', async (_event, port: number): Promise<{ success: boolean; error?: string }> => {
         try {
             // --d flag to detach (run in background)
-            await execAsync(`${mildStackExecutable} start ${port} --d`)
+            await runMildStackCli(['start', String(port), '--d'])
             return { success: true }
         } catch (err) {
             const error = parseCliError(err)
@@ -97,14 +116,14 @@ export function registerMildStackIpcHandlers(): void {
 
     ipcMain.handle('mildstack:stop', async (_event, args: { port?: number; all?: boolean }): Promise<{ success: boolean; error?: string }> => {
         try {
-            let cmd = `${mildStackExecutable} stop`
+            const cliArgs = ['stop']
             if (args.all) {
-                cmd += ' --all'
+                cliArgs.push('--all')
             } else if (args.port) {
-                cmd += ` ${args.port}`
+                cliArgs.push(String(args.port))
             }
-            cmd += ' --json'
-            await execAsync(cmd)
+            cliArgs.push('--json')
+            await runMildStackCli(cliArgs)
             return { success: true }
         } catch (err) {
             const error = parseCliError(err)
@@ -115,14 +134,14 @@ export function registerMildStackIpcHandlers(): void {
 
     ipcMain.handle('mildstack:delete', async (_event, args: { port?: number; all?: boolean }): Promise<{ success: boolean; error?: string }> => {
         try {
-            let cmd = `${mildStackExecutable} delete`
+            const cliArgs = ['delete']
             if (args.all) {
-                cmd += ' --all'
+                cliArgs.push('--all')
             } else if (args.port) {
-                cmd += ` ${args.port}`
+                cliArgs.push(String(args.port))
             }
-            cmd += ' --json'
-            await execAsync(cmd)
+            cliArgs.push('--json')
+            await runMildStackCli(cliArgs)
             return { success: true }
         } catch (err) {
             const error = parseCliError(err)
@@ -135,7 +154,7 @@ export function registerMildStackIpcHandlers(): void {
     ipcMain.handle('mildstack:validateInstance', async (_event): Promise<{ valid: boolean; error?: string }> => {
         const port = getActiveInstancePort()
         try {
-            const { stdout } = await execAsync(`${mildStackExecutable} instances --json`)
+            const { stdout } = await runMildStackCli(['instances', '--json'])
             const response: MildStackInstancesResponse = JSON.parse(stdout)
             const instance = response.instances.find(i => i.port === port)
 

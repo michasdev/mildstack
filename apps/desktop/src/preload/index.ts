@@ -198,6 +198,10 @@ interface MildStackApi {
   stop(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
   delete(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
   validateInstance(): Promise<{ valid: boolean; error?: string }>
+  getCliPath(): Promise<{ cliPath: string; defaultCliPath: string }>
+  setCliPath(cliPath: string): Promise<{ cliPath: string }>
+  resetCliPath(): Promise<{ cliPath: string }>
+  testCliPath(): Promise<{ valid: boolean; error?: string }>
 }
 
 // Custom APIs for renderer
@@ -307,7 +311,11 @@ const api: { s3: S3BrowserApi; dynamodb: DynamoDBBrowserApi; sqs: SQSBrowserApi;
     start: (port) => ipcRenderer.invoke('mildstack:start', port),
     stop: (port?, all?) => ipcRenderer.invoke('mildstack:stop', { port, all }),
     delete: (port?, all?) => ipcRenderer.invoke('mildstack:delete', { port, all }),
-    validateInstance: () => ipcRenderer.invoke('mildstack:validateInstance')
+    validateInstance: () => ipcRenderer.invoke('mildstack:validateInstance'),
+    getCliPath: () => ipcRenderer.invoke('mildstack:cliPath:get'),
+    setCliPath: (cliPath) => ipcRenderer.invoke('mildstack:cliPath:set', cliPath),
+    resetCliPath: () => ipcRenderer.invoke('mildstack:cliPath:reset'),
+    testCliPath: () => ipcRenderer.invoke('mildstack:cliPath:test')
   }
 }
 

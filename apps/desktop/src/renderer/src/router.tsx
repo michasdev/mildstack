@@ -13,6 +13,7 @@ import { QueuesList } from '@renderer/features/sqs-browser/components/queues-lis
 import { QueueDetails } from '@renderer/features/sqs-browser/components/queue-details'
 import { SNSLayout } from '@renderer/features/sns-browser/sns-layout'
 import { SNSBrowser } from '@renderer/features/sns-browser/sns-browser'
+import SettingsPage from '@renderer/features/settings/settings'
 
 export const router = createHashRouter([
   {
@@ -52,6 +53,7 @@ export const router = createHashRouter([
           { path: ':topicName/*', element: <SNSBrowser /> }
         ]
       },
+      { path: '/settings', element: <SettingsPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

@@ -196,6 +196,10 @@ interface MildStackApi {
   stop(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
   delete(port?: number, all?: boolean): Promise<{ success: boolean; error?: string }>
   validateInstance(): Promise<{ valid: boolean; error?: string }>
+  getCliPath(): Promise<{ cliPath: string; defaultCliPath: string }>
+  setCliPath(cliPath: string): Promise<{ cliPath: string }>
+  resetCliPath(): Promise<{ cliPath: string }>
+  testCliPath(): Promise<{ valid: boolean; error?: string }>
 }
 
 declare global {
