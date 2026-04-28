@@ -130,14 +130,15 @@ jobs:
         if: matrix.platform == 'mac'
         shell: bash
         run: |
-          mapfile -t app_paths < <(find apps/desktop/dist -maxdepth 3 -type d -name "MildStack Desktop.app" | sort)
-          if [[ ${#app_paths[@]} -eq 0 ]]; then
+          app_paths="$(find apps/desktop/dist -maxdepth 3 -type d -name "MildStack Desktop.app" | sort)"
+          if [[ -z "$app_paths" ]]; then
             echo "No macOS app bundle found under apps/desktop/dist"
             exit 1
           fi
 
-          for app_path in "${app_paths[@]}"; do
+          while IFS= read -r app_path; do
+            [[ -z "$app_path" ]] && continue
             echo "Verifying: $app_path"
             codesign --verify --deep --strict --verbose=2 "$app_path"
             codesign -dv --verbose=4 "$app_path" 2>&1 | sed -n '1,40p'
-          done
+          done <<< "$app_paths"
