@@ -161,6 +161,8 @@ jobs:
       - name: Build Electron app source
         working-directory: apps/desktop
         run: npm run build
+        env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
 
       - name: Build Electron app
         working-directory: apps/desktop
