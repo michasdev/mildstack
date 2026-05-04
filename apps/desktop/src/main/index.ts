@@ -1,7 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { autoUpdater } from 'electron-updater'
 import icon from '../../build/icon.png?asset'
 import { registerS3IpcHandlers } from './s3-ipc'
 import { registerDynamoDBIpcHandlers } from './dynamodb-ipc'
@@ -9,23 +8,12 @@ import { registerSQSIpcHandlers } from './sqs-ipc'
 import { registerSNSIpcHandlers } from './sns-ipc'
 import { registerMildStackIpcHandlers } from './mildstack-ipc'
 import { setupCliInstaller } from './setup-cli'
+import { checkForUpdatesInBackground, registerUpdaterIpcHandlers } from './updater-ipc'
 
 // Set app name for macOS Dock and Menu Bar as early as possible
 if (process.platform === 'darwin') {
   app.name = 'MildStack Desktop'
   app.setName('MildStack Desktop')
-}
-
-function checkForUpdates(): void {
-  if (is.dev) return
-
-  autoUpdater.on('error', (error) => {
-    console.error('Auto updater error:', error)
-  })
-
-  autoUpdater.checkForUpdatesAndNotify().catch((error) => {
-    console.error('Auto updater check failed:', error)
-  })
 }
 
 function createWindow(): void {
@@ -88,9 +76,10 @@ app.whenReady().then(() => {
   registerSQSIpcHandlers()
   registerSNSIpcHandlers()
   registerMildStackIpcHandlers()
+  registerUpdaterIpcHandlers()
 
   createWindow()
-  checkForUpdates()
+  checkForUpdatesInBackground()
   setupCliInstaller()
 
   app.on('activate', function () {

@@ -192,6 +192,24 @@ interface MildStackInstancesResponse {
   ports: number[] | null
 }
 
+type AppUpdateState =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'unsupported'
+  | 'error'
+
+interface AppUpdateStatus {
+  currentVersion: string
+  state: AppUpdateState
+  availableVersion?: string
+  lastCheckedAt?: string
+  error?: string
+}
+
 interface MildStackApi {
   instances(): Promise<MildStackInstancesResponse>
   start(port: number): Promise<{ success: boolean; error?: string }>
@@ -202,6 +220,9 @@ interface MildStackApi {
   setCliPath(cliPath: string): Promise<{ cliPath: string }>
   resetCliPath(): Promise<{ cliPath: string }>
   testCliPath(): Promise<{ valid: boolean; error?: string }>
+  getAppUpdateStatus(): Promise<AppUpdateStatus>
+  checkAppUpdates(): Promise<AppUpdateStatus>
+  installAppUpdate(): Promise<AppUpdateStatus>
 }
 
 // Custom APIs for renderer
@@ -315,7 +336,10 @@ const api: { s3: S3BrowserApi; dynamodb: DynamoDBBrowserApi; sqs: SQSBrowserApi;
     getCliPath: () => ipcRenderer.invoke('mildstack:cliPath:get'),
     setCliPath: (cliPath) => ipcRenderer.invoke('mildstack:cliPath:set', cliPath),
     resetCliPath: () => ipcRenderer.invoke('mildstack:cliPath:reset'),
-    testCliPath: () => ipcRenderer.invoke('mildstack:cliPath:test')
+    testCliPath: () => ipcRenderer.invoke('mildstack:cliPath:test'),
+    getAppUpdateStatus: () => ipcRenderer.invoke('app:update:status'),
+    checkAppUpdates: () => ipcRenderer.invoke('app:update:check'),
+    installAppUpdate: () => ipcRenderer.invoke('app:update:install')
   }
 }
 

@@ -441,7 +441,7 @@ export function ObjectList() {
               Enter a name for the new folder in the current directory.
             </DialogDescription>
           </DialogHeader>
-          <DialogContent className="py-4">
+          <div className="py-4">
             <Input
               autoFocus
               placeholder="Folder name..."
@@ -453,7 +453,7 @@ export function ObjectList() {
                 }
               }}
             />
-          </DialogContent>
+          </div>
           <DialogFooter>
             <DialogClose asChild>
               <Button variant="ghost">Cancel</Button>

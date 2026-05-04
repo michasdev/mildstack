@@ -190,6 +190,24 @@ interface MildStackInstancesResponse {
   ports: number[] | null
 }
 
+type AppUpdateState =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'unsupported'
+  | 'error'
+
+interface AppUpdateStatus {
+  currentVersion: string
+  state: AppUpdateState
+  availableVersion?: string
+  lastCheckedAt?: string
+  error?: string
+}
+
 interface MildStackApi {
   instances(): Promise<MildStackInstancesResponse>
   start(port: number): Promise<{ success: boolean; error?: string }>
@@ -200,6 +218,9 @@ interface MildStackApi {
   setCliPath(cliPath: string): Promise<{ cliPath: string }>
   resetCliPath(): Promise<{ cliPath: string }>
   testCliPath(): Promise<{ valid: boolean; error?: string }>
+  getAppUpdateStatus(): Promise<AppUpdateStatus>
+  checkAppUpdates(): Promise<AppUpdateStatus>
+  installAppUpdate(): Promise<AppUpdateStatus>
 }
 
 declare global {

@@ -123,32 +123,45 @@ export function registerS3IpcHandlers(): void {
       })
     )
 
-    const folders = (response.CommonPrefixes ?? []).flatMap((prefix) => {
-      if (!prefix.Prefix) return []
+    const folders = new Map<string, { Key: string; prefix: string; isFolder: true }>()
+
+    for (const prefix of response.CommonPrefixes ?? []) {
+      if (!prefix.Prefix) continue
+      folders.set(prefix.Prefix, {
+        Key: prefix.Prefix,
+        prefix: prefix.Prefix,
+        isFolder: true
+      })
+    }
+
+    const files = (response.Contents ?? []).flatMap((object) => {
+      if (!object.Key || object.Key === args.prefix) return []
+
+      if (object.Key.endsWith('/')) {
+        if (!folders.has(object.Key)) {
+          folders.set(object.Key, {
+            Key: object.Key,
+            prefix: object.Key,
+            isFolder: true
+          })
+        }
+        return []
+      }
+
       return [
         {
-          Key: prefix.Prefix,
-          prefix: prefix.Prefix,
-          isFolder: true
+          Key: object.Key,
+          LastModified: object.LastModified?.toISOString(),
+          ETag: object.ETag,
+          Size: object.Size,
+          StorageClass: object.StorageClass,
+          isFolder: false
         }
       ]
     })
 
-    const folderKeys = new Set(folders.map((f) => f.Key))
-
-    const files = (response.Contents ?? [])
-      .filter((object) => object.Key && object.Key !== args.prefix && !folderKeys.has(object.Key))
-      .map((object) => ({
-        Key: object.Key!,
-        LastModified: object.LastModified?.toISOString(),
-        ETag: object.ETag,
-        Size: object.Size,
-        StorageClass: object.StorageClass,
-        isFolder: false
-      }))
-
     return {
-      objects: [...folders, ...files],
+      objects: [...folders.values(), ...files],
       hasMore: Boolean(response.IsTruncated),
       continuationToken: response.NextContinuationToken
     }

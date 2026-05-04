@@ -159,7 +159,12 @@ export function UploadDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <DialogContent>
+        <div
+          className={cn(
+            'flex flex-col gap-4',
+            uploading && 'pointer-events-none opacity-50'
+          )}
+        >
           <div
             className={cn(
               'relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 transition-colors',
@@ -220,7 +225,7 @@ export function UploadDialog({
               ))}
             </div>
           )}
-        </DialogContent>
+        </div>
 
         <DialogFooter>
           <Button variant="ghost" onClick={handleClose} disabled={uploading}>
