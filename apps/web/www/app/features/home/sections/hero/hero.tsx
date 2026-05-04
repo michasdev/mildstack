@@ -1,6 +1,6 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { motion, type Variants } from 'motion/react';
-import { ChevronRight, Database, Zap, Bell, ShieldCheck } from 'lucide-react';
+import { ChevronRight, Cpu, Timer, MemoryStick, PlugZap } from 'lucide-react';
 
 interface LightningProps {
     hue?: number;
@@ -217,16 +217,16 @@ interface FeatureItemProps {
 
 const FeatureItem: React.FC<FeatureItemProps> = ({ name, value, position, icon }) => {
     return (
-        <div className={`relative ${position} z-10 group transition-all duration-500 w-full lg:w-60`}>
+        <div className={`relative ${position} z-10 group transition-all duration-500 w-full lg:w-[clamp(13rem,16vw,15rem)]`}>
             <motion.div
                 whileHover={{ scale: 1.02, y: -2 }}
-                className="relative flex items-center gap-3 p-3 md:p-4 rounded-2xl bg-gradient-to-br from-purple-500/10 to-transparent backdrop-blur-md border border-white/10 shadow-2xl overflow-hidden"
+                className="relative flex items-center gap-3 p-3 md:p-4 rounded-2xl bg-black/10 md:bg-gradient-to-br md:from-purple-500/10 md:to-transparent backdrop-blur-md border border-white/10 shadow-2xl overflow-hidden"
             >
                 {/* Animated Background Gradient on Hover */}
                 <div className="absolute inset-0 bg-linear-to-br from-purple-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
 
                 {/* Icon Container */}
-                <div className="relative flex items-center justify-center w-8 h-8 md:w-10 md:h-10 rounded-xl bg-white/10 group-hover:bg-purple-500/20 transition-colors duration-500">
+                <div className="relative flex shrink-0 items-center justify-center size-8 md:size-10 rounded-xl bg-white/10 group-hover:bg-purple-500/20 transition-colors duration-500">
                     <div className="text-white/80 group-hover:text-white transition-colors duration-500">
                         {icon}
                     </div>
@@ -253,6 +253,20 @@ const FeatureItem: React.FC<FeatureItemProps> = ({ name, value, position, icon }
 
 export const HeroSection: React.FC = () => {
     const lightningHue = 245;
+    const [lightningXOffset, setLightningXOffset] = useState(0);
+
+    useEffect(() => {
+        const updateLightningOffset = () => {
+            setLightningXOffset(window.innerWidth < 768 ? -0.25 : 0);
+        };
+
+        updateLightningOffset();
+        window.addEventListener("resize", updateLightningOffset);
+
+        return () => {
+            window.removeEventListener("resize", updateLightningOffset);
+        };
+    }, []);
 
     const containerVariants: Variants = {
         hidden: { opacity: 0 },
@@ -278,16 +292,16 @@ export const HeroSection: React.FC = () => {
     };
 
     return (
-        <div className="relative w-full bg-background text-foreground overflow-hidden">
+        <div className="relative w-full bg-background text-foreground overflow-hidden min-h-dvh">
             {/* Main container with space for content */}
-            <div className="2xl:mt-14 relative z-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 h-screen">
+            <div className="2xl:mt-14 relative z-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 ">
 
                 {/* Main hero content */}
                 <motion.div
                     variants={containerVariants}
                     initial="hidden"
                     animate="visible"
-                    className="mt-28 relative z-30 flex flex-col items-center text-center max-w-4xl mx-auto "
+                    className="relative z-30 mx-auto flex min-h-[calc(100vh-7rem)] max-w-4xl flex-col items-center justify-center text-center md:min-h-0 md:mt-28"
                 >
                     <motion.a
                         href="/download"
@@ -328,20 +342,22 @@ export const HeroSection: React.FC = () => {
                     variants={containerVariants}
                     initial="hidden"
                     animate="visible"
-                    className="flex flex-col lg:flex-row items-center justify-between gap-6 z-[200] relative lg:absolute lg:top-[60%] xl:top-[58%] 2xl:top-[55%] lg:inset-x-0 mt-14 lg:mt-0 px-4 lg:px-8"
+                    className="relative z-[200] mt-4 hidden w-full px-4 sm:px-0 md:block lg:mt-4 lg:max-w-6xl lg:mx-auto"
                 >
-                    <motion.div variants={itemVariants} className="lg:translate-y-20 w-full lg:w-auto">
-                        <FeatureItem icon={<Database className="size-5" />} name="High-speed Storage" value="S3 & DynamoDB" position="" />
-                    </motion.div>
-                    <motion.div variants={itemVariants} className="lg:translate-y-4 w-full lg:w-auto">
-                        <FeatureItem icon={<Zap className="size-5" />} name="Serverless Workflows" value="Lambda & SQS" position="" />
-                    </motion.div>
-                    <motion.div variants={itemVariants} className="lg:translate-y-4 w-full lg:w-auto">
-                        <FeatureItem icon={<Bell className="size-5" />} name="Event-Driven Logic" value="SNS & EventBridge" position="" />
-                    </motion.div>
-                    <motion.div variants={itemVariants} className="lg:translate-y-20 w-full lg:w-auto">
-                        <FeatureItem icon={<ShieldCheck className="size-5" />} name="Offline & Cost-Free" value="100% Local" position="" />
-                    </motion.div>
+                    <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-start lg:gap-6">
+                        <motion.div variants={itemVariants} className="w-full transition-transform duration-500 lg:translate-y-[clamp(1rem,8vh,5.5rem)]">
+                            <FeatureItem icon={<Cpu className="size-5" />} name="Go Native Runtime" value="Built in Go, no Docker" position="" />
+                        </motion.div>
+                        <motion.div variants={itemVariants} className="w-full transition-transform duration-500 lg:translate-y-[clamp(0.25rem,3vh,1.5rem)]">
+                            <FeatureItem icon={<Timer className="size-5" />} name="~200ms Startup" value="Fast local boot time" position="" />
+                        </motion.div>
+                        <motion.div variants={itemVariants} className="w-full transition-transform duration-500 lg:translate-y-[clamp(0.25rem,3vh,1.5rem)]">
+                            <FeatureItem icon={<MemoryStick className="size-5" />} name="~15MB RAM Idle" value="Low memory footprint" position="" />
+                        </motion.div>
+                        <motion.div variants={itemVariants} className="w-full transition-transform duration-500 lg:translate-y-[clamp(1rem,8vh,5.5rem)]">
+                            <FeatureItem icon={<PlugZap className="size-5" />} name="AWS SDK Ready" value="Use existing SDKs & CLI" position="" />
+                        </motion.div>
+                    </div>
                 </motion.div>
             </div>
 
@@ -362,7 +378,7 @@ export const HeroSection: React.FC = () => {
                 <div className="absolute top-0 w-[100%] left-1/2 transform -translate-x-1/2 h-full">
                     <Lightning
                         hue={lightningHue} // Use the state variable here
-                        xOffset={0}
+                        xOffset={lightningXOffset}
                         speed={1.6}
                         intensity={0.7}
                         size={2.2}

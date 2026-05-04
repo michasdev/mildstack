@@ -204,14 +204,19 @@ export const Navbar: React.FC = () => {
         }}
         transition={{ duration: 0.5 }}
         className={cn(
-          "px-4 backdrop-blur-3xl rounded-full py-4 flex justify-between items-center transition-all duration-300",
+          "px-4 backdrop-blur-3xl rounded-full md:py-4 flex justify-between items-center transition-all duration-300",
+          mobileMenuOpen ? 'py-4' : 'py-2.5',
           scrolled ? 'bg-background/80 border shadow-2xl shadow-white/5' : 'bg-background/50'
         )}
       >
         <div className="flex items-center">
           <div className="text-2xl font-bold">
             <a href="/" aria-label="MildStack home">
-              <img src={logoFullWhite} className='h-9 w-auto' alt="Logo" />
+              <img
+                src={logoFullWhite}
+                className={cn('w-auto transition-all duration-300 md:h-9', mobileMenuOpen ? 'h-9' : 'h-8')}
+                alt="Logo"
+              />
             </a>
           </div>
           <div className="hidden md:flex items-center space-x-2 ml-8">
