@@ -289,7 +289,8 @@ export const HeroSection: React.FC = () => {
                     animate="visible"
                     className="mt-28 relative z-30 flex flex-col items-center text-center max-w-4xl mx-auto "
                 >
-                    <motion.button
+                    <motion.a
+                        href="/download"
                         variants={itemVariants}
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
@@ -297,7 +298,7 @@ export const HeroSection: React.FC = () => {
                     >
                         <span>Download the Desktop App</span>
                         <ChevronRight className='size-4 transform group-hover:translate-x-1 transition-transform duration-300' />
-                    </motion.button>
+                    </motion.a>
 
                     <motion.h1
                         variants={itemVariants}
@@ -318,7 +319,7 @@ export const HeroSection: React.FC = () => {
                         variants={itemVariants}
                         className="text-center text-gray-400 mb-9 max-w-2xl leading-relaxed font-light"
                     >
-                        High-performance and lightweight local AWS emulator for <span className="font-normal text-foreground">S3</span>, <span className="font-normal text-foreground">DynamoDB</span>, <span className="font-normal text-foreground">SQS</span>, and more. Includes an intuitive <span className="font-normal text-foreground">Desktop App</span> to manage and browse your local cloud resources from a single place. No docker required!
+                        High-performance and lightweight local AWS emulator for <span className="font-normal text-foreground">S3</span>, <span className="font-normal text-foreground">DynamoDB</span>, <span className="font-normal text-foreground">SQS</span>, <span className="font-normal text-foreground">SNS</span>, and more. Includes an intuitive <span className="font-normal text-foreground">Desktop App</span> to manage and browse your local cloud resources from a single place. No docker required!
                     </motion.p>
                 </motion.div>
 

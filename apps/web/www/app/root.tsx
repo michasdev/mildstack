@@ -33,7 +33,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" type="image/svg+xml" href="/mildstack-logo.svg" />
         <title>MildStack: Free Open Source LocalStack Alternative</title>
-        <meta name="description" content="MildStack is a lightweight, local-first AWS emulator and LocalStack alternative. Build and test S3, DynamoDB, Lambda, SQS, and more locally with zero cloud costs and minimal overhead." />
+        <meta name="description" content="MildStack is a lightweight, local-first AWS emulator and LocalStack alternative. Build and test S3, DynamoDB, Lambda, SQS, SNS, and more locally with zero cloud costs and minimal overhead." />
         <meta name="keywords" content="aws, cloud, localstack, localstack alternative, aws emulator, local aws development, s3 local, dynamodb local, lambda local, sqs local, cloud development tools, s3, sqs, dynamodb, lambda, local mildstack, mildstack, open source aws emulator, ministack" />
 
         <meta property="og:type" content="website" />

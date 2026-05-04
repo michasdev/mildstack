@@ -1,4 +1,5 @@
 import mildstack from '@/assets/logos/mildstack-logo-full-white.png';
+import { Download } from 'lucide-react';
 
 export function Footer() {
     const year = new Date().getFullYear();
@@ -6,19 +7,19 @@ export function Footer() {
     const website = [
         {
             title: 'Home',
-            href: '#',
+            href: '/#home',
         },
         {
-            title: 'Features',
-            href: '#',
+            title: 'Get Started',
+            href: '/#get-started',
         },
         {
-            title: 'Services',
-            href: '#',
+            title: 'Desktop App',
+            href: '/#desktop-app',
         },
         {
             title: 'Docs',
-            href: 'https://mildstack.dev/docs',
+            href: '/docs',
         }
     ];
 
@@ -41,7 +42,7 @@ export function Footer() {
                 <div className="bg-border absolute inset-x-0 h-px w-full" />
                 <div className="grid max-w-7xl grid-cols-5 gap-6 p-4">
                     <div className="col-span-6 flex flex-col gap-3 md:col-span-4">
-                        <a href="#" className="w-max">
+                        <a href="/#home" className="w-max">
                             <img src={mildstack} alt="MildStack Logo" className="h-12" />
                         </a>
                         <p className="w-full text-muted-foreground max-w-xl font-mono text-sm text-balance">
@@ -60,6 +61,13 @@ export function Footer() {
                                     {item.icon} Github
                                 </a>
                             ))}
+                            <a
+                                className="hover:bg-accent rounded-md border p-1.5 flex flex-row items-center gap-2 text-sm font-light"
+                                href="/download"
+                            >
+                                <Download className="size-5" />
+                                Download App
+                            </a>
                         </div>
                     </div>
                     <div className="col-span-3 w-full md:col-span-1">
@@ -80,7 +88,7 @@ export function Footer() {
                     </div>
                 </div>
                 <div className="bg-border absolute inset-x-0 h-px w-full" />
-                <div className="flex max-w-4xl flex-col justify-between gap-2 pt-2 pb-5">
+                <div className="flex max-w-4xl flex-col justify-between gap-2 pt-2 pb-5 mx-auto">
                     <p className="text-muted-foreground text-center text-sm font-light">
                         © <a href="https://mildstack.dev">MildStack {year}</a>. GPL-3.0 licensed. <a href="https://github.com/michasdev/mildstack" target="_blank" rel="noopener noreferrer">View Repository.</a>
                     </p>

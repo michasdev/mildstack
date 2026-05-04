@@ -37,9 +37,15 @@ export function CallToAction() {
       </div>
 
       <div className="flex items-center justify-center gap-2">
-        <Button variant="outline">View source</Button>
-        <Button>
-          Download <ArrowRightIcon className="size-4 ml-1" />
+        <Button asChild variant="outline">
+          <a href="https://github.com/michasdev/mildstack" target="_blank" rel="noopener noreferrer">
+            View source
+          </a>
+        </Button>
+        <Button asChild>
+          <a href="/download">
+            Download <ArrowRightIcon className="size-4 ml-1" />
+          </a>
         </Button>
       </div>
     </div>
