@@ -3,6 +3,9 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -45,6 +48,37 @@ func TestExecuteWiresContextAndRootCommand(t *testing.T) {
 
 	if err := Execute(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, Commands{}); err != nil {
 		t.Fatalf("execute: %v", err)
+	}
+}
+
+func TestExecuteRendersPrettyErrorWithoutUsage(t *testing.T) {
+	t.Helper()
+
+	originalArgs := os.Args
+	t.Cleanup(func() { os.Args = originalArgs })
+	os.Args = []string{"mildstack", "start"}
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	err := Execute(context.Background(), stdout, stderr, Commands{
+		Serve: &cobra.Command{
+			Use: "start",
+			RunE: func(*cobra.Command, []string) error {
+				return errors.New("start: unable to find an available port starting at 4566")
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected execute to return error")
+	}
+	if got, want := stripANSI(stderr.String()), "✗ start: unable to find an available port starting at 4566\n"; got != want {
+		t.Fatalf("unexpected stderr output:\n got %q\nwant %q", got, want)
+	}
+	if strings.Contains(stripANSI(stderr.String()), "Usage:") {
+		t.Fatalf("stderr should not include usage help, got %q", stripANSI(stderr.String()))
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("expected empty stdout, got %q", got)
 	}
 }
 

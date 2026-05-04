@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/michasdev/mildstack/core/internal/application/runtime"
 	"github.com/spf13/cobra"
 )
@@ -24,6 +25,8 @@ const detachedReadyFileEnv = "MILDSTACK_DETACHED_READY_FILE"
 
 var listenTCP = net.Listen
 var startDetachedServe = defaultStartDetachedServe
+
+var detachedSuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e")).Bold(true)
 
 func NewServeCommand(manager *runtime.Manager, factories ...HTTPServerFactory) *cobra.Command {
 	var detach bool
@@ -64,7 +67,11 @@ func NewServeCommand(manager *runtime.Manager, factories ...HTTPServerFactory) *
 					return server.Start(ctx)
 				}
 				if detach {
-					return startDetachedServe(cmd.Context(), resolvedPort, start)
+					if err := startDetachedServe(cmd.Context(), resolvedPort, start); err != nil {
+						return err
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "%s\n", renderDetachedSuccessMessage(resolvedPort))
+					return nil
 				}
 				return start(cmd.Context())
 			}
@@ -165,4 +172,9 @@ func pickServePort(startPort int) (int, error) {
 		lastErr = fmt.Errorf("no available ports starting at %d", startPort)
 	}
 	return 0, fmt.Errorf("start: unable to find an available port starting at %d: %w", startPort, lastErr)
+}
+
+func renderDetachedSuccessMessage(port int) string {
+	message := fmt.Sprintf("✓ MildStack running on http://localhost:%d", port)
+	return detachedSuccessStyle.Render(message)
 }

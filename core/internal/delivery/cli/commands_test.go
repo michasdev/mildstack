@@ -334,7 +334,7 @@ func TestCommandsServeDetachedLifecycle(t *testing.T) {
 			}
 		}
 	}
-	cmd, _, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
+	cmd, stdout, _ := newTestCommand(t, manager, storage, func(port int) HTTPServer {
 		return &commandServerStub{
 			manager:  manager,
 			storage:  storage,
@@ -364,6 +364,10 @@ func TestCommandsServeDetachedLifecycle(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("detached start did not return after startup")
+	}
+
+	if got, want := stripANSI(stdout.String()), "✓ MildStack running on http://localhost:9090\n"; got != want {
+		t.Fatalf("unexpected detached success output:\n got %q\nwant %q", got, want)
 	}
 
 	instances, err := storage.LoadInstances()
