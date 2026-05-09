@@ -1,8 +1,10 @@
 import mildstack from '@/assets/logos/mildstack-logo-full-white.png';
 import { Download } from 'lucide-react';
+import { useInstallationTarget } from '@/hooks/use-installation-target';
 
 export function Footer() {
     const year = new Date().getFullYear();
+    const { installationHref } = useInstallationTarget();
 
     const website = [
         {
@@ -63,7 +65,7 @@ export function Footer() {
                             ))}
                             <a
                                 className="hover:bg-accent rounded-md border p-1.5 flex flex-row items-center gap-2 text-sm font-light"
-                                href="/download"
+                                href={installationHref}
                             >
                                 <Download className="size-5" />
                                 Download App

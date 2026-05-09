@@ -490,8 +490,6 @@ func validatePersistedSecondaryIndex(table domain.Table, index domain.SecondaryI
 		if partitionKey != table.PartitionKey {
 			return fmt.Errorf("index %q must reuse table partition key %q", index.Name, table.PartitionKey)
 		}
-	} else if partitionKey == table.PartitionKey {
-		return fmt.Errorf("index %q must not reuse table partition key %q", index.Name, table.PartitionKey)
 	}
 	if rangeCount > 1 {
 		return fmt.Errorf("index %q has duplicate RANGE keys", index.Name)

@@ -1,7 +1,10 @@
 import { ArrowRightIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useInstallationTarget } from "@/hooks/use-installation-target";
 
 export function CallToAction() {
+  const { installationHref } = useInstallationTarget();
+
   return (
     <div className="relative mx-auto flex w-full max-w-3xl flex-col justify-between gap-y-6 border-y bg-background bg-[radial-gradient(35%_80%_at_75%_0%,color-mix(in_oklab,var(--color-primary)_35%,var(--color-background)),transparent)] px-4 py-8">
       <PlusIcon
@@ -43,7 +46,7 @@ export function CallToAction() {
           </a>
         </Button>
         <Button asChild>
-          <a href="/download">
+          <a href={installationHref}>
             Download <ArrowRightIcon className="size-4 ml-1" />
           </a>
         </Button>

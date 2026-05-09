@@ -22,6 +22,7 @@ import (
 type DynamoDBNativeService interface {
 	ListTables() []dynamodbdomain.Table
 	CreateTable(name, partitionKey, sortKey, billingMode string, specs ...dynamodbdomain.CreateTableSpec) (dynamodbdomain.Table, error)
+	UpdateTableSchema(name string, attributeDefinitions []dynamodbdomain.AttributeDefinition, globalSecondaryIndexes []dynamodbdomain.SecondaryIndex) (dynamodbdomain.Table, error)
 	DescribeTable(name string) (dynamodbdomain.Table, error)
 	DeleteTable(name string) (dynamodbdomain.Table, error)
 	GetItem(table, key string) (dynamodbdomain.Item, error)
@@ -81,15 +82,16 @@ type nativeTTLDescription struct {
 }
 
 type nativeTableMeta struct {
-	DeletionProtectionEnabled bool
-	StreamSpecification       *streamSpecification
-	LatestStreamArn           string
-	LatestStreamLabel         string
-	PointInTimeRecovery       bool
-	Tags                      map[string]string
-	ProvisionedThroughput     provisionedThroughputDescription
-	GSIProvisionedThroughput  map[string]provisionedThroughputDescription
-	SSEDescription            *sseDescription
+	DeletionProtectionEnabled               bool
+	StreamSpecification                     *streamSpecification
+	LatestStreamArn                         string
+	LatestStreamLabel                       string
+	PointInTimeRecovery                     bool
+	PointInTimeRecoveryRecoveryPeriodInDays *int
+	Tags                                    map[string]string
+	ProvisionedThroughput                   provisionedThroughputDescription
+	GSIProvisionedThroughput                map[string]provisionedThroughputDescription
+	SSEDescription                          *sseDescription
 }
 
 type dynamoTargetSpec struct {
@@ -331,7 +333,7 @@ func (h *dynamoDBNativeHandler) handleDescribeTable(c *gin.Context, body []byte)
 		return fmt.Errorf("dynamodb: invalid DescribeTable request: %w", err)
 	}
 
-	tableName := strings.TrimSpace(request.TableName)
+	tableName := resolveDynamoDBTableName(request.TableName)
 	if tableName == "" {
 		return fmt.Errorf("dynamodb: table name is required")
 	}
@@ -829,8 +831,8 @@ func (h *dynamoDBNativeHandler) handleBatchGetItem(c *gin.Context, body []byte) 
 	result.Unprocessed = append(result.Unprocessed, missingTables...)
 
 	writeDynamoDBJSON(c, http.StatusOK, batchGetItemResponse{
-		Responses:       batchGetResponsesFromDomain(result.Responses),
-		UnprocessedKeys: batchGetUnprocessedKeysFromDomain(result.Unprocessed),
+		Responses:        batchGetResponsesFromDomain(result.Responses),
+		UnprocessedKeys:  batchGetUnprocessedKeysFromDomain(result.Unprocessed),
 		ConsumedCapacity: consumedCapacityForBatchGet(appRequest, strings.TrimSpace(request.ReturnConsumedCapacity)),
 	})
 	return nil
@@ -1097,7 +1099,7 @@ func (h *dynamoDBNativeHandler) handleDescribeContinuousBackups(c *gin.Context, 
 	if err := json.Unmarshal(body, &request); err != nil {
 		return fmt.Errorf("dynamodb: invalid DescribeContinuousBackups request: %w", err)
 	}
-	tableName := strings.TrimSpace(request.TableName)
+	tableName := resolveDynamoDBTableName(request.TableName)
 	if tableName == "" {
 		return fmt.Errorf("dynamodb: table name is required")
 	}
@@ -1109,11 +1111,12 @@ func (h *dynamoDBNativeHandler) handleDescribeContinuousBackups(c *gin.Context, 
 	if meta.PointInTimeRecovery {
 		status = "ENABLED"
 	}
-	writeDynamoDBJSON(c, http.StatusOK, map[string]any{
-		"ContinuousBackupsDescription": map[string]any{
-			"ContinuousBackupsStatus": "ENABLED",
-			"PointInTimeRecoveryDescription": map[string]any{
-				"PointInTimeRecoveryStatus": status,
+	writeDynamoDBJSON(c, http.StatusOK, describeContinuousBackupsResponse{
+		ContinuousBackupsDescription: continuousBackupsDescription{
+			ContinuousBackupsStatus: "ENABLED",
+			PointInTimeRecoveryDescription: pointInTimeRecoveryDescription{
+				PointInTimeRecoveryStatus: status,
+				RecoveryPeriodInDays:      cloneOptionalInt(meta.PointInTimeRecoveryRecoveryPeriodInDays),
 			},
 		},
 	})
@@ -1121,24 +1124,29 @@ func (h *dynamoDBNativeHandler) handleDescribeContinuousBackups(c *gin.Context, 
 }
 
 func (h *dynamoDBNativeHandler) handleUpdateContinuousBackups(c *gin.Context, body []byte) error {
-	request := struct {
-		TableName                        string `json:"TableName"`
-		PointInTimeRecoverySpecification struct {
-			PointInTimeRecoveryEnabled bool `json:"PointInTimeRecoveryEnabled"`
-		} `json:"PointInTimeRecoverySpecification"`
-	}{}
+	request := updateContinuousBackupsRequest{}
 	if err := json.Unmarshal(body, &request); err != nil {
 		return fmt.Errorf("dynamodb: invalid UpdateContinuousBackups request: %w", err)
 	}
-	tableName := strings.TrimSpace(request.TableName)
+	tableName := resolveDynamoDBTableName(request.TableName)
 	if tableName == "" {
 		return fmt.Errorf("dynamodb: table name is required")
+	}
+	if request.PointInTimeRecoverySpecification == nil {
+		return fmt.Errorf("dynamodb: point in time recovery specification is required")
+	}
+	if request.PointInTimeRecoverySpecification.RecoveryPeriodInDays != nil {
+		recoveryPeriod := *request.PointInTimeRecoverySpecification.RecoveryPeriodInDays
+		if recoveryPeriod < 1 || recoveryPeriod > 35 {
+			return fmt.Errorf("dynamodb: recovery period in days is invalid, must be between 1 and 35")
+		}
 	}
 	if _, err := h.service.DescribeTable(tableName); err != nil {
 		return err
 	}
 	meta := h.ensureTableMeta(tableName)
 	meta.PointInTimeRecovery = request.PointInTimeRecoverySpecification.PointInTimeRecoveryEnabled
+	meta.PointInTimeRecoveryRecoveryPeriodInDays = cloneOptionalInt(request.PointInTimeRecoverySpecification.RecoveryPeriodInDays)
 	return h.handleDescribeContinuousBackups(c, []byte(fmt.Sprintf(`{"TableName":%q}`, tableName)))
 }
 
@@ -1146,7 +1154,7 @@ func (h *dynamoDBNativeHandler) handleDescribeEndpoints(c *gin.Context, _ []byte
 	writeDynamoDBJSON(c, http.StatusOK, map[string]any{
 		"Endpoints": []map[string]any{
 			{
-				"Address":     "localhost:4566",
+				"Address":              "localhost:4566",
 				"CachePeriodInMinutes": int64(60),
 			},
 		},
@@ -1233,28 +1241,45 @@ func (h *dynamoDBNativeHandler) handleListTagsOfResource(c *gin.Context, body []
 }
 
 func (h *dynamoDBNativeHandler) handleUpdateTable(c *gin.Context, body []byte) error {
-	request := struct {
-		TableName                 string                   `json:"TableName"`
-		BillingMode               string                   `json:"BillingMode,omitempty"`
-		DeletionProtectionEnabled *bool                    `json:"DeletionProtectionEnabled,omitempty"`
-		SSESpecification          *sseSpecification        `json:"SSESpecification,omitempty"`
-	}{}
+	if err := validateUpdateTableTopLevelFields(body); err != nil {
+		return err
+	}
+
+	request := updateTableRequest{}
 	if err := json.Unmarshal(body, &request); err != nil {
 		return fmt.Errorf("dynamodb: invalid UpdateTable request: %w", err)
 	}
-	tableName := strings.TrimSpace(request.TableName)
+	tableName := resolveDynamoDBTableName(request.TableName)
 	if tableName == "" {
 		return fmt.Errorf("dynamodb: table name is required")
 	}
-	table, err := h.service.DescribeTable(tableName)
+	billingMode, err := validateUpdateTableBillingMode(request.BillingMode)
 	if err != nil {
 		return err
 	}
+
+	globalSecondaryIndexCreates, err := globalSecondaryIndexCreatesFromUpdate(request.GlobalSecondaryIndexUpdates)
+	if err != nil {
+		return err
+	}
+	attributeDefinitions := attributeDefinitionsToDomain(request.AttributeDefinitions)
+	globalSecondaryIndexes := secondaryIndexesToDomain(globalSecondaryIndexCreates)
+
+	var table dynamodbdomain.Table
+	if len(attributeDefinitions) > 0 || len(globalSecondaryIndexes) > 0 {
+		table, err = h.service.UpdateTableSchema(tableName, attributeDefinitions, globalSecondaryIndexes)
+	} else {
+		table, err = h.service.DescribeTable(tableName)
+	}
+	if err != nil {
+		return err
+	}
+
 	meta := h.ensureTableMeta(tableName)
 	if request.DeletionProtectionEnabled != nil {
 		meta.DeletionProtectionEnabled = *request.DeletionProtectionEnabled
 	}
-	if strings.EqualFold(strings.TrimSpace(request.BillingMode), "PAY_PER_REQUEST") {
+	if billingMode == "PAY_PER_REQUEST" {
 		meta.ProvisionedThroughput = provisionedThroughputDescription{}
 		for indexName := range meta.GSIProvisionedThroughput {
 			meta.GSIProvisionedThroughput[indexName] = provisionedThroughputDescription{}
@@ -1271,13 +1296,60 @@ func (h *dynamoDBNativeHandler) handleUpdateTable(c *gin.Context, body []byte) e
 			KMSMasterKeyArn: strings.TrimSpace(request.SSESpecification.KMSMasterKeyId),
 		}
 	}
+	if len(globalSecondaryIndexCreates) > 0 {
+		if meta.GSIProvisionedThroughput == nil {
+			meta.GSIProvisionedThroughput = map[string]provisionedThroughputDescription{}
+		}
+
+		effectiveBillingMode := billingMode
+		if effectiveBillingMode == "" {
+			effectiveBillingMode = table.BillingMode
+		}
+		for indexName, throughput := range gsiThroughputFromCreateRequest(effectiveBillingMode, globalSecondaryIndexCreates) {
+			meta.GSIProvisionedThroughput[indexName] = throughput
+		}
+
+		h.storeIndexDefinitions(
+			tableName,
+			secondaryIndexesFromDomain(table.GlobalSecondaryIndexes),
+			secondaryIndexesFromDomain(table.LocalSecondaryIndexes),
+		)
+	}
+
 	writeDynamoDBJSON(c, http.StatusOK, map[string]any{"TableDescription": h.tableDescriptionFor(table)})
 	return nil
 }
 
+func globalSecondaryIndexCreatesFromUpdate(updates []dynamoGlobalSecondaryIndexUpdate) ([]dynamoSecondaryIndexDefinition, error) {
+	if len(updates) == 0 {
+		return nil, nil
+	}
+
+	creates := make([]dynamoSecondaryIndexDefinition, 0, len(updates))
+	createDeleteOperations := 0
+	for i, update := range updates {
+		switch {
+		case update.Update != nil:
+			return nil, fmt.Errorf("dynamodb: GlobalSecondaryIndexUpdates.Update is not supported")
+		case update.Delete != nil:
+			return nil, fmt.Errorf("dynamodb: GlobalSecondaryIndexUpdates.Delete is not supported")
+		case update.Create == nil:
+			return nil, fmt.Errorf("dynamodb: global secondary index update at position %d must include Create", i+1)
+		default:
+			createDeleteOperations++
+			if createDeleteOperations > 1 {
+				return nil, fmt.Errorf("dynamodb: GlobalSecondaryIndexUpdates with more than one Create/Delete operation is not supported")
+			}
+			creates = append(creates, *update.Create)
+		}
+	}
+
+	return creates, nil
+}
+
 func (h *dynamoDBNativeHandler) handleExecuteStatement(c *gin.Context, body []byte) error {
 	request := struct {
-		Statement  string                `json:"Statement"`
+		Statement  string                 `json:"Statement"`
 		Parameters []dynamoAttributeValue `json:"Parameters,omitempty"`
 	}{}
 	if err := json.Unmarshal(body, &request); err != nil {
@@ -1466,16 +1538,16 @@ type listTablesResponse struct {
 }
 
 type createTableRequest struct {
-	TableName              string                           `json:"TableName"`
-	BillingMode            string                           `json:"BillingMode,omitempty"`
-	ProvisionedThroughput  *provisionedThroughputRequest    `json:"ProvisionedThroughput,omitempty"`
-	KeySchema              []dynamoKeySchemaElement         `json:"KeySchema,omitempty"`
-	AttributeDefinitions   []dynamoAttributeDefinition      `json:"AttributeDefinitions,omitempty"`
-	GlobalSecondaryIndexes []dynamoSecondaryIndexDefinition `json:"GlobalSecondaryIndexes,omitempty"`
-	LocalSecondaryIndexes  []dynamoSecondaryIndexDefinition `json:"LocalSecondaryIndexes,omitempty"`
-	StreamSpecification    *streamSpecification             `json:"StreamSpecification,omitempty"`
-	DeletionProtectionEnabled bool                          `json:"DeletionProtectionEnabled,omitempty"`
-	SSESpecification       *sseSpecification                `json:"SSESpecification,omitempty"`
+	TableName                 string                           `json:"TableName"`
+	BillingMode               string                           `json:"BillingMode,omitempty"`
+	ProvisionedThroughput     *provisionedThroughputRequest    `json:"ProvisionedThroughput,omitempty"`
+	KeySchema                 []dynamoKeySchemaElement         `json:"KeySchema,omitempty"`
+	AttributeDefinitions      []dynamoAttributeDefinition      `json:"AttributeDefinitions,omitempty"`
+	GlobalSecondaryIndexes    []dynamoSecondaryIndexDefinition `json:"GlobalSecondaryIndexes,omitempty"`
+	LocalSecondaryIndexes     []dynamoSecondaryIndexDefinition `json:"LocalSecondaryIndexes,omitempty"`
+	StreamSpecification       *streamSpecification             `json:"StreamSpecification,omitempty"`
+	DeletionProtectionEnabled bool                             `json:"DeletionProtectionEnabled,omitempty"`
+	SSESpecification          *sseSpecification                `json:"SSESpecification,omitempty"`
 }
 
 type createTableResponse struct {
@@ -1483,10 +1555,10 @@ type createTableResponse struct {
 }
 
 type dynamoSecondaryIndexDefinition struct {
-	IndexName             string                          `json:"IndexName"`
-	KeySchema             []dynamoKeySchemaElement        `json:"KeySchema,omitempty"`
-	Projection            dynamoProjection                `json:"Projection,omitempty"`
-	ProvisionedThroughput *provisionedThroughputRequest   `json:"ProvisionedThroughput,omitempty"`
+	IndexName             string                        `json:"IndexName"`
+	KeySchema             []dynamoKeySchemaElement      `json:"KeySchema,omitempty"`
+	Projection            dynamoProjection              `json:"Projection,omitempty"`
+	ProvisionedThroughput *provisionedThroughputRequest `json:"ProvisionedThroughput,omitempty"`
 }
 
 type describeTableRequest struct {
@@ -1503,6 +1575,30 @@ type deleteTableRequest struct {
 
 type deleteTableResponse struct {
 	TableDescription tableDescription `json:"TableDescription"`
+}
+
+type updateTableRequest struct {
+	TableName                   string                             `json:"TableName"`
+	BillingMode                 string                             `json:"BillingMode,omitempty"`
+	DeletionProtectionEnabled   *bool                              `json:"DeletionProtectionEnabled,omitempty"`
+	SSESpecification            *sseSpecification                  `json:"SSESpecification,omitempty"`
+	AttributeDefinitions        []dynamoAttributeDefinition        `json:"AttributeDefinitions,omitempty"`
+	GlobalSecondaryIndexUpdates []dynamoGlobalSecondaryIndexUpdate `json:"GlobalSecondaryIndexUpdates,omitempty"`
+}
+
+type dynamoGlobalSecondaryIndexUpdate struct {
+	Create *dynamoSecondaryIndexDefinition              `json:"Create,omitempty"`
+	Update *dynamoGlobalSecondaryIndexProvisionedUpdate `json:"Update,omitempty"`
+	Delete *dynamoGlobalSecondaryIndexDelete            `json:"Delete,omitempty"`
+}
+
+type dynamoGlobalSecondaryIndexProvisionedUpdate struct {
+	IndexName             string                        `json:"IndexName"`
+	ProvisionedThroughput *provisionedThroughputRequest `json:"ProvisionedThroughput,omitempty"`
+}
+
+type dynamoGlobalSecondaryIndexDelete struct {
+	IndexName string `json:"IndexName"`
 }
 
 type getItemRequest struct {
@@ -1525,13 +1621,13 @@ type putItemRequest struct {
 
 type putItemResponse struct {
 	Attributes       map[string]dynamoAttributeValue `json:"Attributes,omitempty"`
-	ConsumedCapacity *consumedCapacity              `json:"ConsumedCapacity,omitempty"`
+	ConsumedCapacity *consumedCapacity               `json:"ConsumedCapacity,omitempty"`
 }
 
 type deleteItemRequest struct {
-	TableName string                          `json:"TableName"`
-	Key       map[string]dynamoAttributeValue `json:"Key"`
-	ReturnValues string                       `json:"ReturnValues,omitempty"`
+	TableName    string                          `json:"TableName"`
+	Key          map[string]dynamoAttributeValue `json:"Key"`
+	ReturnValues string                          `json:"ReturnValues,omitempty"`
 }
 
 type updateItemRequest struct {
@@ -1616,7 +1712,7 @@ type batchWriteDeleteRequest struct {
 }
 
 type batchWriteItemResponse struct {
-	UnprocessedItems  map[string][]batchWriteRequest `json:"UnprocessedItems,omitempty"`
+	UnprocessedItems map[string][]batchWriteRequest `json:"UnprocessedItems,omitempty"`
 	ConsumedCapacity []consumedCapacity             `json:"ConsumedCapacity,omitempty"`
 }
 
@@ -1633,9 +1729,9 @@ type batchGetTableRequest struct {
 }
 
 type batchGetItemResponse struct {
-	Responses       map[string][]map[string]dynamoAttributeValue `json:"Responses,omitempty"`
-	UnprocessedKeys map[string]batchGetTableRequest              `json:"UnprocessedKeys,omitempty"`
-	ConsumedCapacity []consumedCapacity                          `json:"ConsumedCapacity,omitempty"`
+	Responses        map[string][]map[string]dynamoAttributeValue `json:"Responses,omitempty"`
+	UnprocessedKeys  map[string]batchGetTableRequest              `json:"UnprocessedKeys,omitempty"`
+	ConsumedCapacity []consumedCapacity                           `json:"ConsumedCapacity,omitempty"`
 }
 
 type transactWriteItemsRequest struct {
@@ -1732,6 +1828,32 @@ type describeTimeToLiveResponse struct {
 	TimeToLiveDescription timeToLiveDescription `json:"TimeToLiveDescription"`
 }
 
+type updateContinuousBackupsRequest struct {
+	TableName                        string                                  `json:"TableName"`
+	PointInTimeRecoverySpecification *pointInTimeRecoverySpecificationUpdate `json:"PointInTimeRecoverySpecification"`
+}
+
+type pointInTimeRecoverySpecificationUpdate struct {
+	PointInTimeRecoveryEnabled bool `json:"PointInTimeRecoveryEnabled"`
+	RecoveryPeriodInDays       *int `json:"RecoveryPeriodInDays,omitempty"`
+}
+
+type describeContinuousBackupsResponse struct {
+	ContinuousBackupsDescription continuousBackupsDescription `json:"ContinuousBackupsDescription"`
+}
+
+type continuousBackupsDescription struct {
+	ContinuousBackupsStatus        string                         `json:"ContinuousBackupsStatus"`
+	PointInTimeRecoveryDescription pointInTimeRecoveryDescription `json:"PointInTimeRecoveryDescription"`
+}
+
+type pointInTimeRecoveryDescription struct {
+	EarliestRestorableDateTime int64  `json:"EarliestRestorableDateTime,omitempty"`
+	LatestRestorableDateTime   int64  `json:"LatestRestorableDateTime,omitempty"`
+	PointInTimeRecoveryStatus  string `json:"PointInTimeRecoveryStatus"`
+	RecoveryPeriodInDays       *int   `json:"RecoveryPeriodInDays,omitempty"`
+}
+
 type timeToLiveSpecification struct {
 	AttributeName string `json:"AttributeName,omitempty"`
 	Enabled       bool   `json:"Enabled"`
@@ -1743,14 +1865,14 @@ type timeToLiveDescription struct {
 }
 
 type dynamoAttributeValue struct {
-	S    string                          `json:"S,omitempty"`
-	N    string                          `json:"N,omitempty"`
-	SS   []string                        `json:"SS,omitempty"`
-	NS   []string                        `json:"NS,omitempty"`
-	BOOL *bool                           `json:"BOOL,omitempty"`
-	NULL bool                            `json:"NULL,omitempty"`
-	M    map[string]dynamoAttributeValue `json:"M,omitempty"`
-	L    []dynamoAttributeValue          `json:"L,omitempty"`
+	S    *string                          `json:"S,omitempty"`
+	N    *string                          `json:"N,omitempty"`
+	SS   []string                         `json:"SS,omitempty"`
+	NS   []string                         `json:"NS,omitempty"`
+	BOOL *bool                            `json:"BOOL,omitempty"`
+	NULL bool                             `json:"NULL,omitempty"`
+	M    *map[string]dynamoAttributeValue `json:"M,omitempty"`
+	L    *[]dynamoAttributeValue          `json:"L,omitempty"`
 }
 
 type dynamoKeySchemaElement struct {
@@ -1769,21 +1891,21 @@ type dynamoProjection struct {
 }
 
 type tableDescription struct {
-	TableName              string                           `json:"TableName"`
-	TableStatus            string                           `json:"TableStatus"`
-	TableArn               string                           `json:"TableArn,omitempty"`
-	CreationDateTime       int64                            `json:"CreationDateTime,omitempty"`
-	KeySchema              []dynamoKeySchemaElement         `json:"KeySchema,omitempty"`
-	AttributeDefinitions   []dynamoAttributeDefinition      `json:"AttributeDefinitions,omitempty"`
-	GlobalSecondaryIndexes []dynamoSecondaryIndexDefinition `json:"GlobalSecondaryIndexes,omitempty"`
-	LocalSecondaryIndexes  []dynamoSecondaryIndexDefinition `json:"LocalSecondaryIndexes,omitempty"`
-	BillingModeSummary     *billingModeSummary              `json:"BillingModeSummary,omitempty"`
-	DeletionProtectionEnabled bool                          `json:"DeletionProtectionEnabled"`
-	ProvisionedThroughput   provisionedThroughputDescription `json:"ProvisionedThroughput"`
-	LatestStreamArn         string                           `json:"LatestStreamArn,omitempty"`
-	LatestStreamLabel       string                           `json:"LatestStreamLabel,omitempty"`
-	StreamSpecification     *streamSpecification             `json:"StreamSpecification,omitempty"`
-	SSEDescription          *sseDescription                  `json:"SSEDescription,omitempty"`
+	TableName                 string                           `json:"TableName"`
+	TableStatus               string                           `json:"TableStatus"`
+	TableArn                  string                           `json:"TableArn,omitempty"`
+	CreationDateTime          int64                            `json:"CreationDateTime,omitempty"`
+	KeySchema                 []dynamoKeySchemaElement         `json:"KeySchema,omitempty"`
+	AttributeDefinitions      []dynamoAttributeDefinition      `json:"AttributeDefinitions,omitempty"`
+	GlobalSecondaryIndexes    []dynamoSecondaryIndexDefinition `json:"GlobalSecondaryIndexes,omitempty"`
+	LocalSecondaryIndexes     []dynamoSecondaryIndexDefinition `json:"LocalSecondaryIndexes,omitempty"`
+	BillingModeSummary        *billingModeSummary              `json:"BillingModeSummary,omitempty"`
+	DeletionProtectionEnabled bool                             `json:"DeletionProtectionEnabled"`
+	ProvisionedThroughput     provisionedThroughputDescription `json:"ProvisionedThroughput"`
+	LatestStreamArn           string                           `json:"LatestStreamArn,omitempty"`
+	LatestStreamLabel         string                           `json:"LatestStreamLabel,omitempty"`
+	StreamSpecification       *streamSpecification             `json:"StreamSpecification,omitempty"`
+	SSEDescription            *sseDescription                  `json:"SSEDescription,omitempty"`
 }
 
 type provisionedThroughputRequest struct {
@@ -1892,21 +2014,21 @@ func (h *dynamoDBNativeHandler) tableDescriptionFor(table dynamodbdomain.Table) 
 	aws := awscontext.Default()
 	meta := h.ensureTableMeta(table.Name)
 	description := tableDescription{
-		TableName:              table.Name,
-		TableStatus:            effectiveTableStatus(table.Status),
-		TableArn:               aws.DynamoDBTableARN(table.Name),
-		CreationDateTime:       awsTimestamp(table.CreatedAt),
-		KeySchema:              cloneKeySchema(nil, table.PartitionKey, table.SortKey),
-		AttributeDefinitions:   attributeDefinitionsFromDomain(table.AttributeDefinitions),
-		GlobalSecondaryIndexes: secondaryIndexesFromDomain(table.GlobalSecondaryIndexes),
-		LocalSecondaryIndexes:  secondaryIndexesFromDomain(table.LocalSecondaryIndexes),
-		BillingModeSummary:     billingModeSummaryFor(table.BillingMode),
+		TableName:                 table.Name,
+		TableStatus:               effectiveTableStatus(table.Status),
+		TableArn:                  aws.DynamoDBTableARN(table.Name),
+		CreationDateTime:          awsTimestamp(table.CreatedAt),
+		KeySchema:                 cloneKeySchema(nil, table.PartitionKey, table.SortKey),
+		AttributeDefinitions:      attributeDefinitionsFromDomain(table.AttributeDefinitions),
+		GlobalSecondaryIndexes:    secondaryIndexesFromDomain(table.GlobalSecondaryIndexes),
+		LocalSecondaryIndexes:     secondaryIndexesFromDomain(table.LocalSecondaryIndexes),
+		BillingModeSummary:        billingModeSummaryFor(table.BillingMode),
 		DeletionProtectionEnabled: meta.DeletionProtectionEnabled,
-		ProvisionedThroughput:  meta.ProvisionedThroughput,
-		LatestStreamArn:        meta.LatestStreamArn,
-		LatestStreamLabel:      meta.LatestStreamLabel,
-		StreamSpecification:    cloneStreamSpecification(meta.StreamSpecification),
-		SSEDescription:         cloneSSEDescription(meta.SSEDescription),
+		ProvisionedThroughput:     meta.ProvisionedThroughput,
+		LatestStreamArn:           meta.LatestStreamArn,
+		LatestStreamLabel:         meta.LatestStreamLabel,
+		StreamSpecification:       cloneStreamSpecification(meta.StreamSpecification),
+		SSEDescription:            cloneSSEDescription(meta.SSEDescription),
 	}
 	for i := range description.GlobalSecondaryIndexes {
 		indexName := description.GlobalSecondaryIndexes[i].IndexName
@@ -2163,9 +2285,9 @@ func keyAttributeTypeMatches(table dynamodbdomain.Table, name string, value dyna
 	}
 	switch expected {
 	case "S":
-		return value.S != ""
+		return value.S != nil && *value.S != ""
 	case "N":
-		return value.N != ""
+		return value.N != nil && *value.N != ""
 	case "":
 		return true
 	default:
@@ -2550,10 +2672,10 @@ func attributeListEqual(left, right []dynamodbdomain.AttributeValue) bool {
 
 func attributeValueToString(value dynamoAttributeValue) (string, error) {
 	switch {
-	case value.S != "":
-		return value.S, nil
-	case value.N != "":
-		return value.N, nil
+	case value.S != nil:
+		return *value.S, nil
+	case value.N != nil:
+		return *value.N, nil
 	case value.BOOL != nil:
 		return strconv.FormatBool(*value.BOOL), nil
 	case value.NULL:
@@ -2565,10 +2687,10 @@ func attributeValueToString(value dynamoAttributeValue) (string, error) {
 
 func attributeValueToDomain(value dynamoAttributeValue) (dynamodbdomain.AttributeValue, error) {
 	switch {
-	case value.S != "":
-		return dynamodbdomain.StringValue(value.S), nil
-	case value.N != "":
-		return dynamodbdomain.NumberValue(value.N), nil
+	case value.S != nil:
+		return dynamodbdomain.StringValue(*value.S), nil
+	case value.N != nil:
+		return dynamodbdomain.NumberValue(*value.N), nil
 	case len(value.SS) > 0:
 		elements := make([]dynamodbdomain.AttributeValue, len(value.SS))
 		for i, entry := range value.SS {
@@ -2592,8 +2714,8 @@ func attributeValueToDomain(value dynamoAttributeValue) (dynamodbdomain.Attribut
 	case value.NULL:
 		return dynamodbdomain.NullValue(), nil
 	case value.M != nil:
-		copied := make(map[string]dynamodbdomain.AttributeValue, len(value.M))
-		for name, child := range value.M {
+		copied := make(map[string]dynamodbdomain.AttributeValue, len(*value.M))
+		for name, child := range *value.M {
 			converted, err := attributeValueToDomain(child)
 			if err != nil {
 				return dynamodbdomain.AttributeValue{}, err
@@ -2602,8 +2724,8 @@ func attributeValueToDomain(value dynamoAttributeValue) (dynamodbdomain.Attribut
 		}
 		return dynamodbdomain.MapValue(copied), nil
 	case value.L != nil:
-		copied := make([]dynamodbdomain.AttributeValue, len(value.L))
-		for i, child := range value.L {
+		copied := make([]dynamodbdomain.AttributeValue, len(*value.L))
+		for i, child := range *value.L {
 			converted, err := attributeValueToDomain(child)
 			if err != nil {
 				return dynamodbdomain.AttributeValue{}, err
@@ -2655,9 +2777,9 @@ func dynamoAttributeValueFromDomain(value dynamodbdomain.AttributeValue) dynamoA
 	}
 	switch {
 	case value.S != nil:
-		return dynamoAttributeValue{S: *value.S}
+		return dynamoAttributeValue{S: pointerToString(*value.S)}
 	case value.N != nil:
-		return dynamoAttributeValue{N: *value.N}
+		return dynamoAttributeValue{N: pointerToString(*value.N)}
 	case value.BOOL != nil:
 		return dynamoAttributeValue{BOOL: value.BOOL}
 	case value.NULL:
@@ -2667,16 +2789,20 @@ func dynamoAttributeValueFromDomain(value dynamodbdomain.AttributeValue) dynamoA
 		for name, child := range *value.M {
 			copied[name] = dynamoAttributeValueFromDomain(child)
 		}
-		return dynamoAttributeValue{M: copied}
+		return dynamoAttributeValue{M: &copied}
 	case value.L != nil:
 		copied := make([]dynamoAttributeValue, len(*value.L))
 		for i, child := range *value.L {
 			copied[i] = dynamoAttributeValueFromDomain(child)
 		}
-		return dynamoAttributeValue{L: copied}
+		return dynamoAttributeValue{L: &copied}
 	default:
-		return dynamoAttributeValue{S: ""}
+		return dynamoAttributeValue{}
 	}
+}
+
+func pointerToString(value string) *string {
+	return &value
 }
 
 func attributeValueListFromDomain(items []dynamodbdomain.Item) []map[string]dynamoAttributeValue {
@@ -2872,7 +2998,74 @@ func tableNameFromTableARN(arn string) string {
 		return ""
 	}
 	parts := strings.Split(arn, "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	if idx := strings.Index(strings.ToLower(arn), ":table/"); idx >= 0 {
+		suffix := arn[idx+len(":table/"):]
+		if slash := strings.Index(suffix, "/"); slash >= 0 {
+			suffix = suffix[:slash]
+		}
+		return strings.TrimSpace(suffix)
+	}
 	return strings.TrimSpace(parts[len(parts)-1])
+}
+
+func resolveDynamoDBTableName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(value), "arn:") {
+		if resolved := tableNameFromTableARN(value); resolved != "" {
+			return resolved
+		}
+	}
+	return value
+}
+
+func validateUpdateTableTopLevelFields(body []byte) error {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return fmt.Errorf("dynamodb: invalid UpdateTable request: %w", err)
+	}
+
+	supported := map[string]struct{}{
+		"TableName":                   {},
+		"AttributeDefinitions":        {},
+		"BillingMode":                 {},
+		"DeletionProtectionEnabled":   {},
+		"GlobalSecondaryIndexUpdates": {},
+		"SSESpecification":            {},
+	}
+	for field := range payload {
+		if _, ok := supported[field]; ok {
+			continue
+		}
+		return fmt.Errorf("dynamodb: UpdateTable field %q is not supported", field)
+	}
+	return nil
+}
+
+func validateUpdateTableBillingMode(value string) (string, error) {
+	billingMode := strings.ToUpper(strings.TrimSpace(value))
+	if billingMode == "" {
+		return "", nil
+	}
+	switch billingMode {
+	case "PAY_PER_REQUEST", "PROVISIONED":
+		return billingMode, nil
+	default:
+		return "", fmt.Errorf("dynamodb: BillingMode %q is not supported", value)
+	}
+}
+
+func cloneOptionalInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func changedAttributes(source map[string]dynamodbdomain.AttributeValue, target map[string]dynamodbdomain.AttributeValue) map[string]dynamoAttributeValue {

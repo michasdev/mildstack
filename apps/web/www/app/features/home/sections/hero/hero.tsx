@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { motion, type Variants } from 'motion/react';
 import { ChevronRight, Cpu, Timer, MemoryStick, PlugZap } from 'lucide-react';
+import { useInstallationTarget } from '@/hooks/use-installation-target';
 
 interface LightningProps {
     hue?: number;
@@ -254,6 +255,7 @@ const FeatureItem: React.FC<FeatureItemProps> = ({ name, value, position, icon }
 export const HeroSection: React.FC = () => {
     const lightningHue = 245;
     const [lightningXOffset, setLightningXOffset] = useState(0);
+    const { installationHref } = useInstallationTarget();
 
     useEffect(() => {
         const updateLightningOffset = () => {
@@ -304,7 +306,7 @@ export const HeroSection: React.FC = () => {
                     className="relative z-30 mx-auto flex min-h-[calc(100vh-7rem)] max-w-4xl flex-col items-center justify-center text-center md:min-h-0 md:mt-28"
                 >
                     <motion.a
-                        href="/download"
+                        href={installationHref}
                         variants={itemVariants}
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}

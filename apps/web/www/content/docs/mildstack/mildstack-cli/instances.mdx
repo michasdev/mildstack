@@ -1,109 +1,70 @@
 ---
 title: Instances
 description: |
-  Manage multiple MildStack instances running on different ports.
-  Each instance has its own isolated data and services.
+  Manage multiple isolated MildStack instances and their lifecycle from the CLI.
 ---
 
-## What is an Instance?
+An instance is one local MildStack runtime bound to one port.
+Each instance has isolated service data through its own `instanceId`.
 
-A MildStack **instance** is a running local AWS environment. Each instance:
+## Start and Detach
 
-- Listens on its own port (e.g., `4566`, `8080`)
-- Has its own isolated data (buckets, tables, queues)
-- Runs all supported services (S3, DynamoDB, SQS) simultaneously
-
-You can run **multiple instances** at the same time to simulate different environments — for example, one for your API service and another for your background workers.
-
-## Running Multiple Instances
-
-Start instances on different ports:
+Use `start` to launch a runtime on a port. `--detach` and `-d` are equivalent, and the flag can appear before or after the port.
 
 ```bash
-# Start a "development" instance
 mildstack start 4566
-
-# In another terminal, start a "testing" instance
-mildstack start 8080
+mildstack start 4566 --detach
+mildstack start --detach 4566
 ```
 
-Each instance is fully independent. Creating a bucket on port `4566` has no effect on port `8080`.
+If no port is provided, `start` probes ports `4566`, `4567`, and `4568`.
 
-## Listing Instances
+## Inspect Runtime State
+
+Use `instances` for the human-readable snapshot and `instances --json` when you need machine-readable output. `status` is an alias of `instances` and returns the same data.
 
 ```bash
 mildstack instances
-```
-
-Example output:
-
-```
-PORT    STATUS     ENDPOINT
-4566    running    http://localhost:4566
-8080    running    http://localhost:8080
-9000    stopped    http://localhost:9000
-```
-
-For scripting and automation, use the `--json` flag:
-
-```bash
 mildstack instances --json
 ```
 
-## Instance Lifecycle
+## Lifecycle States
 
 Instances go through these states:
 
 | State | Description |
 | --- | --- |
 | **running** | The instance is active and accepting requests |
-| **stopped** | The instance was stopped but its data is preserved |
+| **not_started** | The instance exists on disk but is not currently running |
+| **errored** | The instance failed to start; error details are included in output |
 
-### Stop an instance (keep data)
+## Stop
+
+`stop` targets running instances only.
 
 ```bash
 mildstack stop 4566
+mildstack stop --all
 ```
 
-Stopping preserves all data. Restart on the same port to pick up where you left off:
+## Delete
 
-```bash
-mildstack start 4566
-```
-
-### Delete an instance (remove data)
+`delete` removes instance records and instance resources from disk.
 
 ```bash
 mildstack delete 4566
+mildstack delete --all
 ```
 
-This permanently removes the instance and all of its stored resources.
-
-## Background Mode
-
-Use `--detach` (or `-d`) to start an instance in the background:
-
-```bash
-mildstack start 4566 --detach
-```
-
-The command returns immediately after the instance is ready. This is useful for scripts and CI pipelines:
-
-```bash
-# Start MildStack in the background, run tests, then stop
-mildstack start 4566 --detach
-npm test
-mildstack stop 4566
-```
+<Callout type="warn" title="Required target selection">
+  `stop` and `delete` require a specific port or `--all`.
+  `--all` cannot be combined with a port argument.
+</Callout>
 
 ## Data Isolation
 
-Each instance stores its data in a separate directory. This means:
+- Each instance is isolated by `instanceId` and port.
+- Stopping preserves instance data.
+- Deleting removes instance data for that instance.
 
-- **No data conflicts** between instances
-- **Persistent data** survives restarts (unless you `delete`)
-- **Clean teardown** — deleting an instance removes only its data
-
-<Callout type="info">
-  Instance data is stored under `~/.mildstack/instances/`. You generally don't need to interact with these files directly.
-</Callout>
+Storage root: `~/.mildstack/instances/`

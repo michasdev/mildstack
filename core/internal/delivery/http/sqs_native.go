@@ -758,6 +758,16 @@ type sqsPurgeQueueResponse struct {
 	ResponseMetadata sqsResponseMetadata `xml:"ResponseMetadata"`
 }
 
+type sqsDeleteMessageResponse struct {
+	XMLName          xml.Name            `xml:"DeleteMessageResponse"`
+	ResponseMetadata sqsResponseMetadata `xml:"ResponseMetadata"`
+}
+
+type sqsChangeMessageVisibilityResponse struct {
+	XMLName          xml.Name            `xml:"ChangeMessageVisibilityResponse"`
+	ResponseMetadata sqsResponseMetadata `xml:"ResponseMetadata"`
+}
+
 type sqsResponseMetadata struct {
 	RequestID string `xml:"RequestId"`
 }
@@ -1022,10 +1032,9 @@ func writeSQSSendMessageBatchJSON(c *gin.Context, result contracts.SendMessageBa
 }
 
 func writeSQSDeleteMessageResponse(c *gin.Context) {
-	if c == nil {
-		return
-	}
-	c.Status(http.StatusOK)
+	c.XML(http.StatusOK, sqsDeleteMessageResponse{
+		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
 }
 
 func writeSQSDeleteMessageBatchResponse(c *gin.Context, result contracts.DeleteMessageBatchResult) {
@@ -1043,10 +1052,9 @@ func writeSQSDeleteMessageBatchJSON(c *gin.Context, result contracts.DeleteMessa
 }
 
 func writeSQSChangeMessageVisibilityResponse(c *gin.Context) {
-	if c == nil {
-		return
-	}
-	c.Status(http.StatusOK)
+	c.XML(http.StatusOK, sqsChangeMessageVisibilityResponse{
+		ResponseMetadata: sqsResponseMetadata{RequestID: requestIDFromContext(c)},
+	})
 }
 
 func writeSQSChangeMessageVisibilityBatchResponse(c *gin.Context, result contracts.ChangeMessageVisibilityBatchResult) {

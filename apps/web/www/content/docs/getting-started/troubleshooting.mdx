@@ -1,0 +1,101 @@
+---
+title: Troubleshooting
+description: |
+  Resolve common setup, port, and command issues when running MildStack locally.
+---
+
+## Quick Check
+
+Start a local instance in the background:
+
+```bash
+mildstack start --detach
+```
+
+Then verify current instances:
+
+```bash
+mildstack instances
+```
+
+<Callout type="info" title="Default endpoint">
+  If you do not pass a port, MildStack probes for an available port starting at `4566`.
+</Callout>
+
+## Common Issues
+
+### `mildstack` command not found
+
+1. Close and reopen your terminal.
+2. Open the MildStack Desktop App once.
+3. Retry `mildstack start`.
+4. If it still fails, reinstall from [/download](/download).
+
+### Port already in use
+
+Pick a different port explicitly:
+
+```bash
+mildstack start 4570
+```
+
+Then use the same endpoint in AWS commands:
+
+```bash
+aws s3 ls --endpoint-url http://localhost:4570 --profile mildstack
+```
+
+### No Port Available
+
+When no port is provided, MildStack probes starting at `4566`. If needed, choose a port explicitly:
+
+```bash
+mildstack start 4590
+```
+
+### AWS CLI cannot connect
+
+1. Confirm an instance is running with `mildstack instances`.
+2. Confirm your AWS command uses the same endpoint and port as the running instance.
+3. Retry with an explicit endpoint:
+
+```bash
+aws dynamodb list-tables \
+  --endpoint-url http://localhost:4566 \
+  --profile mildstack
+```
+
+### Stop and delete require a port or `--all`
+
+Use one of these valid patterns:
+
+```bash
+mildstack stop 4566
+mildstack stop --all
+
+mildstack delete 4566
+mildstack delete --all
+```
+
+### Invalid instance port
+
+`start`, `stop`, and `delete` require a numeric port value:
+
+```bash
+# valid
+mildstack start 4567
+
+# invalid
+mildstack start abc
+```
+
+## More Help
+
+<Cards>
+  <Card title="Quick Start" href="/docs/getting-started/quick-start">
+    Re-run the full first-run flow for S3, DynamoDB, SQS, and SNS.
+  </Card>
+  <Card title="MildStack CLI" href="/docs/mildstack/mildstack-cli">
+    Review full lifecycle command behavior.
+  </Card>
+</Cards>

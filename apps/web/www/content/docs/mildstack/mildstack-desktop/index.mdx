@@ -1,89 +1,112 @@
 ---
 title: MildStack Desktop
 description: |
-  The MildStack Desktop App is a visual interface for browsing and managing your local AWS resources.
-  Browse S3 buckets, explore DynamoDB tables, and inspect SQS queues — all from one app.
+  Visual interface for managing MildStack instances and local AWS resources.
 ---
 
-## Overview
+MildStack Desktop is the GUI companion to the `mildstack` CLI.
+It manages instances through CLI-backed IPC handlers and provides service explorers for local AWS workflows.
 
-The MildStack Desktop App gives you a visual way to interact with your local AWS resources. Instead of typing CLI commands or writing scripts, you can browse, create, edit, and delete resources through an intuitive graphical interface.
+<Callout type="info" title="Runtime requirement">
+  Service navigation is disabled when the selected instance is not `running`, and service IPC handlers validate the selected instance before executing operations.
+</Callout>
 
-It connects to your running MildStack instances and provides dedicated browsers for each supported service.
+## Quick Start
 
-## Key Features
-
-### Multi-Instance Management
-
-The Desktop App can connect to any running MildStack instance. Use the instance selector in the sidebar to switch between different environments:
-
-- See all running instances at a glance
-- Switch between instances with one click
-- View the port and endpoint URL for each instance
-
-### S3 Resource Browser
-
-Browse and manage your local S3 resources visually:
-
-- **List buckets** and see their properties
-- **Navigate objects** within a bucket using a file-explorer-like interface
-- **Upload and download files** with drag-and-drop support
-- **View object metadata** including size, content type, and last modified date
-- **Delete objects and buckets** with confirmation dialogs
-
-### DynamoDB Explorer
-
-Inspect and manage your local DynamoDB tables:
-
-- **List tables** with their key schema and status
-- **Browse items** in a table with sortable columns
-- **View item details** with formatted attribute values
-- **Create and edit items** directly in the app
-- **Query and scan** tables using the built-in query builder
-
-### SQS Queue Browser
-
-Monitor and manage your local SQS queues:
-
-- **List queues** with message counts and attributes
-- **View queue details** including configuration and dead-letter settings
-- **Send messages** to a queue directly from the UI
-- **Receive and inspect messages** with full body and attribute visibility
-- **Purge queues** to clear all messages
-- **Monitor DLQ** (Dead Letter Queue) redrive status
-
-## Getting Started
-
-### Connect to an Instance
-
-1. **Start a MildStack instance** using the CLI:
+1. Start an instance:
    ```bash
    mildstack start
    ```
+2. Open the Desktop app.
+3. Go to **Instances** and select a running instance.
+4. Open any enabled service browser from the sidebar.
 
-2. **Open the Desktop App** — it will automatically detect running instances on your machine.
+## Main Areas
 
-3. **Select an instance** from the sidebar to start browsing resources.
+<Cards>
+  <Card title="Instances" href="#instances">
+    Start, stop, delete, refresh, and select instances by port.
+  </Card>
+  <Card title="S3 Browser" href="#s3-browser">
+    Manage buckets and objects, including uploads, downloads, folders, and bulk deletes.
+  </Card>
+  <Card title="DynamoDB Browser" href="#dynamodb-browser">
+    Create/delete tables, inspect schema/indexes, and run query/scan item workflows.
+  </Card>
+  <Card title="SQS Browser" href="#sqs-browser">
+    Create/purge/delete queues, send/poll/delete messages, and inspect queue attributes.
+  </Card>
+  <Card title="SNS Browser" href="#sns-browser">
+    Manage topics, subscriptions, platform apps/endpoints, and SMS sandbox resources.
+  </Card>
+  <Card title="Settings" href="#settings">
+    Configure CLI path and trigger app update checks/install flow.
+  </Card>
+</Cards>
 
-<Callout type="info">
-  The Desktop App detects instances running on the default port (`4566`) automatically. If you're using a custom port, you can add it manually from the instance selector.
+## Instances
+
+- Lists runtime instances from `mildstack instances --json`.
+- Creates or starts an instance on a selected port.
+- Stops or deletes instances from the table actions.
+- Selects the active instance used by service IPC requests.
+
+## S3 Browser
+
+- List/create/delete buckets.
+- Browse object trees by prefix with client-side search and sorting.
+- Upload files (drag and drop or file picker) and create folder placeholders.
+- Download objects, preview supported formats, and copy S3 URIs.
+- Bulk delete selected objects.
+
+## DynamoDB Browser
+
+- List/create/delete tables.
+- View table overview, key schema, attribute definitions, and index metadata.
+- Browse items with local filtering and sortable columns.
+- Run advanced `Scan` and `Query` flows with filter expressions and index selection.
+- Create/edit items in JSON and delete items (single or bulk).
+
+## SQS Browser
+
+- List/create/purge/delete queues.
+- Open queue details for messages, send form, and queue attributes.
+- Poll messages and delete individual messages.
+- Send standard or FIFO messages (including FIFO fields).
+- Show DLQ indicators when redrive metadata is present.
+
+## SNS Browser
+
+SNS includes four top-level sections:
+
+- **Topics**: create/delete topics, edit attributes, publish and publish-batch, manage tags, permissions, and data protection policy.
+- **Subscriptions**: list/create/confirm/delete subscriptions, inspect and update subscription attributes.
+- **Platform Apps**: create/delete platform applications, edit app attributes, create/delete endpoints.
+- **SMS Sandbox**: sandbox status, SMS account attributes, sandbox phone number create/verify/delete, opt-in/out checks.
+
+## Settings
+
+- Configure the CLI executable path used by desktop IPC.
+- Save/reset/test the configured CLI path.
+- Check for desktop updates manually.
+- Trigger update installation when an update is available.
+
+## Known Limits
+
+<Callout type="warn" title="Some UI surfaces are still in progress">
+  Sidebar entries `Lambda`, `SSM`, and `EventBridge` are marked as coming soon.
+  In S3 bucket details, `Permissions`, `CORS`, and `Metrics` tabs are disabled and marked as coming soon.
+  SQS DLQ redrive currently shows a UI flow and toasts, but does not execute a backend redrive operation yet.
 </Callout>
 
-### Navigate Services
+## Desktop Packages
 
-Use the sidebar to switch between services:
+Distribution targets currently configured:
 
-- **S3** — Browse buckets and objects
-- **DynamoDB** — Explore tables and items
-- **SQS** — Monitor queues and messages
+| Platform | Format | Architectures |
+| --- | --- | --- |
+| macOS | `dmg` | `x64`, `arm64` |
+| Windows | `nsis` installer | `x64`, `arm64` |
+| Linux | `AppImage` and `deb` | `x64`, `arm64` |
 
-## Download
-
-The Desktop App is available for macOS, Windows, and Linux. Download the latest version from the [Installation](/docs/getting-started/installation) page.
-
-| Platform | Download |
-| --- | --- |
-| macOS (Apple Silicon) | `.dmg` |
-| macOS (Intel) | `.dmg` |
-| Windows | `.exe` installer |
-| Linux | `.AppImage` |
+Download from [Installation](/docs/getting-started/installation).

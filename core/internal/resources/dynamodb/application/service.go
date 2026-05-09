@@ -174,6 +174,56 @@ func (s *Service) CreateTable(name, partitionKey, sortKey, billingMode string, s
 	return table, nil
 }
 
+func (s *Service) UpdateTableSchema(name string, attributeDefinitions []domain.AttributeDefinition, globalSecondaryIndexes []domain.SecondaryIndex) (domain.Table, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return domain.Table{}, fmt.Errorf("dynamodb: table name is required")
+	}
+
+	attributeDefinitions = normalizeCreateTableAttributeDefinitions(attributeDefinitions)
+	globalSecondaryIndexes = normalizeCreateTableSecondaryIndexes(globalSecondaryIndexes)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := s.state.Clone()
+	tableIndex := -1
+	for i := range next.Tables {
+		if next.Tables[i].Name == name {
+			tableIndex = i
+			break
+		}
+	}
+	if tableIndex < 0 || next.Tables[tableIndex].Status == domain.TableStatusDeleting {
+		return domain.Table{}, fmt.Errorf("dynamodb: table %q not found", name)
+	}
+
+	table := next.Tables[tableIndex]
+	if len(attributeDefinitions) == 0 && len(globalSecondaryIndexes) == 0 {
+		return table, nil
+	}
+
+	mergedAttributeDefinitions := make([]domain.AttributeDefinition, 0, len(table.AttributeDefinitions)+len(attributeDefinitions))
+	mergedAttributeDefinitions = append(mergedAttributeDefinitions, cloneCreateTableAttributeDefinitions(table.AttributeDefinitions)...)
+	mergedAttributeDefinitions = append(mergedAttributeDefinitions, cloneCreateTableAttributeDefinitions(attributeDefinitions)...)
+	table.AttributeDefinitions = normalizeCreateTableAttributeDefinitions(mergedAttributeDefinitions)
+
+	mergedGlobalSecondaryIndexes := make([]domain.SecondaryIndex, 0, len(table.GlobalSecondaryIndexes)+len(globalSecondaryIndexes))
+	mergedGlobalSecondaryIndexes = append(mergedGlobalSecondaryIndexes, cloneCreateTableSecondaryIndexes(table.GlobalSecondaryIndexes)...)
+	mergedGlobalSecondaryIndexes = append(mergedGlobalSecondaryIndexes, cloneCreateTableSecondaryIndexes(globalSecondaryIndexes)...)
+	table.GlobalSecondaryIndexes = normalizeCreateTableSecondaryIndexes(mergedGlobalSecondaryIndexes)
+
+	if err := validateCreateTableDefinition(table); err != nil {
+		return domain.Table{}, err
+	}
+
+	next.Tables[tableIndex] = table
+	if err := s.commitStateLocked(next); err != nil {
+		return domain.Table{}, err
+	}
+	return table, nil
+}
+
 func (s *Service) DescribeTable(name string) (domain.Table, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -576,8 +626,6 @@ func validateCreateTableIndex(table domain.Table, index domain.SecondaryIndex, l
 		if partitionKey != table.PartitionKey {
 			return fmt.Errorf("dynamodb: index %q must reuse table partition key %q", index.Name, table.PartitionKey)
 		}
-	} else if partitionKey == table.PartitionKey {
-		return fmt.Errorf("dynamodb: index %q must not reuse table partition key %q", index.Name, table.PartitionKey)
 	}
 	if sortKey == "" && local {
 		return fmt.Errorf("dynamodb: index %q must define a RANGE key", index.Name)

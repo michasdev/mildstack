@@ -1,0 +1,66 @@
+---
+title: Build from Source
+description: |
+  Build MildStack from source for local development, contribution workflows, or custom packaging.
+---
+
+## When to Use This Guide
+
+Use this path when you want to compile MildStack directly from this repository for development, contribution workflows, or custom packaging.
+
+<Callout type="info" title="Standard users">
+  If you only need to run MildStack, use [Installation](/docs/getting-started/installation) instead.
+</Callout>
+
+## Prerequisites
+
+- Go `1.26.2` or later
+- Node.js and npm for the Desktop App build
+- Git
+
+## Clone the Repository
+
+```bash
+git clone https://github.com/michasdev/mildstack.git
+cd mildstack
+```
+
+## Build the CLI Binary
+
+From the repository root:
+
+```bash
+go build -o mildstack ./core/cmd/mildstack/main.go
+```
+
+Optional CLI smoke check:
+
+```bash
+./mildstack start --detach
+./mildstack instances
+./mildstack stop --all
+```
+
+## Build the Desktop App
+
+```bash
+cd apps/desktop
+npm install
+npm run build
+```
+
+## Build Desktop Installers (optional)
+
+From `apps/desktop`:
+
+```bash
+npm run build:mac
+# or
+npm run build:win
+# or
+npm run build:linux
+```
+
+## Back to Installation
+
+For standard installation paths, see [Installation](/docs/getting-started/installation).

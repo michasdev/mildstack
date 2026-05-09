@@ -3,6 +3,7 @@ import { motion, AnimatePresence, useScroll, useMotionValueEvent } from 'motion/
 import { Star, Download, Menu, X } from 'lucide-react';
 import { useLocation } from 'react-router';
 import { Button } from '@/components/ui/button';
+import { useInstallationTarget } from '@/hooks/use-installation-target';
 import { cn } from '@/lib/utils';
 import logoFullWhite from '../../assets/logos/mildstack-logo-full-white.png'
 
@@ -36,6 +37,7 @@ export const Navbar: React.FC = () => {
   const [activeSection, setActiveSection] = useState<string | null>('home');
   const { scrollY } = useScroll();
   const { pathname } = useLocation();
+  const { installationDocsRoute, installationHref } = useInstallationTarget();
 
   const handleSectionClick = (
     event: React.MouseEvent<HTMLAnchorElement>,
@@ -159,7 +161,8 @@ export const Navbar: React.FC = () => {
     </>
   );
 
-  const isDownloadActive = pathname === '/download';
+  const isDownloadActive =
+    pathname === '/download' || pathname === installationDocsRoute;
 
   const ActionButtons = ({ isMobile = false, closeMenu }: { isMobile?: boolean; closeMenu?: () => void }) => (
     <>
@@ -172,7 +175,7 @@ export const Navbar: React.FC = () => {
           isMobile ? 'px-8 h-12 text-lg w-full max-w-[280px] flex' : 'hidden md:flex h-9 px-4 text-sm hover:text-gray-300'
         )}
       >
-        <a href="/download" onClick={closeMenu}>
+        <a href={installationHref} onClick={closeMenu}>
           <Download className={isMobile ? 'size-5' : 'size-4'} />
           Download
         </a>

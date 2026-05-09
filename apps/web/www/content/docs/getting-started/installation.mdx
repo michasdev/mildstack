@@ -1,127 +1,135 @@
 ---
 title: Installation
 description: |
-  Install the MildStack CLI and Desktop App on macOS, Windows, or Linux.
+  Install MildStack on macOS, Windows, or Linux. The installation includes the Desktop App, CLI, and bundled runtime.
 ---
 
-## Install the CLI
+## Install Once
 
-The MildStack CLI is a single native binary — no Docker, no containers, no runtime dependencies.
+MildStack is installed once and includes:
+
+- MildStack Desktop App
+- `mildstack` CLI
+- Bundled MildStack Core runtime
+
+<Callout type="info" title="Single installation model">
+  You do not install CLI and Desktop separately. Installing the Desktop App provides the CLI and bundled runtime.
+</Callout>
+
+## Choose an Installation Method
+
+<div className="fd-steps">
+
+<div className="fd-step">
 
 ### macOS
 
-Download the latest release from [GitHub Releases](https://github.com/michasdev/mildstack/releases):
+Install with Homebrew (recommended):
 
 ```bash
-# Apple Silicon (M1/M2/M3/M4)
-curl -L https://github.com/michasdev/mildstack/releases/latest/download/mildstack-darwin-arm64 -o mildstack
-chmod +x mildstack
-sudo mv mildstack /usr/local/bin/
-
-# Intel
-curl -L https://github.com/michasdev/mildstack/releases/latest/download/mildstack-darwin-amd64 -o mildstack
-chmod +x mildstack
-sudo mv mildstack /usr/local/bin/
+brew tap michasdev/tap
+brew install mildstack --cask
 ```
 
-### Linux
+Or install without Homebrew:
 
-```bash
-# x86_64
-curl -L https://github.com/michasdev/mildstack/releases/latest/download/mildstack-linux-amd64 -o mildstack
-chmod +x mildstack
-sudo mv mildstack /usr/local/bin/
+1. Open [/download](/download) and download the macOS installer.
+2. Or download the latest macOS installer from [GitHub releases](https://github.com/michasdev/mildstack/releases/latest).
+3. Run the installer and open the app.
 
-# ARM64
-curl -L https://github.com/michasdev/mildstack/releases/latest/download/mildstack-linux-arm64 -o mildstack
-chmod +x mildstack
-sudo mv mildstack /usr/local/bin/
-```
+<Callout type="warn" title="Common macOS first-run issue">
+  If macOS blocks the app after manual installation (and in some Homebrew installs), go to <strong>System Settings &gt; Privacy &amp; Security</strong>, scroll to the <strong>Security</strong> section, and click <strong>Open Anyway</strong>. Then open the app again.
+</Callout>
+
+</div>
+
+<div className="fd-step">
 
 ### Windows
 
-Download `mildstack-windows-amd64.exe` from [GitHub Releases](https://github.com/michasdev/mildstack/releases) and add it to your `PATH`.
+1. Open [/download](/download) and download the Windows installer.
+2. Or download the latest Windows installer from [GitHub releases](https://github.com/michasdev/mildstack/releases/latest).
+3. Run the installer and complete setup.
 
-### Verify Installation
+</div>
+
+<div className="fd-step">
+
+### Linux
+
+1. Open [/download](/download) and download the package for your distribution.
+2. Or download the latest Linux package from [GitHub releases](https://github.com/michasdev/mildstack/releases/latest).
+3. Install the package.
+
+</div>
+
+</div>
+
+## Verify the Installation
+
+Start MildStack in the background:
 
 ```bash
-mildstack --help
+mildstack start --detach
 ```
 
-You should see:
+Then confirm the running instance:
 
-```
-mildstack is the shared binary entrypoint for the MildStack core runtime.
-
-Usage:
-  mildstack [command]
-
-Available Commands:
-  start       Start the shared HTTP runtime
-  instances   List known instances
-  status      Show instance status
-  stop        Stop a running instance
-  delete      Delete an instance
+```bash
+mildstack instances
 ```
 
-## Install the Desktop App
-
-The MildStack Desktop App is an Electron-based visual console that lets you browse and manage your local AWS resources.
-
-### Download
-
-Download the latest installer for your platform from [GitHub Releases](https://github.com/michasdev/mildstack/releases):
-
-| Platform | File |
-| --- | --- |
-| macOS (Apple Silicon) | `MildStack-*-arm64.dmg` |
-| macOS (Intel) | `MildStack-*-x64.dmg` |
-| Windows (x64) | `MildStack-*-x64-setup.exe` |
-| Windows (ARM) | `MildStack-*-arm64-setup.exe` |
-| Linux (x64) | `MildStack-*-amd64.AppImage` |
-
-<Callout type="info" title="CLI included">
-  The Desktop App bundles the MildStack CLI binary and can install it to your system path automatically on first launch.
+<Callout type="info" title="Default local endpoint">
+  By default, MildStack starts on `http://localhost:4566`.
 </Callout>
 
-## Build from Source
-
-If you prefer to build MildStack yourself:
-
-### Prerequisites
-
-- **Go** 1.26.2 or later
-- **Node.js** 20+ and **npm** (for Desktop App)
-- **Git**
-
-### Build the CLI
+When you finish testing:
 
 ```bash
-git clone https://github.com/michasdev/mildstack.git
-cd mildstack
-go build -o mildstack ./core/cmd/mildstack
+mildstack stop --all
 ```
 
-### Build the Desktop App
+## Update MildStack
+
+### macOS (Homebrew)
 
 ```bash
-cd apps/desktop
-npm install
-npm run build
+brew update
+brew upgrade mildstack
 ```
 
-## System Requirements
+### macOS (without Homebrew)
 
-| Component | Minimum | Recommended |
-| --- | --- | --- |
-| **RAM** | 50 MB | 128 MB |
-| **Disk** | 20 MB (binary) | 100 MB (with data) |
-| **OS** | macOS 12+, Windows 10+, Ubuntu 20.04+ | Latest stable |
+Auto-updates do not work on macOS. To update, uninstall your current version and install the newest version from [/download](/download) or [GitHub releases](https://github.com/michasdev/mildstack/releases/latest).
+
+### Windows and Linux
+
+MildStack includes auto-update support on Windows and Linux.
+
+To check manually for updates:
+
+1. Open the Desktop App.
+2. Go to **Settings**.
+3. Click **Check for updates**.
+
+<Callout type="warn" title="Common macOS first-run issue">
+  If macOS blocks the app after manual installation (and in some Homebrew installs), go to <strong>System Settings &gt; Privacy &amp; Security</strong>, scroll to the <strong>Security</strong> section, and click <strong>Open Anyway</strong>. Then open the app again.
+</Callout>
+
+## Advanced Setup
+
+If you need custom builds or contributor workflows, see [Build from Source](/docs/getting-started/build-from-source).
 
 ## Next Steps
 
 <Cards>
   <Card title="Quick Start" href="/docs/getting-started/quick-start">
-    Start your first MildStack instance and create an S3 bucket.
+    Run your first S3, DynamoDB, SQS, and SNS commands.
+  </Card>
+  <Card title="Troubleshooting" href="/docs/getting-started/troubleshooting">
+    Resolve command and endpoint issues quickly.
+  </Card>
+  <Card title="Build from Source" href="/docs/getting-started/build-from-source">
+    Compile MildStack manually for development workflows.
   </Card>
 </Cards>

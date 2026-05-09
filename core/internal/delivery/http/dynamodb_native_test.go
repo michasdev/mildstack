@@ -151,10 +151,10 @@ func TestDynamoDBNativeRoutesHandleSupportedLocalSubset(t *testing.T) {
 	}
 	var updateItemResponse updateItemResponse
 	decodeResponse(t, updateItem.body, &updateItemResponse)
-	if got, want := updateItemResponse.Attributes["title"].S, "updated archive item"; got != want {
+	if got, want := requireScalarValue(t, updateItemResponse.Attributes["title"].S), "updated archive item"; got != want {
 		t.Fatalf("unexpected updated title: got %q want %q", got, want)
 	}
-	if got, want := updateItemResponse.Attributes["version"].N, "2"; got != want {
+	if got, want := requireScalarValue(t, updateItemResponse.Attributes["version"].N), "2"; got != want {
 		t.Fatalf("unexpected updated version: got %q want %q", got, want)
 	}
 	if _, ok := updateItemResponse.Attributes["obsolete"]; ok {
@@ -173,10 +173,10 @@ func TestDynamoDBNativeRoutesHandleSupportedLocalSubset(t *testing.T) {
 	}
 	var getItemResponse getItemResponse
 	decodeResponse(t, getItem.body, &getItemResponse)
-	if got, want := getItemResponse.Item["title"].S, "updated archive item"; got != want {
+	if got, want := requireScalarValue(t, getItemResponse.Item["title"].S), "updated archive item"; got != want {
 		t.Fatalf("unexpected title: got %q want %q", got, want)
 	}
-	if got, want := getItemResponse.Item["version"].N, "2"; got != want {
+	if got, want := requireScalarValue(t, getItemResponse.Item["version"].N), "2"; got != want {
 		t.Fatalf("unexpected version: got %q want %q", got, want)
 	}
 	if _, ok := getItemResponse.Item["obsolete"]; ok {
@@ -305,7 +305,7 @@ func TestDynamoDBNativeRoutesHandleBatchAndTransactionSurface(t *testing.T) {
 	if got, want := len(batchWriteResponse.UnprocessedItems["mildstack-batch"]), 1; got != want {
 		t.Fatalf("unexpected unprocessed batch write count: got %d want %d", got, want)
 	}
-	if got, want := batchWriteResponse.UnprocessedItems["mildstack-batch"][0].PutRequest.Item["id"].S, "item#26"; got != want {
+	if got, want := requireScalarValue(t, batchWriteResponse.UnprocessedItems["mildstack-batch"][0].PutRequest.Item["id"].S), "item#26"; got != want {
 		t.Fatalf("unexpected unprocessed batch write id: got %q want %q", got, want)
 	}
 
@@ -331,10 +331,10 @@ func TestDynamoDBNativeRoutesHandleBatchAndTransactionSurface(t *testing.T) {
 	if got, want := len(batchGetResponse.Responses["mildstack-batch"]), 2; got != want {
 		t.Fatalf("unexpected batch get response count: got %d want %d", got, want)
 	}
-	if got, want := batchGetResponse.Responses["mildstack-batch"][0]["id"].S, "item#01"; got != want {
+	if got, want := requireScalarValue(t, batchGetResponse.Responses["mildstack-batch"][0]["id"].S), "item#01"; got != want {
 		t.Fatalf("unexpected first batch get id: got %q want %q", got, want)
 	}
-	if got, want := batchGetResponse.Responses["mildstack-batch"][1]["id"].S, "item#25"; got != want {
+	if got, want := requireScalarValue(t, batchGetResponse.Responses["mildstack-batch"][1]["id"].S), "item#25"; got != want {
 		t.Fatalf("unexpected second batch get id: got %q want %q", got, want)
 	}
 
@@ -368,10 +368,10 @@ func TestDynamoDBNativeRoutesHandleBatchAndTransactionSurface(t *testing.T) {
 	if got, want := len(transactGetResponse.Responses), 2; got != want {
 		t.Fatalf("unexpected transact get response count: got %d want %d", got, want)
 	}
-	if got, want := transactGetResponse.Responses[0].Item["id"].S, "item#27"; got != want {
+	if got, want := requireScalarValue(t, transactGetResponse.Responses[0].Item["id"].S), "item#27"; got != want {
 		t.Fatalf("unexpected first transact get id: got %q want %q", got, want)
 	}
-	if got, want := transactGetResponse.Responses[1].Item["id"].S, "item#02"; got != want {
+	if got, want := requireScalarValue(t, transactGetResponse.Responses[1].Item["id"].S), "item#02"; got != want {
 		t.Fatalf("unexpected second transact get id: got %q want %q", got, want)
 	}
 
@@ -734,13 +734,13 @@ func TestDynamoDBNativeRoutesHandleQueryAndScanSubset(t *testing.T) {
 	if got, want := queryResponse.ScannedCount, 2; got != want {
 		t.Fatalf("unexpected query scanned count: got %d want %d", got, want)
 	}
-	if got, want := queryResponse.Items[0]["sk"].S, "003"; got != want {
+	if got, want := requireScalarValue(t, queryResponse.Items[0]["sk"].S), "003"; got != want {
 		t.Fatalf("unexpected first query item: got %q want %q", got, want)
 	}
-	if got, want := queryResponse.Items[1]["sk"].S, "002"; got != want {
+	if got, want := requireScalarValue(t, queryResponse.Items[1]["sk"].S), "002"; got != want {
 		t.Fatalf("unexpected second query item: got %q want %q", got, want)
 	}
-	if got, want := queryResponse.LastEvaluatedKey["sk"].S, "002"; got != want {
+	if got, want := requireScalarValue(t, queryResponse.LastEvaluatedKey["sk"].S), "002"; got != want {
 		t.Fatalf("unexpected query last evaluated key: got %q want %q", got, want)
 	}
 
@@ -762,10 +762,10 @@ func TestDynamoDBNativeRoutesHandleQueryAndScanSubset(t *testing.T) {
 	if got, want := len(queryResponse.Items), 3; got != want {
 		t.Fatalf("unexpected begins_with query item count: got %d want %d", got, want)
 	}
-	if got, want := queryResponse.Items[0]["sk"].S, "001"; got != want {
+	if got, want := requireScalarValue(t, queryResponse.Items[0]["sk"].S), "001"; got != want {
 		t.Fatalf("unexpected begins_with first item: got %q want %q", got, want)
 	}
-	if got, want := queryResponse.Items[2]["sk"].S, "003"; got != want {
+	if got, want := requireScalarValue(t, queryResponse.Items[2]["sk"].S), "003"; got != want {
 		t.Fatalf("unexpected begins_with third item: got %q want %q", got, want)
 	}
 
@@ -794,7 +794,7 @@ func TestDynamoDBNativeRoutesHandleQueryAndScanSubset(t *testing.T) {
 	if len(scanResponse.Items) != 0 {
 		t.Fatalf("expected first scan page to be empty, got %#v", scanResponse.Items)
 	}
-	if got, want := scanResponse.LastEvaluatedKey["sk"].S, "001"; got != want {
+	if got, want := requireScalarValue(t, scanResponse.LastEvaluatedKey["sk"].S), "001"; got != want {
 		t.Fatalf("unexpected scan page 1 cursor: got %q want %q", got, want)
 	}
 
@@ -820,7 +820,7 @@ func TestDynamoDBNativeRoutesHandleQueryAndScanSubset(t *testing.T) {
 	if got, want := scanResponse.Count, 1; got != want {
 		t.Fatalf("unexpected scan page 2 count: got %d want %d", got, want)
 	}
-	if got, want := scanResponse.Items[0]["title"].S, "keep-two"; got != want {
+	if got, want := requireScalarValue(t, scanResponse.Items[0]["title"].S), "keep-two"; got != want {
 		t.Fatalf("unexpected scan page 2 item: got %q want %q", got, want)
 	}
 }
@@ -915,7 +915,7 @@ func TestDynamoDBNativeRoutesSupportIndexedQueryAndProjection(t *testing.T) {
 	if got, want := queryResponse.Count, 1; got != want {
 		t.Fatalf("unexpected indexed query count: got %d want %d", got, want)
 	}
-	if got, want := queryResponse.Items[0]["title"].S, "indexed-one"; got != want {
+	if got, want := requireScalarValue(t, queryResponse.Items[0]["title"].S), "indexed-one"; got != want {
 		t.Fatalf("unexpected indexed query title: got %q want %q", got, want)
 	}
 	if _, ok := queryResponse.Items[0]["gsi_sk"]; ok {
@@ -950,7 +950,7 @@ func TestDynamoDBNativeRoutesSupportIndexedQueryAndProjection(t *testing.T) {
 	if got, want := queryResponse.Count, 1; got != want {
 		t.Fatalf("unexpected indexed query page 2 count: got %d want %d", got, want)
 	}
-	if got, want := queryResponse.Items[0]["title"].S, "indexed-two"; got != want {
+	if got, want := requireScalarValue(t, queryResponse.Items[0]["title"].S), "indexed-two"; got != want {
 		t.Fatalf("unexpected indexed query page 2 title: got %q want %q", got, want)
 	}
 }
@@ -1012,8 +1012,579 @@ func TestDynamoDBNativeRoutesHonorCustomTableKeyNames(t *testing.T) {
 
 	var response getItemResponse
 	decodeResponse(t, getItem.body, &response)
-	if got, want := response.Item["title"].S, "custom schema"; got != want {
+	if got, want := requireScalarValue(t, response.Item["title"].S), "custom schema"; got != want {
 		t.Fatalf("unexpected fetched title: got %q want %q", got, want)
+	}
+}
+
+func TestDynamoDBNativeRoutesUpdateTableCreatesGlobalSecondaryIndex(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+
+	createTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"mildstack-update-gsi",
+			"KeySchema":[
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions":[
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"}
+			],
+			"BillingMode":"PAY_PER_REQUEST"
+		}`,
+	})
+	if got, want := createTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create table status: got %d want %d\nbody: %s", got, want, createTable.body)
+	}
+
+	updateTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.UpdateTable",
+		body: `{
+			"TableName":"mildstack-update-gsi",
+			"AttributeDefinitions":[
+				{"AttributeName":"type","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"}
+			],
+			"GlobalSecondaryIndexUpdates":[
+				{
+					"Create":{
+						"IndexName":"gsi_appKey",
+						"KeySchema":[
+							{"AttributeName":"type","KeyType":"HASH"},
+							{"AttributeName":"sk","KeyType":"RANGE"}
+						],
+						"Projection":{"ProjectionType":"ALL"}
+					}
+				}
+			]
+		}`,
+	})
+	if got, want := updateTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected update table status: got %d want %d\nbody: %s", got, want, updateTable.body)
+	}
+
+	var updateTableResponse struct {
+		TableDescription tableDescription `json:"TableDescription"`
+	}
+	decodeResponse(t, updateTable.body, &updateTableResponse)
+	if got, want := len(updateTableResponse.TableDescription.GlobalSecondaryIndexes), 1; got != want {
+		t.Fatalf("unexpected global secondary index count after update: got %d want %d", got, want)
+	}
+	if got, want := updateTableResponse.TableDescription.GlobalSecondaryIndexes[0].IndexName, "gsi_appKey"; got != want {
+		t.Fatalf("unexpected global secondary index name: got %q want %q", got, want)
+	}
+
+	for _, item := range []struct {
+		pk   string
+		sk   string
+		kind string
+	}{
+		{pk: "tenant#1", sk: "001", kind: "appKey"},
+		{pk: "tenant#2", sk: "002", kind: "appKey"},
+	} {
+		putItem := doDynamoDBRequest(t, engine, dynamoRequest{
+			target: "DynamoDB_20120810.PutItem",
+			body: `{
+				"TableName":"mildstack-update-gsi",
+				"Item":{
+					"pk":{"S":"` + item.pk + `"},
+					"sk":{"S":"` + item.sk + `"},
+					"type":{"S":"` + item.kind + `"}
+				}
+			}`,
+		})
+		if got, want := putItem.code, http.StatusOK; got != want {
+			t.Fatalf("unexpected put item status: got %d want %d\nbody: %s", got, want, putItem.body)
+		}
+	}
+
+	query := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.Query",
+		body: `{
+			"TableName":"mildstack-update-gsi",
+			"IndexName":"gsi_appKey",
+			"KeyConditionExpression":"type = :type AND sk BETWEEN :start AND :end",
+			"ExpressionAttributeValues":{
+				":type":{"S":"appKey"},
+				":start":{"S":"000"},
+				":end":{"S":"999"}
+			}
+		}`,
+	})
+	if got, want := query.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected query status: got %d want %d\nbody: %s", got, want, query.body)
+	}
+	var queryResponse queryResponse
+	decodeResponse(t, query.body, &queryResponse)
+	if got, want := queryResponse.Count, 2; got != want {
+		t.Fatalf("unexpected indexed query count: got %d want %d", got, want)
+	}
+}
+
+func TestDynamoDBNativeRoutesUpdateTableRejectsUnsupportedGlobalSecondaryIndexUpdateOperation(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+
+	createTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"mildstack-update-gsi-unsupported",
+			"KeySchema":[{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions":[{"AttributeName":"pk","AttributeType":"S"}],
+			"BillingMode":"PAY_PER_REQUEST"
+		}`,
+	})
+	if got, want := createTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create table status: got %d want %d\nbody: %s", got, want, createTable.body)
+	}
+
+	updateTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.UpdateTable",
+		body: `{
+			"TableName":"mildstack-update-gsi-unsupported",
+			"GlobalSecondaryIndexUpdates":[
+				{"Update":{"IndexName":"gsi_appKey"}}
+			]
+		}`,
+	})
+	assertDynamoError(t, updateTable, http.StatusBadRequest, "ValidationException")
+}
+
+func TestDynamoDBNativeRoutesUpdateTableRejectsMultipleGlobalSecondaryIndexCreateOperations(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+
+	createTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"mildstack-update-gsi-limit",
+			"KeySchema":[{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions":[{"AttributeName":"pk","AttributeType":"S"}],
+			"BillingMode":"PAY_PER_REQUEST"
+		}`,
+	})
+	if got, want := createTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create table status: got %d want %d\nbody: %s", got, want, createTable.body)
+	}
+
+	updateTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.UpdateTable",
+		body: `{
+			"TableName":"mildstack-update-gsi-limit",
+			"AttributeDefinitions":[
+				{"AttributeName":"type","AttributeType":"S"},
+				{"AttributeName":"category","AttributeType":"S"}
+			],
+			"GlobalSecondaryIndexUpdates":[
+				{
+					"Create":{
+						"IndexName":"gsi_type",
+						"KeySchema":[{"AttributeName":"type","KeyType":"HASH"}],
+						"Projection":{"ProjectionType":"ALL"}
+					}
+				},
+				{
+					"Create":{
+						"IndexName":"gsi_category",
+						"KeySchema":[{"AttributeName":"category","KeyType":"HASH"}],
+						"Projection":{"ProjectionType":"ALL"}
+					}
+				}
+			]
+		}`,
+	})
+	assertDynamoError(t, updateTable, http.StatusBadRequest, "ValidationException")
+	if !strings.Contains(updateTable.body, "Create/Delete operation") {
+		t.Fatalf("expected UpdateTable create/delete limit message, got: %s", updateTable.body)
+	}
+}
+
+func TestDynamoDBNativeRoutesUpdateTableRejectsUnsupportedTopLevelField(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+
+	createTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"mildstack-update-unsupported-top-level",
+			"KeySchema":[{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions":[{"AttributeName":"pk","AttributeType":"S"}],
+			"BillingMode":"PAY_PER_REQUEST"
+		}`,
+	})
+	if got, want := createTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create table status: got %d want %d\nbody: %s", got, want, createTable.body)
+	}
+
+	updateTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.UpdateTable",
+		body: `{
+			"TableName":"mildstack-update-unsupported-top-level",
+			"ProvisionedThroughput":{"ReadCapacityUnits":5,"WriteCapacityUnits":5}
+		}`,
+	})
+	assertDynamoError(t, updateTable, http.StatusBadRequest, "ValidationException")
+	if !strings.Contains(updateTable.body, "not supported") {
+		t.Fatalf("expected UpdateTable unsupported field message, got: %s", updateTable.body)
+	}
+}
+
+func TestDynamoDBNativeRoutesUpdateTableAcceptsTableNameARN(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+
+	tableName := "mildstack-update-arn"
+	tableArn := awscontext.Default().DynamoDBTableARN(tableName)
+
+	createTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"` + tableName + `",
+			"KeySchema":[{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions":[{"AttributeName":"pk","AttributeType":"S"}],
+			"BillingMode":"PAY_PER_REQUEST"
+		}`,
+	})
+	if got, want := createTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create table status: got %d want %d\nbody: %s", got, want, createTable.body)
+	}
+
+	updateTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.UpdateTable",
+		body: `{
+			"TableName":"` + tableArn + `",
+			"DeletionProtectionEnabled":true
+		}`,
+	})
+	if got, want := updateTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected update table status: got %d want %d\nbody: %s", got, want, updateTable.body)
+	}
+
+	describeTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.DescribeTable",
+		body: `{
+			"TableName":"` + tableArn + `"
+		}`,
+	})
+	if got, want := describeTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected describe table status: got %d want %d\nbody: %s", got, want, describeTable.body)
+	}
+
+	var response describeTableResponse
+	decodeResponse(t, describeTable.body, &response)
+	if got, want := response.Table.TableName, tableName; got != want {
+		t.Fatalf("unexpected table name: got %q want %q", got, want)
+	}
+	if !response.Table.DeletionProtectionEnabled {
+		t.Fatalf("expected deletion protection to be enabled after UpdateTable by ARN")
+	}
+}
+
+func TestDynamoDBNativeRoutesUpdateContinuousBackupsPersistsRecoveryPeriodInDays(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+
+	createTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"mildstack-continuous-backups",
+			"KeySchema":[{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions":[{"AttributeName":"pk","AttributeType":"S"}],
+			"BillingMode":"PAY_PER_REQUEST"
+		}`,
+	})
+	if got, want := createTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create table status: got %d want %d\nbody: %s", got, want, createTable.body)
+	}
+
+	updateBackups := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.UpdateContinuousBackups",
+		body: `{
+			"TableName":"mildstack-continuous-backups",
+			"PointInTimeRecoverySpecification":{
+				"PointInTimeRecoveryEnabled":true,
+				"RecoveryPeriodInDays":21
+			}
+		}`,
+	})
+	if got, want := updateBackups.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected update continuous backups status: got %d want %d\nbody: %s", got, want, updateBackups.body)
+	}
+
+	var updateResponse describeContinuousBackupsResponse
+	decodeResponse(t, updateBackups.body, &updateResponse)
+	if got, want := updateResponse.ContinuousBackupsDescription.PointInTimeRecoveryDescription.PointInTimeRecoveryStatus, "ENABLED"; got != want {
+		t.Fatalf("unexpected PITR status after update: got %q want %q", got, want)
+	}
+	if updateResponse.ContinuousBackupsDescription.PointInTimeRecoveryDescription.RecoveryPeriodInDays == nil {
+		t.Fatalf("expected RecoveryPeriodInDays in update response")
+	}
+	if got, want := *updateResponse.ContinuousBackupsDescription.PointInTimeRecoveryDescription.RecoveryPeriodInDays, 21; got != want {
+		t.Fatalf("unexpected RecoveryPeriodInDays after update: got %d want %d", got, want)
+	}
+
+	describeBackups := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.DescribeContinuousBackups",
+		body: `{
+			"TableName":"mildstack-continuous-backups"
+		}`,
+	})
+	if got, want := describeBackups.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected describe continuous backups status: got %d want %d\nbody: %s", got, want, describeBackups.body)
+	}
+
+	var describeResponse describeContinuousBackupsResponse
+	decodeResponse(t, describeBackups.body, &describeResponse)
+	if describeResponse.ContinuousBackupsDescription.PointInTimeRecoveryDescription.RecoveryPeriodInDays == nil {
+		t.Fatalf("expected RecoveryPeriodInDays in describe response")
+	}
+	if got, want := *describeResponse.ContinuousBackupsDescription.PointInTimeRecoveryDescription.RecoveryPeriodInDays, 21; got != want {
+		t.Fatalf("unexpected RecoveryPeriodInDays after describe: got %d want %d", got, want)
+	}
+}
+
+func TestDynamoDBNativeRoutesAllowGlobalSecondaryIndexWithBasePartitionKey(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+
+	createWithGSI := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"mildstack-gsi-shared-partition-create",
+			"KeySchema":[
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions":[
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"},
+				{"AttributeName":"gsi_sk","AttributeType":"S"}
+			],
+			"GlobalSecondaryIndexes":[
+				{
+					"IndexName":"gsi_by_pk",
+					"KeySchema":[
+						{"AttributeName":"pk","KeyType":"HASH"},
+						{"AttributeName":"gsi_sk","KeyType":"RANGE"}
+					],
+					"Projection":{"ProjectionType":"ALL"}
+				}
+			],
+			"BillingMode":"PAY_PER_REQUEST"
+		}`,
+	})
+	if got, want := createWithGSI.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create table with gsi status: got %d want %d\nbody: %s", got, want, createWithGSI.body)
+	}
+
+	createBaseTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"mildstack-gsi-shared-partition-update",
+			"KeySchema":[
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions":[
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"}
+			],
+			"BillingMode":"PAY_PER_REQUEST"
+		}`,
+	})
+	if got, want := createBaseTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create base table status: got %d want %d\nbody: %s", got, want, createBaseTable.body)
+	}
+
+	updateTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.UpdateTable",
+		body: `{
+			"TableName":"mildstack-gsi-shared-partition-update",
+			"AttributeDefinitions":[
+				{"AttributeName":"gsi_sk","AttributeType":"S"}
+			],
+			"GlobalSecondaryIndexUpdates":[
+				{
+					"Create":{
+						"IndexName":"gsi_by_pk",
+						"KeySchema":[
+							{"AttributeName":"pk","KeyType":"HASH"},
+							{"AttributeName":"gsi_sk","KeyType":"RANGE"}
+						],
+						"Projection":{"ProjectionType":"ALL"}
+					}
+				}
+			]
+		}`,
+	})
+	if got, want := updateTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected update table status: got %d want %d\nbody: %s", got, want, updateTable.body)
+	}
+
+	var response struct {
+		TableDescription tableDescription `json:"TableDescription"`
+	}
+	decodeResponse(t, updateTable.body, &response)
+	if got, want := len(response.TableDescription.GlobalSecondaryIndexes), 1; got != want {
+		t.Fatalf("unexpected gsi count after update: got %d want %d", got, want)
+	}
+	if got, want := response.TableDescription.GlobalSecondaryIndexes[0].IndexName, "gsi_by_pk"; got != want {
+		t.Fatalf("unexpected gsi name after update: got %q want %q", got, want)
+	}
+}
+
+func TestDynamoDBNativeRoutesPutItemAcceptsEmptyStringAttributes(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+
+	createTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"mildstack-empty-string",
+			"KeySchema":[
+				{"AttributeName":"id","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions":[
+				{"AttributeName":"id","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"}
+			],
+			"BillingMode":"PAY_PER_REQUEST"
+		}`,
+	})
+	if got, want := createTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create table status: got %d want %d", got, want)
+	}
+
+	putItem := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.PutItem",
+		body: `{
+			"TableName":"mildstack-empty-string",
+			"Item":{
+				"id":{"S":"tenant#1"},
+				"sk":{"S":"routing#default"},
+				"message":{"S":""}
+			}
+		}`,
+	})
+	if got, want := putItem.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected put item status: got %d want %d\nbody: %s", got, want, putItem.body)
+	}
+
+	getItem := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.GetItem",
+		body: `{
+			"TableName":"mildstack-empty-string",
+			"Key":{
+				"id":{"S":"tenant#1"},
+				"sk":{"S":"routing#default"}
+			}
+		}`,
+	})
+	if got, want := getItem.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected get item status: got %d want %d\nbody: %s", got, want, getItem.body)
+	}
+
+	var response getItemResponse
+	decodeResponse(t, getItem.body, &response)
+	if got, want := requireScalarValue(t, response.Item["message"].S), ""; got != want {
+		t.Fatalf("unexpected message value: got %q want %q", got, want)
+	}
+}
+
+func TestDynamoDBNativeRoutesPreserveEmptyListAndMapAttributeValues(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterDynamoDBNativeRoutes(engine, application.New())
+
+	createTable := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.CreateTable",
+		body: `{
+			"TableName":"mildstack-empty-collections",
+			"KeySchema":[
+				{"AttributeName":"id","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions":[
+				{"AttributeName":"id","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"}
+			],
+			"BillingMode":"PAY_PER_REQUEST"
+		}`,
+	})
+	if got, want := createTable.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected create table status: got %d want %d", got, want)
+	}
+
+	putItem := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.PutItem",
+		body: `{
+			"TableName":"mildstack-empty-collections",
+			"Item":{
+				"id":{"S":"tenant#1"},
+				"sk":{"S":"routing#default"},
+				"requiredFields":{"L":[]},
+				"routingMap":{"M":{}}
+			}
+		}`,
+	})
+	if got, want := putItem.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected put item status: got %d want %d\nbody: %s", got, want, putItem.body)
+	}
+	if !strings.Contains(putItem.body, `"requiredFields":{"L":[]}`) {
+		t.Fatalf("expected put item response to preserve empty list attribute value, got body: %s", putItem.body)
+	}
+	if !strings.Contains(putItem.body, `"routingMap":{"M":{}}`) {
+		t.Fatalf("expected put item response to preserve empty map attribute value, got body: %s", putItem.body)
+	}
+
+	getItem := doDynamoDBRequest(t, engine, dynamoRequest{
+		target: "DynamoDB_20120810.GetItem",
+		body: `{
+			"TableName":"mildstack-empty-collections",
+			"Key":{
+				"id":{"S":"tenant#1"},
+				"sk":{"S":"routing#default"}
+			}
+		}`,
+	})
+	if got, want := getItem.code, http.StatusOK; got != want {
+		t.Fatalf("unexpected get item status: got %d want %d\nbody: %s", got, want, getItem.body)
+	}
+	if !strings.Contains(getItem.body, `"requiredFields":{"L":[]}`) {
+		t.Fatalf("expected get item response to preserve empty list attribute value, got body: %s", getItem.body)
+	}
+	if !strings.Contains(getItem.body, `"routingMap":{"M":{}}`) {
+		t.Fatalf("expected get item response to preserve empty map attribute value, got body: %s", getItem.body)
 	}
 }
 
@@ -1051,6 +1622,15 @@ func decodeResponse(t *testing.T, body string, into any) {
 	if err := json.Unmarshal([]byte(body), into); err != nil {
 		t.Fatalf("decode response: %v\nbody: %s", err, body)
 	}
+}
+
+func requireScalarValue(t *testing.T, value *string) string {
+	t.Helper()
+
+	if value == nil {
+		t.Fatal("expected scalar attribute value to be present")
+	}
+	return *value
 }
 
 func assertDynamoError(t *testing.T, response capturedResponse, wantStatus int, wantType string) {

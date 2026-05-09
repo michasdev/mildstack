@@ -3,6 +3,8 @@
     "pages": [
         "overview",
         "installation",
-        "quick-start"
+        "quick-start",
+        "troubleshooting",
+        "build-from-source"
     ]
 }

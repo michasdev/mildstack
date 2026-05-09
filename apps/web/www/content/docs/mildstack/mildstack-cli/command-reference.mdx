@@ -1,0 +1,46 @@
+---
+title: Command Reference
+description: |
+  Exact MildStack CLI syntax and flags from the current core implementation.
+---
+
+This page captures the implemented CLI surface in `core/internal/delivery/cli`.
+For walkthroughs and lifecycle examples, see the Instances page.
+
+## Command Surface
+
+| Command | Notes |
+| --- | --- |
+| `mildstack start [port]` | Starts on a specific port, or probes `4566`, `4567`, then `4568` when no port is provided |
+| `mildstack instances` | Returns the runtime snapshot |
+| `mildstack status` | Alias of `instances` |
+| `mildstack stop [port]` | Stops one running instance by port |
+| `mildstack stop --all` | Stops every running instance |
+| `mildstack delete [port]` | Deletes one instance by port, running or stopped |
+| `mildstack delete --all` | Deletes every instance and its resources |
+
+## Persistent Flag
+
+`mildstack` exposes a persistent `--json` flag.
+It affects the snapshot output from `instances` and `status`.
+
+## Start Command
+
+`start` supports detached mode with `--detach` or `-d`. The flag can appear before or after the port; both forms are equivalent.
+
+```bash
+mildstack start 4566 --detach
+```
+
+<Callout type="info">
+  With no port argument, `start` probes `4566`, then `4567`, then `4568`, and fails if all are busy.
+</Callout>
+
+## Lifecycle Rules
+
+For `stop` and `delete`:
+
+- You must pass a port or `--all`.
+- `--all` cannot be combined with a port argument.
+- `stop` requires the target instance to be in `running` state.
+- `delete` removes persisted instance resources from disk.

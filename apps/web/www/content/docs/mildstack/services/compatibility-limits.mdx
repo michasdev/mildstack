@@ -1,0 +1,32 @@
+---
+title: Compatibility & Limits
+description: |
+  Cross-service compatibility summary grounded in current core policies,
+  registries, and native adapters.
+---
+
+## How to Use This Page
+
+MildStack compatibility is operation-based. Use this matrix to compare guaranteed policy coverage with current native adapter behavior.
+
+## Service Matrix
+
+| Service | API shape | Code-backed coverage | Deferred / limits |
+| --- | --- | --- | --- |
+| S3 | Native S3 adapter on `/`, `/:bucket`, `/:bucket/:object`; runtime service routes under `/api/v1/runtime/services/s3/...` | Guaranteed policy coverage includes the core bucket/object/multipart families plus selected subresources. Runtime service routes expose the full mapped set, while the native adapter currently focuses on core bucket/object flows, selected bucket subresources, and multipart create/upload/complete. | Policy defers directory buckets/S3 Express (`CreateSession`, `ListDirectoryBuckets`, `RenameObject`, and related metadata configuration flows), reporting/admin families (`analytics`, `intelligent-tiering`, `inventory`, `metrics`), lower-value management features (`website hosting`, `accelerate`, `request payment`, `ABAC`, `policy status`), and specialized Object Lambda actions. Some policy-covered operations are runtime-route only today. |
+| DynamoDB | JSON protocol on `/` with `X-Amz-Target: DynamoDB_20120810.<Action>` | Guaranteed policy surface: `ListTables`, `CreateTable`, `DescribeTable`, `DeleteTable`, `GetItem`, `PutItem`, `UpdateItem`, `DeleteItem`. Native target registry additionally includes Query, Scan, batch, transaction, TTL, backup, tag, UpdateTable, DescribeEndpoints, and ExecuteStatement actions, with parameter-level limits in some handlers. | `global tables` and `transactions` remain deferred in policy terms. Treat transaction behavior as non-guaranteed compatibility. |
+| SQS | Query and target-style requests, version `2012-11-05` | 23 catalog actions across queue lifecycle, messaging, permissions/tags, and DLQ redrive are registered and routed. | Queue-owner checks use local account context (`00000000000`), and cooldown windows apply to queue delete and purge flows. |
+| SNS | Query/XML on `/`, version `2010-03-31` | 42 catalog actions are registered and routed by the native SNS registry across topics, publish, subscriptions, governance controls, platform endpoints, and SMS sandbox. | SNS policy fidelity is partial. HTTP/HTTPS deliveries are only attempted for loopback endpoints. Non-local HTTP/HTTPS endpoints are recorded as simulated attempts instead of making outbound requests. Other protocols are also simulated in local runtime, except SQS subscriptions when the internal bridge is available. |
+
+## Local AWS Defaults
+
+| Setting | Default |
+| --- | --- |
+| Endpoint | `http://127.0.0.1:4566` |
+| Region | `us-east-1` |
+| Account ID | `00000000000` |
+| Partition | `aws` |
+
+<Callout type="info">
+  Local development does not require real AWS credentials or IAM signature validation.
+</Callout>

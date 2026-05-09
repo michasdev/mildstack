@@ -150,6 +150,67 @@ func TestSQLiteRepositoryBootstrapAndPersistAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoryAllowsGlobalSecondaryIndexReusingTablePartitionKey(t *testing.T) {
+	t.Helper()
+
+	baseDir := t.TempDir()
+	repo := mustOpenSQLiteRepositoryAt(t, baseDir, "instance-a")
+	defer func() {
+		if err := repo.Close(); err != nil {
+			t.Fatalf("close repo: %v", err)
+		}
+	}()
+
+	state := domain.NewEmptyState()
+	state.UpsertTable(domain.Table{
+		Name:         "claudia-bff-leads-local",
+		PartitionKey: "pk",
+		SortKey:      "sk",
+		BillingMode:  "PAY_PER_REQUEST",
+		AttributeDefinitions: []domain.AttributeDefinition{
+			{Name: "pk", Type: "S"},
+			{Name: "sk", Type: "S"},
+			{Name: "gsi1sk", Type: "S"},
+		},
+		GlobalSecondaryIndexes: []domain.SecondaryIndex{
+			{
+				Name: "gsi1sk",
+				KeySchema: []domain.KeySchemaElement{
+					{AttributeName: "pk", KeyType: "HASH"},
+					{AttributeName: "gsi1sk", KeyType: "RANGE"},
+				},
+				Projection: domain.Projection{Type: "ALL"},
+			},
+		},
+	})
+
+	if err := repo.Save(state); err != nil {
+		t.Fatalf("save state with shared-partition gsi: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("close repo after save: %v", err)
+	}
+
+	reopened := mustOpenSQLiteRepositoryAt(t, baseDir, "instance-a")
+	defer func() {
+		if err := reopened.Close(); err != nil {
+			t.Fatalf("close reopened repo: %v", err)
+		}
+	}()
+
+	loaded, err := reopened.Load()
+	if err != nil {
+		t.Fatalf("load state with shared-partition gsi: %v", err)
+	}
+	table, ok := loaded.Table("claudia-bff-leads-local")
+	if !ok {
+		t.Fatal("expected table to be present after reload")
+	}
+	if got, want := len(table.GlobalSecondaryIndexes), 1; got != want {
+		t.Fatalf("unexpected gsi count after reload: got %d want %d", got, want)
+	}
+}
+
 func TestSQLiteRepositoryIsolatesInstances(t *testing.T) {
 	t.Helper()
 

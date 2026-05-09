@@ -1,107 +1,52 @@
 ---
 title: Quick Start
 description: |
-  Get MildStack running in under a minute. Start a local AWS environment, create an S3 bucket, and send your first SQS message.
+  Start a local MildStack instance, then run first AWS CLI commands for S3, DynamoDB, SQS, and SNS.
 ---
 
-## Start the Runtime
-
-Launch a MildStack instance with a single command:
+## 1. Start a Local Instance
 
 ```bash
 mildstack start
 ```
 
-By default, the runtime starts on port `4566`. You can specify a different port:
-
-```bash
-mildstack start 8080
-```
-
-To start the instance in the background (detached mode):
-
-```bash
-mildstack start --detach
-```
-
-<Callout type="info" title="Ready in milliseconds">
-  MildStack starts in approximately **200ms**. No containers, no waiting.
+<Callout type="info" title="Keep this process running">
+  `mildstack start` runs the instance in the current terminal. Keep it open and use another terminal for the commands below.
 </Callout>
 
-## Configure Your AWS SDK
+If MildStack starts on a different port, use that port consistently in the commands below.
 
-Point your AWS SDK to the local MildStack endpoint. MildStack ignores credentials, so you can use any dummy values:
-
-```ts tab="JavaScript"
-import { S3Client } from "@aws-sdk/client-s3";
-
-const client = new S3Client({
-  region: "us-east-1",
-  endpoint: "http://localhost:4566",
-  credentials: {
-    accessKeyId: "test",
-    secretAccessKey: "test",
-  },
-  forcePathStyle: true,
-});
-```
-
-```python tab="Python"
-import boto3
-
-s3 = boto3.client(
-    "s3",
-    region_name="us-east-1",
-    endpoint_url="http://localhost:4566",
-    aws_access_key_id="test",
-    aws_secret_access_key="test",
-)
-```
-
-```go tab="Go"
-import (
-    "github.com/aws/aws-sdk-go-v2/config"
-    "github.com/aws/aws-sdk-go-v2/credentials"
-    "github.com/aws/aws-sdk-go-v2/service/s3"
-)
-
-cfg, _ := config.LoadDefaultConfig(context.TODO(),
-    config.WithRegion("us-east-1"),
-    config.WithCredentialsProvider(
-        credentials.NewStaticCredentialsProvider("test", "test", ""),
-    ),
-)
-
-client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-    o.BaseEndpoint = aws.String("http://localhost:4566")
-    o.UsePathStyle = true
-})
-```
-
-## Use the AWS CLI
-
-You can also use the standard AWS CLI with MildStack:
+## 2. Configure an AWS CLI Profile
 
 ```bash
-# Configure a local profile
 aws configure set aws_access_key_id test --profile mildstack
 aws configure set aws_secret_access_key test --profile mildstack
 aws configure set region us-east-1 --profile mildstack
-
-# Create an S3 bucket
-aws s3 mb s3://my-bucket --endpoint-url http://localhost:4566 --profile mildstack
-
-# List buckets
-aws s3 ls --endpoint-url http://localhost:4566 --profile mildstack
-
-# Upload a file
-aws s3 cp ./myfile.txt s3://my-bucket/ --endpoint-url http://localhost:4566 --profile mildstack
 ```
 
-## Try DynamoDB
+<Callout type="info" title="Use a dedicated local profile">
+  Keep a separate profile (like `mildstack`) so local commands do not mix with your real AWS account profile.
+</Callout>
+
+## 3. Run S3 Commands
 
 ```bash
-# Create a table
+aws s3 mb s3://my-bucket \
+  --endpoint-url http://localhost:4566 \
+  --profile mildstack
+
+aws s3 cp ./hello.txt s3://my-bucket/hello.txt \
+  --endpoint-url http://localhost:4566 \
+  --profile mildstack
+
+aws s3 ls s3://my-bucket \
+  --endpoint-url http://localhost:4566 \
+  --profile mildstack
+```
+
+## 4. Run DynamoDB Commands
+
+```bash
 aws dynamodb create-table \
   --table-name Users \
   --attribute-definitions AttributeName=id,AttributeType=S \
@@ -110,55 +55,74 @@ aws dynamodb create-table \
   --endpoint-url http://localhost:4566 \
   --profile mildstack
 
-# Put an item
 aws dynamodb put-item \
   --table-name Users \
   --item '{"id": {"S": "user-1"}, "name": {"S": "Alice"}}' \
   --endpoint-url http://localhost:4566 \
   --profile mildstack
-```
 
-## Try SQS
-
-```bash
-# Create a queue
-aws sqs create-queue \
-  --queue-name my-queue \
+aws dynamodb get-item \
+  --table-name Users \
+  --key '{"id": {"S": "user-1"}}' \
   --endpoint-url http://localhost:4566 \
   --profile mildstack
+```
 
-# Send a message
+## 5. Run SQS Commands
+
+```bash
+QUEUE_URL=$(aws sqs create-queue \
+  --queue-name my-queue \
+  --endpoint-url http://localhost:4566 \
+  --profile mildstack \
+  --query 'QueueUrl' \
+  --output text)
+
 aws sqs send-message \
-  --queue-url http://localhost:4566/000000000000/my-queue \
+  --queue-url "$QUEUE_URL" \
   --message-body "Hello from MildStack!" \
   --endpoint-url http://localhost:4566 \
   --profile mildstack
 
-# Receive messages
 aws sqs receive-message \
-  --queue-url http://localhost:4566/000000000000/my-queue \
+  --queue-url "$QUEUE_URL" \
   --endpoint-url http://localhost:4566 \
   --profile mildstack
 ```
 
-## Manage Instances
-
-Use the CLI to check on your running instances:
+## 6. Run SNS Commands
 
 ```bash
-# List all instances
+TOPIC_ARN=$(aws sns create-topic \
+  --name local-events \
+  --endpoint-url http://localhost:4566 \
+  --profile mildstack \
+  --query 'TopicArn' \
+  --output text)
+
+aws sns publish \
+  --topic-arn "$TOPIC_ARN" \
+  --message "Hello from MildStack SNS" \
+  --endpoint-url http://localhost:4566 \
+  --profile mildstack
+
+aws sns list-topics \
+  --endpoint-url http://localhost:4566 \
+  --profile mildstack
+```
+
+## 7. Inspect, Stop, and Delete the Instance
+
+Check running instances:
+
+```bash
 mildstack instances
+```
 
-# Show instance status (with JSON output)
-mildstack instances --json
+Then stop and delete by port:
 
-# Stop a specific instance
+```bash
 mildstack stop 4566
-
-# Stop all running instances
-mildstack stop --all
-
-# Delete an instance and its data
 mildstack delete 4566
 ```
 
@@ -166,12 +130,12 @@ mildstack delete 4566
 
 <Cards>
   <Card title="Services" href="/docs/mildstack/services">
-    Explore supported AWS services and their API compatibility.
+    Explore service-specific guides and supported operations.
   </Card>
   <Card title="MildStack CLI" href="/docs/mildstack/mildstack-cli">
-    Learn all CLI commands for managing your local cloud.
+    Learn full instance lifecycle command behavior.
   </Card>
-  <Card title="Desktop App" href="/docs/mildstack/mildstack-desktop">
-    Browse and manage resources visually with the Desktop App.
+  <Card title="Troubleshooting" href="/docs/getting-started/troubleshooting">
+    Resolve common setup and endpoint issues.
   </Card>
 </Cards>

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -251,6 +252,94 @@ func TestSQSSDKSmokeReceivesAWSCompatibleSuccess(t *testing.T) {
 	}
 	if got, want := len(cleared.Messages), 0; got != want {
 		t.Fatalf("unexpected post-delete receive count: got %d want %d", got, want)
+	}
+}
+
+func TestSQSNativeQueryDeleteMessageReturnsXMLResponse(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	service := sqsapplication.New()
+	router := gin.New()
+	RegisterSQSNativeRoutes(router, service)
+
+	if _, err := service.CreateQueue("orders", nil); err != nil {
+		t.Fatalf("create queue: %v", err)
+	}
+	if _, err := service.SendMessage("orders", contracts.SendMessageRequest{
+		QueueUrl:    service.QueueURL("orders"),
+		MessageBody: "delete-me",
+	}); err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+	messages, err := service.ReceiveMessage("orders", 1, 0)
+	if err != nil {
+		t.Fatalf("receive message: %v", err)
+	}
+	if len(messages) == 0 {
+		t.Fatal("expected a message for delete")
+	}
+
+	receiptHandle := sqsapplication.CurrentReceiptHandle(messages[0])
+	body := "Action=DeleteMessage&Version=2012-11-05&QueueUrl=" + url.QueryEscape(service.QueueURL("orders")) + "&ReceiptHandle=" + url.QueryEscape(receiptHandle)
+	request := httptest.NewRequest(http.MethodPost, "/"+defaultSQSAccountID+"/orders/", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if got, want := recorder.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected delete status: got %d want %d", got, want)
+	}
+	if ct := recorder.Header().Get("Content-Type"); !strings.Contains(ct, "application/xml") {
+		t.Fatalf("unexpected delete content type: got %q", ct)
+	}
+	if !strings.Contains(recorder.Body.String(), "<DeleteMessageResponse>") {
+		t.Fatalf("expected delete XML response, got %q", recorder.Body.String())
+	}
+}
+
+func TestSQSNativeQueryChangeVisibilityReturnsXMLResponse(t *testing.T) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	service := sqsapplication.New()
+	router := gin.New()
+	RegisterSQSNativeRoutes(router, service)
+
+	if _, err := service.CreateQueue("orders", nil); err != nil {
+		t.Fatalf("create queue: %v", err)
+	}
+	if _, err := service.SendMessage("orders", contracts.SendMessageRequest{
+		QueueUrl:    service.QueueURL("orders"),
+		MessageBody: "visible",
+	}); err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+	messages, err := service.ReceiveMessage("orders", 1, 0)
+	if err != nil {
+		t.Fatalf("receive message: %v", err)
+	}
+	if len(messages) == 0 {
+		t.Fatal("expected a message for change visibility")
+	}
+
+	receiptHandle := sqsapplication.CurrentReceiptHandle(messages[0])
+	body := "Action=ChangeMessageVisibility&Version=2012-11-05&QueueUrl=" + url.QueryEscape(service.QueueURL("orders")) + "&ReceiptHandle=" + url.QueryEscape(receiptHandle) + "&VisibilityTimeout=0"
+	request := httptest.NewRequest(http.MethodPost, "/"+defaultSQSAccountID+"/orders/", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if got, want := recorder.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected visibility status: got %d want %d", got, want)
+	}
+	if ct := recorder.Header().Get("Content-Type"); !strings.Contains(ct, "application/xml") {
+		t.Fatalf("unexpected visibility content type: got %q", ct)
+	}
+	if !strings.Contains(recorder.Body.String(), "<ChangeMessageVisibilityResponse>") {
+		t.Fatalf("expected visibility XML response, got %q", recorder.Body.String())
 	}
 }
 

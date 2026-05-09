@@ -1,86 +1,64 @@
 ---
 title: Services
 description: |
-  MildStack emulates core AWS services locally. Learn what's supported
-  and how to use S3, DynamoDB, and SQS in your development workflow.
+  MildStack runs local AWS-compatible services and documents compatibility at
+  the operation level.
 ---
 
-## Supported Services
+## Service Coverage
 
-MildStack provides local emulations of the most commonly used AWS services. Each service is fully compatible with the official AWS SDKs and CLI — just point your application to the local endpoint.
+MildStack currently runs four AWS-compatible services in the core runtime:
+S3, DynamoDB, SQS, and SNS.
 
 <Cards>
   <Card title="Amazon S3" href="/docs/mildstack/services/s3">
-    Object storage — buckets, objects, multipart uploads, versioning, and more.
+    Buckets, objects, multipart uploads, versioning, and selected bucket/object subresources.
   </Card>
   <Card title="Amazon DynamoDB" href="/docs/mildstack/services/dynamodb">
-    NoSQL database — tables, items, queries, scans, and batch operations.
+    Table and item workflows, plus additional native targets documented per operation.
   </Card>
   <Card title="Amazon SQS" href="/docs/mildstack/services/sqs">
-    Message queues — standard and FIFO queues, dead-letter queues, and message operations.
+    Queue lifecycle, message operations, permissions, tags, and DLQ redrive actions.
+  </Card>
+  <Card title="Amazon SNS" href="/docs/mildstack/services/sns">
+    Topics, subscriptions, publish flows, policies, platform endpoints, and SMS sandbox actions.
   </Card>
 </Cards>
 
-## Connecting to Services
+## Compatibility Model
 
-All services share the same endpoint. Just point your AWS SDK to MildStack:
+Compatibility is documented by operation, not by blanket parity claims.
+
+- Each service page separates guaranteed policy coverage from adapter-specific behavior when they differ.
+- See [Compatibility & Limits](/docs/mildstack/services/compatibility-limits) for a cross-service matrix.
+
+<Callout type="warn" title="S3 scope note">
+  The S3 service policy and runtime service routes cover more operations than
+  the current AWS native S3 adapter. See the S3 page for the exact split.
+</Callout>
+
+## Local Connection Defaults
 
 | Setting | Value |
 | --- | --- |
-| **Endpoint URL** | `http://localhost:4566` (or your custom port) |
-| **Region** | `us-east-1` (default) |
-| **Access Key** | Any value (e.g., `test`) |
-| **Secret Key** | Any value (e.g., `test`) |
+| Endpoint | `http://127.0.0.1:4566` (default) |
+| Region | `us-east-1` |
+| Default account ID | `00000000000` |
+| Access key / secret key | Any placeholder values |
+
+## Quick Start Example
 
 ```ts
-import { S3Client } from "@aws-sdk/client-s3";
+import { SQSClient } from "@aws-sdk/client-sqs";
 
-const client = new S3Client({
+const sqs = new SQSClient({
   region: "us-east-1",
-  endpoint: "http://localhost:4566",
+  endpoint: "http://127.0.0.1:4566",
   credentials: {
     accessKeyId: "test",
     secretAccessKey: "test",
   },
-  forcePathStyle: true,
 });
 ```
 
-<Callout type="info">
-  MildStack does not validate credentials. Use any dummy values — they exist only to satisfy SDK requirements.
-</Callout>
-
-## Service Availability
-
-All services start automatically when you launch a MildStack instance. There's no need to enable or configure individual services — everything is ready to use immediately.
-
-```bash
-# Start MildStack — all services are available
-mildstack start
-```
-
-## Benefits of Local Development
-
-| Benefit | Description |
-| --- | --- |
-| **No internet required** | Build and test offline, on a plane, or anywhere |
-| **Instant feedback** | No deployment delays — changes are reflected immediately |
-| **Zero cost** | No AWS charges during development |
-| **Full control** | Create complex test scenarios deterministically |
-| **Data privacy** | Sensitive development data stays on your machine |
-
-## Planned Services
-
-We're actively working on expanding our service coverage:
-
-| Service | Status |
-| --- | --- |
-| Amazon SNS | 🔜 In development |
-| AWS Lambda | 📅 Planned |
-| Amazon EventBridge | 📅 Planned |
-
-## API Compatibility
-
-MildStack aims for high compatibility with the AWS APIs. We focus on the operations that matter most for local development and testing. Each service page lists the specific operations that are supported.
-
-If you encounter a missing operation or unexpected behavior, please [open an issue](https://github.com/michasdev/mildstack/issues) on GitHub.
+MildStack does not require real AWS credentials for local development.

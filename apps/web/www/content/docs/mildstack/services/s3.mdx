@@ -1,158 +1,86 @@
 ---
 title: Amazon S3
 description: |
-  MildStack provides full S3 emulation with bucket management, object storage,
-  multipart uploads, versioning, object lock, and more.
+  Code-backed compatibility for MildStack S3, including policy coverage and
+  current native adapter behavior.
 ---
 
 ## Overview
 
-MildStack's S3 emulation lets you work with buckets and objects locally, just like you would with the real AWS S3. It supports a wide range of S3 features including multipart uploads, versioning, tagging, and object lock.
+MildStack currently exposes two S3 surfaces:
 
-## Supported Operations
+- AWS native S3 adapter routes on `/`, `/:bucket`, and `/:bucket/:object`
+- Runtime service routes under `/api/v1/runtime/services/s3/...`
 
-### Bucket Operations
+They share the same core service implementation but do not currently expose identical operation sets.
 
-| Operation | Description |
-| --- | --- |
-| `ListBuckets` | List all buckets |
-| `CreateBucket` | Create a new bucket |
-| `HeadBucket` | Check if a bucket exists |
-| `DeleteBucket` | Delete an empty bucket |
-| `GetBucketLocation` | Get the region of a bucket |
+## Service Policy and Runtime Routes
 
-### Object Operations
+The S3 service policy defines the guaranteed operation groups below, and the runtime service routes map those groups to concrete operations.
 
-| Operation | Description |
-| --- | --- |
-| `GetObject` | Download an object |
-| `PutObject` | Upload an object |
-| `HeadObject` | Get object metadata without downloading |
-| `DeleteObject` | Delete a single object |
-| `DeleteObjects` | Delete multiple objects in a single request |
-| `CopyObject` | Copy an object between buckets or keys |
-| `ListObjectsV2` | List objects in a bucket |
+- `ListBuckets`
+- `CreateBucket`
+- `HeadBucket`
+- `GetBucketLocation`
+- `DeleteBucket`
 
-### Multipart Upload
+### Bucket Subresources
 
-| Operation | Description |
-| --- | --- |
-| `CreateMultipartUpload` | Start a multipart upload |
-| `UploadPart` | Upload a part |
-| `ListParts` | List uploaded parts |
-| `CompleteMultipartUpload` | Complete the upload |
-| `AbortMultipartUpload` | Cancel the upload |
-| `ListMultipartUploads` | List active multipart uploads |
+- Policy: `GetBucketPolicy`, `PutBucketPolicy`, `DeleteBucketPolicy`
+- Encryption: `GetBucketEncryption`, `PutBucketEncryption`, `DeleteBucketEncryption`
+- Lifecycle: `GetBucketLifecycleConfiguration`, `PutBucketLifecycleConfiguration`, `DeleteBucketLifecycleConfiguration`
+- CORS: `GetBucketCors`, `PutBucketCors`, `DeleteBucketCors`
+- ACL and tagging: `GetBucketAcl`, `PutBucketAcl`, `GetBucketTagging`, `PutBucketTagging`, `DeleteBucketTagging`
+- Ownership and access controls: `GetBucketOwnershipControls`, `PutBucketOwnershipControls`, `DeleteBucketOwnershipControls`, `GetPublicAccessBlock`, `PutPublicAccessBlock`, `DeletePublicAccessBlock`
+- Event/admin config: `GetBucketNotificationConfiguration`, `PutBucketNotificationConfiguration`, `GetBucketLogging`, `PutBucketLogging`, `GetBucketReplication`, `PutBucketReplication`, `DeleteBucketReplication`
+- Versioning: `GetBucketVersioning`, `PutBucketVersioning`
+- Object lock config: `GetObjectLockConfiguration`, `PutObjectLockConfiguration`
 
-### Versioning
+### Objects and Multipart
 
-| Operation | Description |
-| --- | --- |
-| `GetBucketVersioning` | Get versioning configuration |
-| `PutBucketVersioning` | Enable or suspend versioning |
-| `ListObjectVersions` | List all versions of objects |
+- Object listing and CRUD: `ListObjects` (v1), `ListObjectsV2`, `GetObject`, `HeadObject`, `PutObject`, `CopyObject`, `DeleteObject`, `DeleteObjects`
+- Version listing: `ListObjectVersions`
+- Object governance: `GetObjectRetention`, `PutObjectRetention`, `GetObjectLegalHold`, `PutObjectLegalHold`, `GetObjectAcl`, `PutObjectAcl`, `GetObjectTagging`, `PutObjectTagging`, `DeleteObjectTagging`
+- Multipart: `CreateMultipartUpload`, `UploadPart`, `ListParts`, `CompleteMultipartUpload`, `AbortMultipartUpload`, `ListMultipartUploads`
 
-### Bucket Configuration
+## Current Native Adapter Coverage
 
-| Operation | Description |
-| --- | --- |
-| `GetBucketPolicy` / `PutBucketPolicy` / `DeleteBucketPolicy` | Bucket policy |
-| `GetBucketEncryption` / `PutBucketEncryption` / `DeleteBucketEncryption` | Server-side encryption |
-| `GetBucketLifecycleConfiguration` / `PutBucketLifecycleConfiguration` / `DeleteBucketLifecycleConfiguration` | Lifecycle rules |
-| `GetBucketCors` / `PutBucketCors` / `DeleteBucketCors` | CORS configuration |
-| `GetBucketTagging` / `PutBucketTagging` / `DeleteBucketTagging` | Bucket tags |
-| `GetBucketAcl` / `PutBucketAcl` | Access control list |
-| `GetBucketNotificationConfiguration` / `PutBucketNotificationConfiguration` | Event notifications |
-| `GetBucketLogging` / `PutBucketLogging` | Access logging |
-| `GetBucketReplication` / `PutBucketReplication` / `DeleteBucketReplication` | Replication rules |
-| `GetBucketOwnershipControls` / `PutBucketOwnershipControls` / `DeleteBucketOwnershipControls` | Ownership controls |
-| `GetPublicAccessBlock` / `PutPublicAccessBlock` / `DeletePublicAccessBlock` | Public access block |
+The current AWS native S3 adapter routes (used by AWS SDK and CLI on the local endpoint) handle these operations today:
 
-### Object Lock & Governance
+- Buckets: `ListBuckets`, `CreateBucket`, `HeadBucket`, `DeleteBucket`
+- Bucket subresources: policy, encryption, lifecycle, CORS, ACL, tagging, ownership controls, public access block, versioning
+- Objects: `ListObjects` (v1), `ListObjectsV2`, `GetObject`, `HeadObject`, `PutObject`, `CopyObject`, `DeleteObject`, `DeleteObjects`
+- Multipart: `CreateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`
 
-| Operation | Description |
-| --- | --- |
-| `GetObjectLockConfiguration` / `PutObjectLockConfiguration` | Bucket-level object lock |
-| `GetObjectRetention` / `PutObjectRetention` | Object retention period |
-| `GetObjectLegalHold` / `PutObjectLegalHold` | Legal hold on objects |
-| `GetObjectAcl` / `PutObjectAcl` | Object ACL |
-| `GetObjectTagging` / `PutObjectTagging` / `DeleteObjectTagging` | Object tags |
+<Callout type="warn" title="Native adapter scope today">
+  Some policy-covered operations are currently exposed only through runtime service routes, not through the AWS native S3 adapter. Examples include bucket location, notification/logging/replication, object lock and governance subresources, and multipart listing or abort actions.
+</Callout>
 
-## Quick Example
+## Deferred Scope
+
+The current S3 policy explicitly defers these areas:
+
+- Directory buckets / S3 Express, including `CreateSession`, `ListDirectoryBuckets`, `RenameObject`, and related metadata configuration flows
+- Reporting and admin surfaces such as analytics, intelligent-tiering, inventory, and metrics
+- Lower-value management features such as website hosting, accelerate, request payment, ABAC, and policy status
+- Specialized data-plane / Object Lambda actions such as `GetObjectAttributes`, `GetObjectTorrent`, `RestoreObject`, `SelectObjectContent`, `UpdateObjectEncryption`, `UploadPartCopy`, and `WriteGetObjectResponse`
+
+## SDK Example
 
 ```ts
-import {
-  S3Client,
-  CreateBucketCommand,
-  PutObjectCommand,
-  GetObjectCommand,
-} from "@aws-sdk/client-s3";
+import { S3Client, CreateBucketCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 
 const s3 = new S3Client({
   region: "us-east-1",
-  endpoint: "http://localhost:4566",
+  endpoint: "http://127.0.0.1:4566",
   credentials: { accessKeyId: "test", secretAccessKey: "test" },
   forcePathStyle: true,
 });
 
-// Create a bucket
-await s3.send(new CreateBucketCommand({ Bucket: "my-bucket" }));
-
-// Upload a file
-await s3.send(
-  new PutObjectCommand({
-    Bucket: "my-bucket",
-    Key: "hello.txt",
-    Body: "Hello from MildStack!",
-    ContentType: "text/plain",
-  })
-);
-
-// Download the file
-const response = await s3.send(
-  new GetObjectCommand({
-    Bucket: "my-bucket",
-    Key: "hello.txt",
-  })
-);
-const body = await response.Body.transformToString();
-console.log(body); // "Hello from MildStack!"
+await s3.send(new CreateBucketCommand({ Bucket: "photos" }));
+await s3.send(new PutObjectCommand({ Bucket: "photos", Key: "hello.txt", Body: "hello" }));
 ```
 
-## AWS CLI Examples
-
-```bash
-# Create a bucket
-awslocal s3 mb s3://photos
-
-# Upload files
-awslocal s3 cp ./image.jpg s3://photos/image.jpg
-
-# List objects
-awslocal s3 ls s3://photos/
-
-# Enable versioning
-awslocal s3api put-bucket-versioning \
-  --bucket photos \
-  --versioning-configuration Status=Enabled
-
-# Upload a new version
-awslocal s3 cp ./image-v2.jpg s3://photos/image.jpg
-
-# List versions
-awslocal s3api list-object-versions --bucket photos
-```
-
-## Path Style vs Virtual Hosted Style
-
-MildStack uses **path-style** URLs by default:
-
-```
-http://localhost:4566/my-bucket/my-key
-```
-
-Make sure to set `forcePathStyle: true` (JavaScript SDK) or the equivalent option in your SDK of choice.
-
-## Persistence
-
-All S3 data is stored locally on disk. Buckets, objects, and metadata persist across instance restarts. Deleting an instance removes all its S3 data.
+<Callout type="info">
+  Use path-style addressing (`forcePathStyle: true`) with the AWS SDK for JavaScript.
+</Callout>

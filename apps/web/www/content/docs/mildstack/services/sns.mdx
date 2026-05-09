@@ -1,0 +1,93 @@
+---
+title: Amazon SNS
+description: |
+  Code-backed compatibility for MildStack SNS Query/XML behavior and local
+  delivery constraints.
+---
+
+## Overview
+
+SNS is active in the MildStack runtime and in MildStack Desktop.
+
+MildStack handles SNS Query API requests on `/` using API version `2010-03-31`.
+
+## Supported Actions
+
+The SNS action catalog currently contains 42 actions, and the native SNS registry marks all 42 as supported.
+
+### Topics
+
+- `CreateTopic`, `DeleteTopic`
+- `GetTopicAttributes`, `SetTopicAttributes`
+- `ListTopics`
+
+### Publish
+
+- `Publish`
+- `PublishBatch`
+
+### Subscriptions
+
+- `Subscribe`, `ConfirmSubscription`, `Unsubscribe`
+- `GetSubscriptionAttributes`, `SetSubscriptionAttributes`
+- `ListSubscriptions`, `ListSubscriptionsByTopic`
+
+### Permissions, Tags, Policies
+
+- `AddPermission`, `RemovePermission`
+- `TagResource`, `UntagResource`, `ListTagsForResource`
+- `GetDataProtectionPolicy`, `PutDataProtectionPolicy`
+
+### Platform Applications and Endpoints
+
+- `CreatePlatformApplication`, `DeletePlatformApplication`
+- `GetPlatformApplicationAttributes`, `SetPlatformApplicationAttributes`, `ListPlatformApplications`
+- `CreatePlatformEndpoint`, `DeleteEndpoint`
+- `GetEndpointAttributes`, `SetEndpointAttributes`, `ListEndpointsByPlatformApplication`
+
+### SMS and Sandbox
+
+- `SetSMSAttributes`, `GetSMSAttributes`
+- `CheckIfPhoneNumberIsOptedOut`, `OptInPhoneNumber`, `ListPhoneNumbersOptedOut`, `ListOriginationNumbers`
+- `GetSMSSandboxAccountStatus`, `CreateSMSSandboxPhoneNumber`, `VerifySMSSandboxPhoneNumber`, `DeleteSMSSandboxPhoneNumber`, `ListSMSSandboxPhoneNumbers`
+
+## Compatibility Posture
+
+<Callout type="info">
+  The SNS native registry currently routes all 42 catalog actions, but the SNS service policy remains `partial` fidelity. Treat compatibility as operation-specific, not as full AWS parity.
+</Callout>
+
+## Delivery Behavior Notes
+
+<Callout type="warn" title="Local Delivery Scope">
+  HTTP/HTTPS deliveries are attempted only for loopback endpoints (`localhost` / `127.0.0.1` / loopback IPs). Non-local HTTP/HTTPS endpoints are recorded as simulated attempts instead of making outbound requests. Other protocols are also simulated in local runtime, except SQS subscriptions when the internal SQS bridge is available.
+</Callout>
+
+Additional behavior constraints:
+
+- `PublishBatch` accepts up to 10 entries per request.
+- FIFO topics require `MessageGroupId`; deduplication rules follow topic FIFO attributes.
+
+## SDK Example
+
+```ts
+import {
+  SNSClient,
+  CreateTopicCommand,
+  PublishCommand,
+} from "@aws-sdk/client-sns";
+
+const sns = new SNSClient({
+  region: "us-east-1",
+  endpoint: "http://127.0.0.1:4566",
+  credentials: { accessKeyId: "test", secretAccessKey: "test" },
+});
+
+const create = await sns.send(new CreateTopicCommand({ Name: "orders" }));
+await sns.send(
+  new PublishCommand({
+    TopicArn: create.TopicArn,
+    Message: "order.created",
+  })
+);
+```
